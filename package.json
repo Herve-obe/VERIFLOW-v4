@@ -1,0 +1,16 @@
+{
+  "name": "veriflow",
+  "private": true,
+  "version": "4.0.0-1",
+  "license": "GPL-3.0-or-later",
+  "workspaces": ["ui"],
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "npm --workspace ui run dev",
+    "build": "npm --workspace ui run build",
+    "check": "npm --workspace ui run check"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

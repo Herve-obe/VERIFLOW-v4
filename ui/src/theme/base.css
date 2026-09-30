@@ -1,0 +1,57 @@
+/* Styles de base communs. Utilise uniquement les jetons de tokens.css. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--vf-bg);
+  color: var(--vf-text);
+  font-family: var(--vf-font-ui);
+  font-size: var(--vf-text-md);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  user-select: text;
+}
+
+:focus-visible {
+  outline: 2px solid var(--vf-accent);
+  outline-offset: 1px;
+}
+
+.mono {
+  font-family: var(--vf-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--vf-border);
+  border-radius: var(--vf-radius-md);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
