@@ -82,7 +82,12 @@ impl Project {
 
         let name = name
             .map(str::to_owned)
-            .or_else(|| project.path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .or_else(|| {
+                project
+                    .path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| "Projet".to_owned());
         project.set_meta("name", &name)?;
         project.set_meta("created_at", &now())?;
