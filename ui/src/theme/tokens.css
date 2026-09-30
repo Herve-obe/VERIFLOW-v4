@@ -4,6 +4,9 @@
  * Modifier une valeur ici change toute l'application.
  */
 :root {
+  /* Contrôles natifs (listes, barres de défilement) en thème sombre */
+  color-scheme: dark;
+
   /* Fonds et surfaces */
   --vf-bg: #0f1115;
   --vf-surface: #171a20;
