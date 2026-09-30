@@ -1,6 +1,6 @@
 # VERIFLOW v4 : charte du logiciel
 
-Version : 0.1 (brouillon soumis à validation)
+Version : 0.2 (validée par Hervé le 30/09/2026, amendable)
 Date : 30/09/2026
 Auteur du produit : Hervé Obejero
 Développement : Claude (Claude Code)
@@ -23,6 +23,7 @@ Promesse : **un seul outil, sur un portable, sans réseau, qui protège juridiqu
 
 ### 1.2 Modèle commercial (VALIDÉ)
 - Licence perpétuelle, activation **100 % hors ligne** par clé signée (Ed25519) liée à l'utilisateur.
+- Code source ouvert sous **GPLv3** (voir §6.1) : on vend les installeurs officiels, les mises à jour et le support.
 - Mises à jour : vérification en ligne optionnelle et désactivable, installation manuelle possible.
 - Aucune télémétrie, aucun compte en ligne, aucun serveur.
 
@@ -70,7 +71,7 @@ VERIFLOW possède **deux modes d'affichage** : **VIDEO** et **AUDIO**. Chacun co
 
 ---
 
-## 4. Charte graphique (VALIDÉ : sombre, logo à créer ; détail PROPOSÉ)
+## 4. Charte graphique (VALIDÉ, amendable)
 
 Références d'ergonomie : logiciels de post-production et de DIT actuels (interfaces sombres, denses, lisibles de nuit sur le plateau). **Aucune reprise du visuel de la v3.**
 
@@ -93,10 +94,11 @@ Références d'ergonomie : logiciels de post-production et de DIT actuels (inter
 - Contraste conforme WCAG AA minimum.
 - Logo : à créer (monogramme "V" + coche de vérification + forme d'onde). Propositions en phase de maquettes.
 - Ergonomie : tout est au clavier, tous les raccourcis sont reconfigurables, pas d'action destructive sans confirmation.
+- **Modifiabilité (exigence d'Hervé)** : tout le visuel est isolé dans le dossier `ui/`. Couleurs, polices, tailles, espacements et arrondis sont définis **une seule fois** dans `ui/src/theme/tokens.css`. Changer une valeur à cet endroit change toute l'application. Aucune couleur n'est écrite en dur dans les composants.
 
 ---
 
-## 5. Architecture technique (PROPOSÉ, validé sur le principe par Hervé)
+## 5. Architecture technique (VALIDÉ)
 
 ### 5.1 Choix : Tauri 2 (Rust + interface web)
 
@@ -114,9 +116,9 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Couche | Technologie | Licence | Rôle |
 |---|---|---|---|
 | Interface | Svelte 5 + TypeScript | MIT | Onglets, formulaires, tableaux |
-| Cœur | Rust | Code propriétaire VERIFLOW | Logique métier |
+| Cœur | Rust | GPL-3.0-or-later (VERIFLOW) | Logique métier |
 | Copie et checksums | Rust (crates `xxhash-rust`, RustCrypto `md-5`, `sha1`, `sha2`) | BSL-1.0 / MIT / Apache 2.0 | OFFLOAD |
-| Décodage, encodage, analyse | FFmpeg **compilé en LGPL**, lié dynamiquement | LGPL 2.1+ | MEDIA, PLAYER, SYNC, TRANSCODE |
+| Décodage, encodage, analyse | FFmpeg compilé avec `--enable-gpl` (x264, x265), lié dynamiquement | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
 | Lecture vidéo | Décodage FFmpeg + rendu GPU natif (wgpu) | MIT / Apache 2.0 | PLAYER VIDEO, image par image |
 | Audio temps réel | `cpal` (WASAPI, CoreAudio, ALSA/JACK) | Apache 2.0 | PLAYER AUDIO |
 | Rééchantillonnage | `rubato` | MIT | Conversion si la carte son ne suit pas |
@@ -125,7 +127,7 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Rapports PDF | Typst (moteur embarqué) | Apache 2.0 | REPORT, rapports d'offload |
 | Formats d'échange | Écrits par VERIFLOW : MHL v2 (XML), EDL CMX3600, ALE, CSV, FCPXML, OTIO (JSON) | Propriétaire | Exports |
 
-Risque technique principal : **la lecture vidéo fluide et précise à l'image dans Tauri**. La WebView ne sait pas lire ProRes, DNxHR ou XAVC. Le décodage se fait donc en Rust via FFmpeg et le rendu dans une surface GPU native. **Ce point sera prototypé en premier (preuve de concept)** avant de développer l'onglet PLAYER. Solution de repli : libmpv compilée en LGPL.
+Risque technique principal : **la lecture vidéo fluide et précise à l'image dans Tauri**. La WebView ne sait pas lire ProRes, DNxHR ou XAVC. Le décodage se fait donc en Rust via FFmpeg et le rendu dans une surface GPU native. **Ce point sera prototypé en premier (preuve de concept)** avant de développer l'onglet PLAYER. Solution de repli : libmpv (GPL/LGPL).
 
 ### 5.3 Données : "un fichier projet + SQLite", expliqué
 
@@ -142,50 +144,63 @@ Les fichiers originaux vérifiés ne sont **jamais modifiés, renommés ni dépl
 
 Toute action qui toucherait un fichier déjà vérifié déclenche un **pop-up d'avertissement**.
 
+## 5.5 Organisation du code
+
+Règle : **l'interface graphique et le cœur métier sont séparés**. Le cœur Rust ne connaît rien de l'interface, et l'interface ne fait aucun calcul métier. On peut ainsi refaire tout le visuel sans toucher à la copie, aux checksums ou à l'audio.
+
+```
+VERIFLOW-v4/
+├── docs/                    Charte, spécifications, notices
+├── ui/                      TOUTE l'interface graphique (Svelte + TypeScript)
+│   └── src/
+│       ├── theme/           Couleurs, polices, espacements : modifier le visuel ici
+│       ├── components/      Éléments réutilisables (boutons, tableaux, vumètres, pop-ups)
+│       ├── layout/          Barre d'onglets, interrupteur VIDEO/AUDIO, fenêtres
+│       ├── tabs/            Un dossier par onglet : offload, media, player, sync, transcode, report
+│       ├── i18n/            Textes de l'interface : fr.json, en.json
+│       └── shortcuts/       Raccourcis clavier par défaut
+├── src-tauri/               Pont entre l'interface et le cœur (commandes Tauri)
+├── core/                    Cœur métier en Rust, un module par fonction
+│   ├── offload/  media/  player/  sync/  transcode/  report/  project/
+├── templates/reports/       Mise en page des rapports PDF : modifier les rapports ici
+└── tests/                   Tests automatisés
+```
+
 ---
 
-## 6. Licences et contraintes légales (VALIDÉ sur le principe, détails PROPOSÉS)
+## 6. Licences et contraintes légales (VALIDÉ : open source GPL, 30/09/2026)
 
-### 6.1 Code propriétaire + FFmpeg LGPL
-- VERIFLOW est un logiciel propriétaire.
-- FFmpeg est compilé **sans** `--enable-gpl` ni `--enable-nonfree`, livré en bibliothèques dynamiques remplaçables par l'utilisateur, avec le texte de la licence LGPL et un lien vers les sources exactes utilisées (obligations LGPL).
-- Exclus car sous GPL : x264, x265, Xvid, librubberband, etc.
+### 6.1 VERIFLOW est un logiciel libre sous GPLv3
+- Licence du code : **GPL-3.0-or-later**. Le fichier `LICENSE` est à la racine du repo.
+- Conséquence positive : on peut intégrer légalement toutes les briques GPL gratuites. FFmpeg peut être compilé **avec** `--enable-gpl` (x264, x265 et les filtres GPL), et le SDK ASIO est utilisable sous sa licence GPLv3.
+- Conséquence sur la vente : la GPL **autorise la vente**, mais chaque acheteur a le droit de redistribuer le logiciel et son code source, gratuitement ou non, et de retirer la vérification de clé. La clé d'activation reste en place mais ne protège pas juridiquement contre la copie.
+- Ce que l'on vend réellement : les **installeurs officiels signés**, les mises à jour, le support, la documentation et la confiance dans une version certifiée (argument fort pour un outil de preuve d'intégrité).
+- Protection possible : le **nom et le logo VERIFLOW** ne sont pas couverts par la GPL. Un dépôt de marque (INPI, payant) interdirait à un tiers de redistribuer une copie sous ce nom. À envisager au lancement commercial.
+- Toute dépendance doit être compatible GPLv3 : MIT, BSD, Apache 2.0, LGPL, GPLv2+, SIL OFL. Interdit : bibliothèques sous licence propriétaire incompatible, "GPLv2 only", "nonfree" de FFmpeg (fdk-aac, NDI SDK...).
+- Les SDK RAW caméra propriétaires (V2) devront être évalués un par un : un SDK propriétaire ne peut pas être lié à un programme GPL sans exception de licence. Solution envisagée : module externe optionnel, installé séparément par l'utilisateur.
 
-### 6.2 Codecs brevetés : "l'idée stable" (réponse à ta question 9)
-Principe : **déléguer l'encodage breveté aux encodeurs livrés avec le système d'exploitation ou la carte graphique**, dont les licences sont réglées par leur éditeur.
+### 6.2 Codecs brevetés : la licence GPL ne règle pas les brevets
+Le droit d'auteur (GPL) et les brevets sont deux sujets distincts. Utiliser x264 est libre, mais H.264 reste couvert par des brevets.
 
-| Codec | macOS | Windows | Linux |
-|---|---|---|---|
-| H.264 / HEVC | VideoToolbox (Apple) | Media Foundation, NVENC, QSV, AMF | VAAPI / NVENC si disponible |
-| AAC | AudioToolbox (Apple) | Media Foundation | Désactivé par défaut |
-| ProRes | **VideoToolbox (encodeur officiel Apple)** | Encodeur FFmpeg `prores_ks` marqué **"ProRes compatible, non certifié Apple"** | Idem Windows |
+| Codec | Stratégie |
+|---|---|
+| H.264 | **Encodeurs OS/GPU par défaut** (VideoToolbox, Media Foundation, NVENC, QSV, AMF). x264 disponible en option (qualité, XAVC Intra, AVC-Intra). Le pool Via LA ne facture pas de redevance sous 100 000 unités par an, sous réserve de signer son accord de licence : à faire avant la vente |
+| HEVC | Encodeurs OS/GPU par défaut, x265 en option. Pools de brevets distincts (Access Advance, Via LA) : conditions à vérifier avant la vente |
+| AAC | Encodeurs OS (AudioToolbox, Media Foundation) par défaut, encodeur natif FFmpeg en option |
+| ProRes | **VideoToolbox (encodeur officiel Apple) sur Mac**. Sur Windows et Linux, `prores_ks` marqué **"ProRes compatible, non certifié Apple"**. Contact Apple ProRes Program Office (ProRes@apple.com) avant la vente |
+| Libres ou brevets expirés | AV1, VP9, VP8, FFV1, DNxHD/DNxHR, CineForm, MPEG-2, MPEG-1, MJPEG, HAP, FLAC, ALAC, Opus, Vorbis, MP3, AC-3, WAV, AIFF : encodés directement |
 
-Pour ProRes, Apple tient une liste de produits certifiés et avertit que les implémentations non autorisées (dont FFmpeg) peuvent poser des problèmes. Sur Mac on utilise l'encodeur Apple. Sur Windows et Linux on affiche la mention "non certifié", et on contactera le ProRes Program Office d'Apple (ProRes@apple.com) quand le produit sera commercialisé.
+### 6.3 ASIO
+Depuis octobre 2025, Steinberg propose le SDK ASIO sous double licence, dont **GPLv3**. VERIFLOW étant sous GPLv3, **ASIO est utilisable gratuitement**. V1 : WASAPI + CoreAudio + ASIO sous Windows.
 
-Codecs libres de droits ou dont les brevets ont expiré, encodés directement par FFmpeg LGPL : AV1 (SVT-AV1, BSD), VP9 (libvpx, BSD), FFV1, DNxHD/DNxHR, CineForm, MPEG-2 (XDCAM HD422), MJPEG, HAP, FLAC, ALAC, Opus, Vorbis, MP3 (LAME, LGPL), AC-3, WAV, AIFF.
+### 6.4 Signature de code (VALIDÉ : reportée)
+La signature Apple et Windows sera achetée **une fois le logiciel fonctionnel à 100 % et validé par les testeurs**. D'ici là, installeurs non signés + notice d'installation illustrée (contournement Gatekeeper et SmartScreen).
 
-### 6.3 ASIO (réponse à ta question 32)
-Depuis octobre 2025, Steinberg propose le SDK ASIO sous **double licence : GPLv3 ou licence propriétaire Steinberg**. La GPLv3 est incompatible avec un code fermé. VERIFLOW devra donc signer la licence propriétaire Steinberg (conditions et gratuité **à confirmer** auprès de Steinberg). En attendant : **WASAPI (mode exclusif) + CoreAudio** en V1, ASIO dès que la licence est obtenue.
-
-### 6.4 Signature de code (réponse à ta question 10 : "c'est-à-dire ?")
-Windows et macOS vérifient qu'un programme téléchargé est "signé" par un éditeur identifié. Sans signature :
-- **Windows** affiche un écran bleu SmartScreen "Windows a protégé votre ordinateur". L'utilisateur doit cliquer sur "Informations complémentaires" puis "Exécuter quand même".
-- **macOS** bloque l'ouverture. L'utilisateur doit passer par Réglages Système > Confidentialité et sécurité > "Ouvrir quand même".
-
-Le logiciel fonctionne normalement ensuite, mais cela fait peu professionnel pour un produit vendu. Coûts :
-- Apple Developer Program : 99 USD par an (tarif affiché par Apple, à revérifier au moment de l'achat).
-- Certificat Windows : service Microsoft ou autorité de certification, de l'ordre de quelques dizaines à quelques centaines d'euros par an selon l'offre (**à chiffrer précisément avant la sortie**).
-
-**Décision PROPOSÉE** : bêta non signée, avec une notice d'installation illustrée ; signature achetée avec les premières recettes, avant la vente publique.
-
-### 6.5 Repo public ou privé (réponse à ta question 11)
-- **Public** : GitHub Actions est gratuit et illimité, mais tout le monde peut lire et copier le code source d'un logiciel que tu veux vendre.
-- **Privé** (compte gratuit) : 2 000 minutes de compilation par mois. Une minute macOS en consomme 10 et une minute Windows en consomme 2. Un cycle complet (Linux 10 min + Windows 15 min + macOS 15 min) coûte environ 10 + 30 + 150 = 190 minutes, soit une dizaine de compilations complètes par mois.
-
-**Recommandation** : **passer le repo en privé maintenant**, avant d'y mettre du code. Stratégie CI : vérifications rapides sous Linux à chaque PR ; compilation Windows et macOS uniquement pour les versions taguées ou à la demande. C'est suffisant pour notre rythme.
+### 6.5 Repo
+Avec un code sous GPL, rien ne justifie de cacher le code. **Recommandation** : repasser le repo en **public**, ce qui rend GitHub Actions **gratuit et illimité** (compilation Windows, macOS et Linux à chaque PR). En privé, le quota est de 2 000 minutes par mois, avec un coefficient 10 pour macOS et 2 pour Windows.
 
 ### 6.6 Polices, icônes, bibliothèques
-Uniquement des licences permissives (MIT, BSD, Apache 2.0, SIL OFL, domaine public). Le fichier `THIRD_PARTY_LICENSES` est généré automatiquement à chaque version.
+Uniquement des licences compatibles GPLv3 (MIT, BSD, Apache 2.0, SIL OFL, domaine public, LGPL, GPL). Le fichier `THIRD_PARTY_LICENSES` est généré automatiquement à chaque version.
 
 ---
 
@@ -274,7 +289,7 @@ Aucun logiciel ne peut garantir à lui seul une valeur juridique. VERIFLOW fourn
 - Par piste : **SOLO, MUTE, niveau (fader), panoramique**.
 - Master **stéréo**, mesures **crête dBFS + LUFS** (intégré, court terme, momentané) (VALIDÉ).
 - Si la carte son ne gère pas la fréquence ou le nombre de canaux du fichier : **rééchantillonnage et réduction à la volée** en mémoire, sans jamais modifier le fichier.
-- Pilotes : WASAPI + CoreAudio en V1, ASIO dès que la licence est obtenue (§6.3).
+- Pilotes : WASAPI + CoreAudio + ASIO (GPLv3) dès la V1 (§6.3).
 
 Calcul du débit maximal : 32 pistes × 192 000 échantillons/s × 4 octets = 24 576 000 octets/s ≈ 24,6 Mo/s (23,4 Mio/s), soit environ 88,5 Go par heure. C'est compatible avec un SSD. Sur un HDD, un tampon de lecture anticipée sera nécessaire.
 
@@ -286,11 +301,24 @@ Rappel des niveaux : les vumètres sont en dBFS (0 dBFS = plafond numérique). L
 |---|---|
 | Types | Rapport **son**, rapport **image**, **EDL** |
 | Lien PLAYER | Chaque champ est éditable à la volée depuis le PLAYER via le pop-up |
-| Modèles | Modèles de l'école Saint-Genès + standards du métier (colonnes : scène, prise, fichier, TC, pistes, prises cerclées, notes, réglages caméra) |
+| Modèles | Modèle **École** (reproduction des rapports Saint-Genès, voir ci-dessous) + modèle **Pro** (colonnes étendues) + modèles personnalisés |
 | Personnalisation | Logo, en-tête, colonnes affichées, ordre |
 | Exports | **PDF, CSV, XLSX, HTML** (PROPOSÉ, validé implicitement à la question 41) |
 
-**OUVERT** : les dossiers Drive "01 - RAPPORT IMAGE" et "03 - RAPPORT SON 8 PISTES" appartiennent au compte herve.obejero@saint-genes.com. Je vois les dossiers mais pas leur contenu depuis ton compte Gmail. Il faut soit copier les fichiers dans ton dossier Drive "VERIFLOW/V4", soit partager les fichiers eux-mêmes avec ton adresse Gmail.
+**Modèles de référence fournis par Hervé** (Drive VERIFLOW/V4 : `Rapport Image.xlsx/pdf`, `Rapport Son 8 pistes.xlsx/pdf`)
+
+| Rapport | En-tête | Colonnes du tableau |
+|---|---|---|
+| **Image** | Rapport N°, feuillet N°/N, support de sauvegarde N°, date, titre du film, réalisateur, directeur photo, OPV. Image : HD / 4K / autre, 24 / 25 / autre. Média : SD / P2 / SSD / CF / autre. Caméra, format image, référence son (dBFS), remarques | SEQ/Plan, prise, TC IN, TC OUT, audio/muet, effets/observations |
+| **Son** | Rapport N°, feuillet N°/N, support de sauvegarde N°, date, titre du film, réalisateur, ingénieur du son, perchman. Image : 35 / 16 mm / autre, 24 / 25 i/s / autre. Enregistreur, time-code, référence (dBFS), autre. Numérisation : 48 / 96 kHz, 16 / 24 bits, autre. Remarques | ID, plan, prise, pistes 1 à 8, observations |
+
+Améliorations apportées par VERIFLOW (PROPOSÉ) :
+- Champs **pré-remplis automatiquement** depuis les métadonnées : TC IN/OUT, cadence, fréquence, résolution, caméra, enregistreur, noms de pistes.
+- Nombre de pistes **dynamique de 1 à 32**, lu dans l'iXML (le modèle 8 pistes reste le format d'impression par défaut, avec feuillets supplémentaires au-delà).
+- Choix étendus : 23.976 / 29.97 / 30 / 50 / 60 i/s, 44,1 / 192 kHz, 32 bits float, supports CFexpress et SxS.
+- Colonnes ajoutées dans le modèle Pro : nom du fichier, durée, **prise cerclée**, faux départ, son seul, MOS, TC son pour le rapport image, réglages caméra (objectif, focale, T-stop, ISO, obturateur, ND, balance des blancs).
+- Numéro de rapport et de feuillet incrémentés automatiquement, support de sauvegarde lié à l'OFFLOAD.
+
 
 ### 7.5 SYNC (priorité 5)
 
@@ -304,13 +332,13 @@ Rappel des niveaux : les vumètres sont en dBFS (0 dBFS = plafond numérique). L
 
 ### 7.6 TRANSCODE (priorité 6)
 
-Liste de référence : celle de Shutter Encoder (VALIDÉ), filtrée par les contraintes de licence du §6.
+Liste de référence : celle de Shutter Encoder (VALIDÉ). Grâce à la GPL, x264 et x265 sont disponibles (§6.2).
 
 | Catégorie | V1 | V2 ou à étudier |
 |---|---|---|
-| Vidéo intermédiaire | ProRes (toutes variantes), DNxHD, DNxHR, CineForm, QT Animation, non compressé, FFV1 | XAVC Intra, AVC-Intra 100 (nécessitent un encodeur H.264 10 bits 4:2:2 intra, absent en LGPL) |
-| Vidéo diffusion | H.264, HEVC (encodeurs OS/GPU), AV1, VP9, MPEG-2 / XDCAM HD422 et HD35 | H.266/VVC (maturité et brevets à évaluer) |
-| Vidéo autres | MJPEG, HAP, VP8, DV, MPEG-1, Theora, WMV | Xvid : exclu (GPL) |
+| Vidéo intermédiaire | ProRes (toutes variantes), DNxHD, DNxHR, CineForm, QT Animation, non compressé, FFV1, XAVC Intra et AVC-Intra 100 (via x264) | |
+| Vidéo diffusion | H.264, HEVC (encodeurs OS/GPU par défaut, x264/x265 en option), XAVC Long GOP, AV1, VP9, MPEG-2 / XDCAM HD422 et HD35 | H.266/VVC (maturité et brevets à évaluer) |
+| Vidéo autres | MJPEG, HAP, VP8, DV, MPEG-1, Theora, WMV, Xvid | |
 | Audio | WAV, AIFF, FLAC, ALAC, MP3, AAC (encodeurs OS), AC-3, Opus, Vorbis | Dolby Digital Plus, TrueHD (licences Dolby à vérifier) |
 | Images | JPEG, PNG, TIFF, DPX, OpenEXR | JPEG XL, PSD |
 | Conteneurs | MOV, MP4, MXF OP1a, MXF OP-Atom, MKV, WebM, AVI, WAV/BWF | |
@@ -346,14 +374,16 @@ Ordre VALIDÉ : OFFLOAD, MEDIA, PLAYER, REPORT, SYNC, TRANSCODE.
 
 ## 10. Points ouverts
 
-| # | Sujet | Action attendue |
+| # | Sujet | Statut |
 |---|---|---|
-| O1 | Modèles de rapports de l'école inaccessibles | Hervé : copier les fichiers dans Drive "VERIFLOW/V4" |
-| O2 | Repo public ou privé | Hervé : valider le passage en privé (recommandé) |
-| O3 | Couleurs d'accent VIDEO/AUDIO et règle TAB | Hervé : valider ou ajuster |
-| O4 | Licence ASIO propriétaire Steinberg | Claude : vérifier les conditions avant la phase 3 |
-| O5 | Coût réel de la signature Windows et macOS | Claude : chiffrer avant la phase 7 |
-| O6 | Branche `main` inexistante | Créer `main` à partir de cette charte une fois validée |
+| O1 | Modèles de rapports de l'école | **Réglé** : intégrés au §7.4 |
+| O2 | Repo public ou privé | Recommandation : repasser en **public** (code GPL, CI gratuite illimitée). Décision d'Hervé |
+| O3 | Couleurs d'accent VIDEO/AUDIO et règle TAB | **Validé**, amendable via `ui/src/theme/` |
+| O4 | ASIO | **Réglé** : GPLv3 compatible |
+| O5 | Signature de code | **Reporté** : après validation complète par les testeurs |
+| O6 | Branche `main` inexistante | À créer à partir de cette charte (accord d'Hervé demandé) |
+| O7 | Accords de brevets H.264 / HEVC et contact Apple ProRes | Avant la vente, pas avant |
+| O8 | Dépôt de la marque VERIFLOW | Au lancement commercial |
 
 ## 11. Sources
 
@@ -362,9 +392,11 @@ Ordre VALIDÉ : OFFLOAD, MEDIA, PLAYER, REPORT, SYNC, TRANSCODE.
 - Licences FFmpeg : https://ffmpeg.org/legal.html
 - Apple ProRes, produits autorisés : https://support.apple.com/en-il/118584
 - Encodeurs ProRes dans FFmpeg : https://academysoftwarefoundation.github.io/EncodingGuidelines/EncodeProres.html
-- Steinberg ASIO en GPLv3 (octobre 2025) : https://www.kvraudio.com/news/steinberg-moves-vst-3-sdk-to-mit-open-source-license-asio-now-gplv3-65179 et https://librearts.org/2025/11/steinberg-relicenses-vst3-and-asio/
+- Steinberg ASIO en double licence GPLv3 (octobre 2025) : https://www.kvraudio.com/news/steinberg-moves-vst-3-sdk-to-mit-open-source-license-asio-now-gplv3-65179 et https://librearts.org/2025/11/steinberg-relicenses-vst3-and-asio/
 - Facturation GitHub Actions : https://docs.github.com/billing/managing-billing-for-github-actions/about-billing-for-github-actions
 - Tauri et Electron, comparatif 2026 : https://www.pkgpulse.com/guides/electron-vs-tauri-2026
+- Pool de brevets AVC/H.264 (Via LA) : https://www.via-la.com/licensing-programs/avc-h-264/
+- Licence GPLv3 : https://www.gnu.org/licenses/gpl-3.0.fr.html
 - Shutter Encoder, fonctions et codecs : https://www.shutterencoder.com/
 - iXML (métadonnées son de tournage) : https://en.wikipedia.org/wiki/IXML
 - Contenu d'un rapport caméra : https://www.studiobinder.com/blog/camera-report-template-pdf-download/
