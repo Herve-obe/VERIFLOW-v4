@@ -19,6 +19,17 @@ pub enum Error {
     #[error("ce fichier n'est pas un projet VERIFLOW : {0}")]
     NotAProject(String),
 
+    #[error(
+        "outil introuvable : {0}. Installe FFmpeg ou indique son dossier dans VERIFLOW_FFMPEG_DIR"
+    )]
+    ToolMissing(String),
+
+    #[error("échec de {tool} : {message}")]
+    Tool { tool: String, message: String },
+
+    #[error("média non pris en charge : {0}")]
+    Unsupported(String),
+
     #[error("projet créé par une version plus récente de VERIFLOW (schéma {found}, maximum supporté {supported})")]
     SchemaTooNew { found: i64, supported: i64 },
 }

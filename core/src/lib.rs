@@ -10,6 +10,7 @@ pub mod player;
 pub mod project;
 pub mod report;
 pub mod sync;
+pub mod tools;
 pub mod transcode;
 
 pub use error::{Error, Result};

@@ -35,7 +35,7 @@ impl FrameRate {
 
     /// Le drop-frame n'existe que pour 29.97 et 59.94.
     pub fn supports_drop_frame(self) -> bool {
-        self.is_ntsc() && self.nominal() % 30 == 0
+        self.is_ntsc() && self.nominal().is_multiple_of(30)
     }
 
     /// Lit une cadence au format FFmpeg ("30000/1001", "25/1", "25").
@@ -101,12 +101,7 @@ impl Timecode {
                 n += drop * ((rem - drop) / per_min);
             }
         }
-        (
-            n / (fps * 3600),
-            n / (fps * 60) % 60,
-            n / fps % 60,
-            n % fps,
-        )
+        (n / (fps * 3600), n / (fps * 60) % 60, n / fps % 60, n % fps)
     }
 
     /// Construit un timecode à partir de ses composants.
@@ -204,7 +199,10 @@ mod tests {
     fn df_2997_one_hour_is_107892_frames() {
         let tc = Timecode::parse("01:00:00;00", R2997).unwrap();
         assert_eq!(tc.frames, 107_892);
-        assert_eq!(Timecode::from_frames(107_892, R2997, true).to_string(), "01:00:00;00");
+        assert_eq!(
+            Timecode::from_frames(107_892, R2997, true).to_string(),
+            "01:00:00;00"
+        );
     }
 
     #[test]
