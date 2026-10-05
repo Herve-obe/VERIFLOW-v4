@@ -1,0 +1,71 @@
+/*
+ * VERIFLOW : jetons de design (charte §4).
+ * SEUL endroit où sont définis couleurs, polices, tailles et espacements.
+ * Modifier une valeur ici change toute l'application.
+ */
+:root {
+  /* Contrôles natifs (listes, barres de défilement) en thème sombre */
+  color-scheme: dark;
+
+  /* Fonds et surfaces */
+  --vf-bg: #0f1115;
+  --vf-surface: #171a20;
+  --vf-surface-high: #20242c;
+  --vf-surface-hover: #262b34;
+  --vf-border: #2a2f38;
+
+  /* Texte */
+  --vf-text: #e6e8eb;
+  --vf-text-muted: #9aa1ac;
+  --vf-text-disabled: #5c636e;
+
+  /* Accents par mode (VIDEO / AUDIO) */
+  --vf-accent-video: #3ba7ff;
+  --vf-accent-audio: #ffb020;
+  --vf-on-accent: #0f1115;
+
+  /* États */
+  --vf-success: #2ecc71;
+  --vf-warning: #f5a623;
+  --vf-error: #ff4d4f;
+
+  /* Polices */
+  --vf-font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --vf-font-mono: "JetBrains Mono Variable", "Consolas", ui-monospace, monospace;
+
+  /* Tailles de texte */
+  --vf-text-xs: 11px;
+  --vf-text-sm: 12px;
+  --vf-text-md: 13px;
+  --vf-text-lg: 16px;
+  --vf-text-xl: 20px;
+  --vf-text-timecode: 28px;
+
+  /* Espacements */
+  --vf-space-1: 4px;
+  --vf-space-2: 8px;
+  --vf-space-3: 12px;
+  --vf-space-4: 16px;
+  --vf-space-6: 24px;
+  --vf-space-8: 32px;
+
+  /* Formes */
+  --vf-radius-sm: 4px;
+  --vf-radius-md: 6px;
+  --vf-radius-lg: 10px;
+
+  /* Dimensions de la mise en page */
+  --vf-topbar-height: 48px;
+  --vf-statusbar-height: 26px;
+
+  /* Animations */
+  --vf-transition: 140ms ease;
+}
+
+/* L'accent courant suit le mode actif (attribut posé sur <html>). */
+:root[data-mode="video"] {
+  --vf-accent: var(--vf-accent-video);
+}
+:root[data-mode="audio"] {
+  --vf-accent: var(--vf-accent-audio);
+}
