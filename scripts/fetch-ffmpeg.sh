@@ -85,10 +85,13 @@ case "$TARGET" in
     ;;
   universal-apple-darwin)
     # Binaire universel (Apple Silicon + Intel) assemblé avec lipo, puis signé ad hoc.
+    # Tauri compile aussi chaque architecture séparément : il lui faut les
+    # versions arm64 et x86_64 en plus de la version universelle.
     for tool in ffmpeg ffprobe; do
-      fetch_mr macos-arm64 "$tool" "$WORK/$tool-arm64"
-      fetch_mr macos-amd64 "$tool" "$WORK/$tool-x86_64"
-      lipo -create "$WORK/$tool-arm64" "$WORK/$tool-x86_64" -output "$DEST/veriflow-$tool-$TARGET"
+      fetch_mr macos-arm64 "$tool" "$DEST/veriflow-$tool-aarch64-apple-darwin"
+      fetch_mr macos-amd64 "$tool" "$DEST/veriflow-$tool-x86_64-apple-darwin"
+      lipo -create "$DEST/veriflow-$tool-aarch64-apple-darwin" "$DEST/veriflow-$tool-x86_64-apple-darwin" \
+        -output "$DEST/veriflow-$tool-$TARGET"
       codesign --force --sign - "$DEST/veriflow-$tool-$TARGET"
       chmod +x "$DEST/veriflow-$tool-$TARGET"
     done
@@ -100,4 +103,4 @@ case "$TARGET" in
 esac
 
 echo "FFmpeg $VERSION prêt pour $TARGET :"
-ls -l "$DEST"/veriflow-*-"$TARGET"*
+ls -l "$DEST"/veriflow-*
