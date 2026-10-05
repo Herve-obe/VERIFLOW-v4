@@ -29,6 +29,18 @@
   --vf-warning: #f5a623;
   --vf-error: #ff4d4f;
 
+  /* Vumètres (zones en dBFS : vert < -18, jaune -18 à -6, rouge > -6) */
+  --vf-meter-bg: #0b0d10;
+  --vf-meter-low: #2ecc71;
+  --vf-meter-mid: #f5d020;
+  --vf-meter-high: #ff4d4f;
+  --vf-meter-width: 8px;
+  --vf-meter-height: 180px;
+
+  /* Lecteur vidéo */
+  --vf-video-bg: #000000;
+  --vf-mark: #c77dff;
+
   /* Polices */
   --vf-font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
   --vf-font-mono: "JetBrains Mono Variable", "Consolas", ui-monospace, monospace;
