@@ -10,7 +10,7 @@ use tauri::State;
 use veriflow_core::player::audio::engine::{AudioEngine, OutputInfo};
 use veriflow_core::player::audio::mixer::{db_to_gain, gain_to_db};
 use veriflow_core::player::audio::producer::SessionInfo;
-use veriflow_core::player::video::{VideoClip, VideoPlayer};
+use veriflow_core::player::video::{FrameFormat, VideoClip, VideoPlayer};
 
 /// Taille maximale des images envoyées à l'interface (aperçu).
 const PREVIEW_MAX: (u32, u32) = (1280, 720);
@@ -33,7 +33,8 @@ fn text<E: std::fmt::Display>(e: E) -> String {
 pub async fn video_open(path: PathBuf, state: State<'_, PlayerState>) -> CmdResult<VideoClip> {
     let slot = state.video.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let player = VideoPlayer::open(&path, PREVIEW_MAX.0, PREVIEW_MAX.1).map_err(text)?;
+        let player = VideoPlayer::open(&path, PREVIEW_MAX.0, PREVIEW_MAX.1, FrameFormat::Jpeg)
+            .map_err(text)?;
         let clip = player.clip().clone();
         *slot.lock().map_err(text)? = Some(player);
         Ok(clip)
@@ -42,7 +43,7 @@ pub async fn video_open(path: PathBuf, state: State<'_, PlayerState>) -> CmdResu
     .map_err(text)?
 }
 
-/// Renvoie l'image demandée en RGBA brut (taille d'affichage du clip).
+/// Renvoie l'image demandée, encodée en JPEG (taille d'affichage du clip).
 #[tauri::command]
 pub async fn video_frame(index: i64, state: State<'_, PlayerState>) -> CmdResult<Response> {
     let slot = state.video.clone();

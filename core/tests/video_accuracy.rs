@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use veriflow_core::player::video::VideoPlayer;
+use veriflow_core::player::video::{FrameFormat, VideoPlayer};
 use veriflow_core::tools;
 
 fn make_clip(dir: &Path, name: &str, rate: &str, codec: &[&str]) -> std::path::PathBuf {
@@ -22,7 +22,7 @@ fn make_clip(dir: &Path, name: &str, rate: &str, codec: &[&str]) -> std::path::P
 
 fn check_seek_accuracy(path: &Path) {
     // Référence : lecture continue de toutes les images.
-    let mut reference = VideoPlayer::open(path, 320, 180).unwrap();
+    let mut reference = VideoPlayer::open(path, 320, 180, FrameFormat::Rgba).unwrap();
     let count = reference.clip().frame_count;
     assert!(count > 90, "clip trop court : {count}");
     let frames: Vec<_> = (0..count)
@@ -31,7 +31,7 @@ fn check_seek_accuracy(path: &Path) {
 
     // Sauts aléatoires (y compris en arrière et hors des images clés).
     for &target in &[37, 3, 88, 12, 13, 11, 60, 0, count - 1] {
-        let mut player = VideoPlayer::open(path, 320, 180).unwrap();
+        let mut player = VideoPlayer::open(path, 320, 180, FrameFormat::Rgba).unwrap();
         let got = player.frame(target).unwrap().unwrap();
         assert!(
             got == frames[target as usize],
@@ -41,7 +41,7 @@ fn check_seek_accuracy(path: &Path) {
     }
 
     // Pas à pas arrière sur un même lecteur (cache), puis avant.
-    let mut player = VideoPlayer::open(path, 320, 180).unwrap();
+    let mut player = VideoPlayer::open(path, 320, 180, FrameFormat::Rgba).unwrap();
     for i in (40..=50).rev() {
         assert!(player.frame(i).unwrap().unwrap() == frames[i as usize]);
     }

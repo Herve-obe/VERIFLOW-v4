@@ -1,10 +1,10 @@
 //! Mesure des temps de saut et de lecture : `cargo run --release --example seek_bench -- <fichier>`.
 use std::time::Instant;
-use veriflow_core::player::video::VideoPlayer;
+use veriflow_core::player::video::{FrameFormat, VideoPlayer};
 
 fn main() {
     let path = std::env::args().nth(1).expect("chemin du clip");
-    let mut p = VideoPlayer::open(path.as_ref(), 1280, 720).unwrap();
+    let mut p = VideoPlayer::open(path.as_ref(), 1280, 720, FrameFormat::Jpeg).unwrap();
     let n = p.clip().frame_count;
     println!(
         "{} images, affichage {}x{}",

@@ -42,8 +42,40 @@ struct Timing {
     preroll: f64,
 }
 
-/// Image décodée, en RGBA 8 bits.
+/// Image décodée (RGBA brut ou JPEG selon `FrameFormat`).
 pub type FrameData = Arc<Vec<u8>>;
+
+/// Format des images produites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameFormat {
+    /// RGBA 8 bits brut : exact, mais lourd à transférer (3,6 Mo en 1280x720).
+    Rgba,
+    /// JPEG qualité maximale en 4:4:4 : environ 20 fois plus léger, pour l'aperçu.
+    Jpeg,
+}
+
+/// Lit une image JPEG complète (de SOI à EOI) dans un flux MJPEG.
+/// Dans les données compressées, l'octet 0xFF est toujours suivi de 0x00 :
+/// le marqueur de fin 0xFFD9 ne peut donc apparaître qu'en fin d'image.
+fn read_jpeg(reader: &mut impl Read) -> std::io::Result<Option<Vec<u8>>> {
+    let mut out = Vec::with_capacity(256 * 1024);
+    let mut byte = [0u8; 1];
+    let mut prev = 0u8;
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {
+                out.push(byte[0]);
+                if prev == 0xFF && byte[0] == 0xD9 && out.len() > 4 {
+                    return Ok(Some(out));
+                }
+                prev = byte[0];
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+}
 
 /// Calcule une taille d'affichage contenue dans `max_w` x `max_h`,
 /// en conservant les proportions et avec des dimensions paires.
@@ -69,7 +101,13 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn spawn(path: &Path, start: i64, timing: Timing, size: (u32, u32)) -> Result<Self> {
+    fn spawn(
+        path: &Path,
+        start: i64,
+        timing: Timing,
+        size: (u32, u32),
+        format: FrameFormat,
+    ) -> Result<Self> {
         // Saut précis à l'image, y compris en GOP long avec images B :
         // 1. on se place une seconde avant la cible (FFmpeg repart de l'image
         //    clé précédente) en gardant les horodatages d'origine (-copyts) ;
@@ -87,26 +125,52 @@ impl Decoder {
             .args(["-ss", &format!("{seek:.6}"), "-i"])
             .arg(path)
             .args(["-map", "0:v:0", "-an", "-sn", "-vf", &filter])
-            .args(["-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+            .args(match format {
+                FrameFormat::Rgba => &["-f", "rawvideo", "-pix_fmt", "rgba", "-"][..],
+                FrameFormat::Jpeg => &[
+                    "-c:v",
+                    "mjpeg",
+                    "-q:v",
+                    "2",
+                    "-pix_fmt",
+                    "yuvj444p",
+                    "-f",
+                    "image2pipe",
+                    "-",
+                ][..],
+            })
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
-        let mut stdout = child.stdout.take().expect("stdout redirigé");
+        let stdout = child.stdout.take().expect("stdout redirigé");
         let frame_size = (size.0 * size.1 * 4) as usize;
         let (tx, rx) = sync_channel(PREFETCH);
-        thread::spawn(move || loop {
-            let mut buf = vec![0u8; frame_size];
-            match stdout.read_exact(&mut buf) {
-                Ok(()) => {
-                    if tx.send(Ok(Arc::new(buf))).is_err() {
-                        break; // décodeur abandonné
+        thread::spawn(move || {
+            let mut stdout = std::io::BufReader::with_capacity(1 << 20, stdout);
+            loop {
+                let frame = match format {
+                    FrameFormat::Rgba => {
+                        let mut buf = vec![0u8; frame_size];
+                        match stdout.read_exact(&mut buf) {
+                            Ok(()) => Ok(Some(buf)),
+                            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+                            Err(e) => Err(e),
+                        }
                     }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(e) => {
-                    let _ = tx.send(Err(e.into()));
-                    break;
+                    FrameFormat::Jpeg => read_jpeg(&mut stdout),
+                };
+                match frame {
+                    Ok(Some(buf)) => {
+                        if tx.send(Ok(Arc::new(buf))).is_err() {
+                            break; // décodeur abandonné
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        let _ = tx.send(Err(e.into()));
+                        break;
+                    }
                 }
             }
         });
@@ -154,13 +218,14 @@ pub struct VideoPlayer {
     path: PathBuf,
     clip: VideoClip,
     timing: Timing,
+    format: FrameFormat,
     decoder: Option<Decoder>,
     cache: VecDeque<(i64, FrameData)>,
 }
 
 impl VideoPlayer {
     /// Ouvre un clip ; les images seront mises à l'échelle dans `max_w` x `max_h`.
-    pub fn open(path: &Path, max_w: u32, max_h: u32) -> Result<Self> {
+    pub fn open(path: &Path, max_w: u32, max_h: u32, format: FrameFormat) -> Result<Self> {
         let info = probe(path)?;
         let video = info.video.clone().ok_or_else(|| {
             Error::Unsupported(format!("{} : aucune piste vidéo", path.display()))
@@ -185,6 +250,7 @@ impl VideoPlayer {
                 display_height,
                 start_frame,
             },
+            format,
             decoder: None,
             cache: VecDeque::with_capacity(CACHE),
         })
@@ -216,6 +282,7 @@ impl VideoPlayer {
                 index,
                 self.timing,
                 (self.clip.display_width, self.clip.display_height),
+                self.format,
             )?);
         }
         loop {
@@ -242,6 +309,17 @@ impl VideoPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn splits_mjpeg_stream() {
+        let a = [0xFF, 0xD8, 1, 0xFF, 0x00, 2, 0xFF, 0xD9];
+        let b = [0xFF, 0xD8, 3, 4, 0xFF, 0xD9];
+        let stream: Vec<u8> = a.iter().chain(b.iter()).copied().collect();
+        let mut r = std::io::Cursor::new(stream);
+        assert_eq!(read_jpeg(&mut r).unwrap().unwrap(), a);
+        assert_eq!(read_jpeg(&mut r).unwrap().unwrap(), b);
+        assert!(read_jpeg(&mut r).unwrap().is_none());
+    }
 
     #[test]
     fn fit_keeps_aspect_and_even_sizes() {

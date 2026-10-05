@@ -15,12 +15,15 @@
   let markIn = $state<number | null>(null);
   let markOut = $state<number | null>(null);
   let displayFps = $state(0);
+  let ipcMs = $state(0); // temps de transfert d'une image depuis le cœur
+  let drawMs = $state(0); // temps de dessin
   let canvas = $state<HTMLCanvasElement | null>(null);
 
   let position = 0; // position fractionnaire (images) pendant la lecture
+  let requested = 0; // dernière image demandée (sert de base au pas à pas)
   let inFlight = false;
   let pending: number | null = null;
-  let raf = 0;
+  let timer = 0;
   let lastTs = 0;
   let fpsCount = 0;
   let fpsSince = performance.now();
@@ -51,17 +54,23 @@
   async function show(i: number) {
     if (!clip) return;
     i = Math.min(Math.max(0, Math.round(i)), last);
+    requested = i;
     if (inFlight) {
       pending = i;
       return;
     }
     inFlight = true;
     try {
+      const t0 = performance.now();
       const buf = await videoFrame(i);
-      const ctx = canvas?.getContext("2d");
-      if (ctx && clip) {
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(buf), clip.display_width, clip.display_height), 0, 0);
-      }
+      const t1 = performance.now();
+      // Décodage JPEG natif du moteur web (rapide et asynchrone).
+      const bitmap = await createImageBitmap(new Blob([buf], { type: "image/jpeg" }));
+      canvas?.getContext("2d")?.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const t2 = performance.now();
+      ipcMs = ipcMs * 0.8 + (t1 - t0) * 0.2;
+      drawMs = drawMs * 0.8 + (t2 - t1) * 0.2;
       shown = i;
       fpsCount++;
       const now = performance.now();
@@ -83,12 +92,16 @@
     pending = null;
   }
 
-  function tick(ts: number) {
+  // Horloge de lecture : minuterie courte plutôt que requestAnimationFrame,
+  // qui peut être suspendu par certains systèmes quand la fenêtre n'a pas le focus.
+  function tick() {
     if (speed === 0) return;
+    const ts = performance.now();
     const dt = lastTs ? (ts - lastTs) / 1000 : 0;
     lastTs = ts;
     position += dt * fps(rate) * speed;
-    if (position >= last || position <= 0) {
+    // Fin de clip (en avant) ou début (en arrière) : arrêt sur la dernière image.
+    if ((speed > 0 && position >= last) || (speed < 0 && position <= 0)) {
       position = Math.min(Math.max(position, 0), last);
       show(position);
       speed = 0;
@@ -97,7 +110,7 @@
     // On ne demande une nouvelle image que lorsque la précédente est affichée :
     // si le décodage ne suit pas, des images sont sautées mais le temps reste juste.
     if (!inFlight && Math.round(position) !== shown) show(position);
-    raf = requestAnimationFrame(tick);
+    timer = window.setTimeout(tick, 4);
   }
 
   function setSpeed(s: number) {
@@ -108,13 +121,13 @@
       lastTs = 0;
       fpsCount = 0;
       fpsSince = performance.now();
-      raf = requestAnimationFrame(tick);
+      timer = window.setTimeout(tick, 0);
     }
   }
 
   function pause() {
     speed = 0;
-    cancelAnimationFrame(raf);
+    window.clearTimeout(timer);
   }
 
   function stop() {
@@ -124,7 +137,7 @@
 
   function step(delta: number) {
     pause();
-    show(shown + delta);
+    show(requested + delta);
   }
 
   const toggle = () => (speed === 0 ? setSpeed(1) : pause());
@@ -202,7 +215,10 @@
       <dt>{t("player.resolution")}</dt><dd>{clip.info.video?.width} x {clip.info.video?.height}</dd>
       <dt>{t("player.rate")}</dt><dd>{fps(rate).toFixed(3)} i/s{dropFrame ? " DF" : ""}</dd>
       <dt>{t("player.tc.start")}</dt><dd class="mono">{clip.info.start_timecode ?? tc(0)}</dd>
-      <dt>{t("player.display.fps")}</dt><dd class="mono">{speed !== 0 ? displayFps.toFixed(1) : "-"} i/s</dd>
+      <dt>{t("player.display.fps")}</dt>
+      <dd class="mono" title="transfert / décodage et dessin">
+        {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
+      </dd>
     </dl>
   </div>
 {/if}
