@@ -36,6 +36,16 @@ pub fn locate(tool: &str) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).map(|d| d.join(&name)));
     }
+    // Emplacements d'installation courants : sous macOS, les applications
+    // lancées depuis le Finder n'héritent pas du PATH du terminal (Homebrew).
+    let common: &[&str] = if cfg!(target_os = "macos") {
+        &["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+    } else if cfg!(windows) {
+        &["C:\\ffmpeg\\bin", "C:\\Program Files\\ffmpeg\\bin"]
+    } else {
+        &["/usr/bin", "/usr/local/bin", "/snap/bin"]
+    };
+    candidates.extend(common.iter().map(|d| PathBuf::from(d).join(&name)));
     candidates.into_iter().find(|p| p.is_file())
 }
 

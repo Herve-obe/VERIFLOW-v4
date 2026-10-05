@@ -2,6 +2,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import Meter from "../../components/Meter.svelte";
+  import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -195,16 +196,7 @@
             <span class="name" title={s.name}>{s.name}</span>
             <div class="meter-fader">
               <Meter db={s.level} hold={s.hold} />
-              <input
-                class="fader"
-                type="range"
-                min="-60"
-                max="12"
-                step="0.5"
-                bind:value={s.gain}
-                oninput={() => send(i)}
-                ondblclick={() => ((s.gain = 0), send(i))}
-              />
+              <Fader bind:value={s.gain} label={s.name} onchange={() => send(i)} />
             </div>
             <span class="db mono">{fmtDb(s.gain)}</span>
             <input
@@ -232,16 +224,7 @@
         <div class="meter-fader">
           <Meter db={master.l} hold={master.holdL} />
           <Meter db={master.r} hold={master.holdR} />
-          <input
-            class="fader"
-            type="range"
-            min="-60"
-            max="12"
-            step="0.5"
-            bind:value={master.gain}
-            oninput={sendMaster}
-            ondblclick={() => ((master.gain = 0), sendMaster())}
-          />
+          <Fader bind:value={master.gain} label={t("player.master")} onchange={sendMaster} />
         </div>
         <span class="db mono">{fmtDb(master.gain)}</span>
         <dl class="lufs mono">
@@ -290,6 +273,7 @@
   .audio {
     display: grid;
     grid-template-rows: auto auto 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--vf-space-3);
     height: 100%;
     padding: var(--vf-space-3);
@@ -298,6 +282,7 @@
     display: flex;
     align-items: center;
     gap: var(--vf-space-6);
+    min-width: 0;
   }
   .clock {
     display: flex;
@@ -330,14 +315,18 @@
   }
   .console {
     display: flex;
+    align-items: flex-start;
     gap: var(--vf-space-3);
     min-height: 0;
+    min-width: 0;
   }
   .strips {
     display: flex;
+    align-items: flex-start;
     gap: var(--vf-space-1);
     overflow-x: auto;
     flex: 1;
+    min-width: 0;
     padding-bottom: var(--vf-space-2);
   }
   .strip {
@@ -370,13 +359,6 @@
     display: flex;
     gap: var(--vf-space-1);
     align-items: center;
-  }
-  .fader {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    height: var(--vf-meter-height);
-    width: 18px;
-    accent-color: var(--vf-accent);
   }
   .db,
   .num {
