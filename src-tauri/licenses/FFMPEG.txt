@@ -1,0 +1,25 @@
+FFmpeg intégré à VERIFLOW
+=========================
+
+VERIFLOW est livré avec les programmes ffmpeg et ffprobe (version 9.0.2),
+installés à côté de l'exécutable VERIFLOW sous les noms veriflow-ffmpeg et
+veriflow-ffprobe. Ils sont exécutés comme des programmes séparés.
+
+FFmpeg est un logiciel libre distribué sous licence GNU General Public License
+version 3 (ces versions incluent x264, x265 et d'autres bibliothèques GPL).
+VERIFLOW est lui-même distribué sous licence GPL-3.0-or-later.
+
+Code source de FFmpeg 9.0.2 :
+  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  https://git.ffmpeg.org/ffmpeg.git (étiquette n9.0.2)
+
+Compilations utilisées (configuration et sources des bibliothèques sur ces pages) :
+  Windows        : https://www.gyan.dev/ffmpeg/builds/ (essentials build 9.0.2)
+                   https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2
+  macOS et Linux : https://ffmpeg.martin-riedl.de/ (release build 9.0.2)
+
+Texte de la licence GPL version 3 : https://www.gnu.org/licenses/gpl-3.0.txt
+(également fourni dans le fichier LICENSE de VERIFLOW).
+
+Sur demande écrite, l'éditeur de VERIFLOW fournit une copie du code source
+correspondant à ces binaires, pendant au moins trois ans après la distribution.

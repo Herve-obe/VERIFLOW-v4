@@ -19,8 +19,8 @@ fn exe_name(tool: &str) -> String {
     }
 }
 
-/// Cherche un outil : variable d'environnement, puis à côté de l'exécutable
-/// VERIFLOW (version embarquée), puis dans le PATH du système.
+/// Cherche un outil : variable d'environnement, puis la version embarquée à
+/// côté de l'exécutable VERIFLOW, puis le PATH et les emplacements courants.
 pub fn locate(tool: &str) -> Option<PathBuf> {
     let name = exe_name(tool);
     let mut candidates = Vec::new();
@@ -31,6 +31,9 @@ pub fn locate(tool: &str) -> Option<PathBuf> {
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))
     {
+        // Version embarquée dans l'installeur, préfixée pour ne jamais entrer
+        // en conflit avec un FFmpeg installé sur le système (paquets Linux).
+        candidates.push(dir.join(exe_name(&format!("veriflow-{tool}"))));
         candidates.push(dir.join(&name));
     }
     if let Some(path) = std::env::var_os("PATH") {

@@ -61,7 +61,12 @@ export async function pickAudio(label: string): Promise<string[]> {
 }
 
 export const videoOpen = (path: string) => invoke<VideoClip>("video_open", { path });
-export const videoFrame = (index: number) => invoke<ArrayBuffer>("video_frame", { index });
+/** Image JPEG encodée. Selon le canal IPC utilisé, Tauri renvoie un ArrayBuffer
+ *  (canal rapide) ou un tableau de nombres (canal de secours) : on normalise. */
+export async function videoFrame(index: number): Promise<Uint8Array<ArrayBuffer>> {
+  const raw = await invoke<ArrayBuffer | number[]>("video_frame", { index });
+  return raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
+}
 export const videoClose = () => invoke<void>("video_close");
 
 export const audioOpen = (paths: string[]) => invoke<AudioOpened>("audio_open", { paths });

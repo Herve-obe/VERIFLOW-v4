@@ -16,6 +16,13 @@ Deux modes, **VIDEO** et **AUDIO** (bascule avec `Tab`), contenant chacun :
 
 Prérequis : Node.js 22, Rust stable, FFmpeg (ffmpeg et ffprobe dans le PATH) et les [dépendances système de Tauri 2](https://v2.tauri.app/start/prerequisites/).
 
+Les installeurs embarquent FFmpeg 9.0.2 (GPL). Pour produire un installeur complet en local :
+
+```bash
+bash scripts/fetch-ffmpeg.sh x86_64-unknown-linux-gnu   # ou x86_64-pc-windows-msvc, universal-apple-darwin
+npm run tauri build -- --config src-tauri/tauri.ffmpeg.conf.json
+```
+
 ```bash
 npm ci                    # dépendances
 npm run tauri dev         # lancer l'application en développement

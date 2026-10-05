@@ -4,3 +4,6 @@ target/
 src-tauri/gen/schemas/
 *.veriflow
 .DS_Store
+
+# FFmpeg téléchargé à la compilation (scripts/fetch-ffmpeg.sh)
+src-tauri/binaries/
