@@ -339,6 +339,7 @@ fn decode(raw: &[u8], bits: u16, format: SampleFormat, out: &mut Vec<f32>) {
 }
 
 /// Écrit un WAV de test (utilisé par les tests et les outils de démonstration).
+#[allow(clippy::too_many_arguments)]
 #[doc(hidden)]
 pub fn write_test_wav(
     path: &Path,

@@ -27,6 +27,9 @@ pub enum Error {
     #[error("échec de {tool} : {message}")]
     Tool { tool: String, message: String },
 
+    #[error("audio : {0}")]
+    Audio(String),
+
     #[error("média non pris en charge : {0}")]
     Unsupported(String),
 
