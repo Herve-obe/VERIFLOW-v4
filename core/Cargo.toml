@@ -31,5 +31,10 @@ thiserror = "2"
 [dev-dependencies]
 tempfile = "3"
 
+# ASIO (Windows) : le SDK Steinberg, sous licence GPLv3 depuis octobre 2025
+# (charte §6.3), est téléchargé par asio-sys à la compilation ; LLVM requis.
+[target.'cfg(windows)'.dependencies]
+cpal = { version = "0.18", features = ["asio"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
