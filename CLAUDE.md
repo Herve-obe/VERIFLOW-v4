@@ -6,6 +6,7 @@
 - **Si Hervé écrit "je dois partir" (ou équivalent) : committer et pousser immédiatement tout le travail en cours**, même inachevé (commit préfixé `wip:`), puis résumer en 3 lignes où on en est et quoi faire ensuite.
 - Une branche par fonctionnalité, une PR validée par Hervé avant fusion.
 - Ne jamais s'inspirer du code ou du visuel de la v3 (github.com/Herve-obe/Veriflow_v3.0).
+- Tenir à jour `docs/TESTS_EN_ATTENTE.md` : toute PR fusionnée sans test d'Hervé sur poste réel y est inscrite, avec la liste des points à tester.
 
 ## Références
 - Charte (source de vérité) : `docs/01_CHARTE.md`
