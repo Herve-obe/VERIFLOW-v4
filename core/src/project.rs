@@ -31,6 +31,31 @@ const MIGRATIONS: &[&str] = &[
          kind    TEXT NOT NULL,
          message TEXT NOT NULL
      );",
+    // v2 : historique des offloads (détection des cartes déjà copiées).
+    "CREATE TABLE offloads (
+         id           INTEGER PRIMARY KEY,
+         started_at   TEXT NOT NULL,
+         finished_at  TEXT NOT NULL,
+         source_name  TEXT NOT NULL,
+         source_path  TEXT NOT NULL,
+         fingerprint  TEXT NOT NULL,
+         files        INTEGER NOT NULL,
+         bytes        INTEGER NOT NULL,
+         failed_files INTEGER NOT NULL,
+         cancelled    INTEGER NOT NULL,
+         destinations TEXT NOT NULL,
+         algorithms   TEXT NOT NULL,
+         reports      TEXT NOT NULL
+     );
+     CREATE INDEX offloads_fingerprint ON offloads (fingerprint);
+     CREATE TABLE offload_files (
+         offload_id INTEGER NOT NULL REFERENCES offloads (id),
+         rel        TEXT NOT NULL,
+         size       INTEGER NOT NULL,
+         modified   TEXT NOT NULL,
+         hashes     TEXT NOT NULL,
+         statuses   TEXT NOT NULL
+     );",
 ];
 
 /// Version de schéma la plus récente connue de cette version de VERIFLOW.
@@ -43,6 +68,18 @@ pub struct ProjectInfo {
     pub name: String,
     pub created_at: String,
     pub created_with: String,
+}
+
+/// Offload déjà réalisé pour une carte.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PreviousOffload {
+    pub finished_at: String,
+    pub source_name: String,
+    pub destinations: Vec<String>,
+}
+
+fn json<T: Serialize>(v: &T) -> String {
+    serde_json::to_string(v).unwrap_or_default()
 }
 
 /// Projet ouvert.
@@ -167,6 +204,80 @@ impl Project {
         Ok(())
     }
 
+    /// Enregistre un offload terminé (ou interrompu) dans l'historique du projet.
+    pub fn record_offload(
+        &self,
+        job: &crate::offload::job::JobResult,
+        source: &Path,
+    ) -> Result<i64> {
+        let s = &job.summary;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO offloads (started_at, finished_at, source_name, source_path, fingerprint, files,
+                 bytes, failed_files, cancelled, destinations, algorithms, reports)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                s.started_at,
+                s.finished_at,
+                job.source_name,
+                source.display().to_string(),
+                job.fingerprint,
+                s.files.len() as i64,
+                s.total_bytes as i64,
+                s.failed_files as i64,
+                s.cancelled,
+                json(&job.roots),
+                json(&s.files.first().map(|f| f.hashes.iter().map(|(a, _)| *a).collect::<Vec<_>>()).unwrap_or_default()),
+                json(&job.reports),
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO offload_files (offload_id, rel, size, modified, hashes, statuses)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for f in &s.files {
+                stmt.execute(params![
+                    id,
+                    f.rel,
+                    f.size as i64,
+                    f.modified,
+                    json(&f.hashes),
+                    json(&f.destinations)
+                ])?;
+            }
+        }
+        tx.commit()?;
+        self.log(
+            "offload",
+            &format!(
+                "{} : {} fichiers, {} en échec{}",
+                job.source_name,
+                s.files.len(),
+                s.failed_files,
+                if s.cancelled { ", interrompu" } else { "" }
+            ),
+        )?;
+        Ok(id)
+    }
+
+    /// Offloads réussis d'une même carte (même empreinte d'inventaire).
+    pub fn previous_offloads(&self, fingerprint: &str) -> Result<Vec<PreviousOffload>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT finished_at, source_name, destinations FROM offloads
+             WHERE fingerprint = ?1 AND failed_files = 0 AND cancelled = 0 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([fingerprint], |r| {
+            Ok(PreviousOffload {
+                finished_at: r.get(0)?,
+                source_name: r.get(1)?,
+                destinations: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn info(&self) -> Result<ProjectInfo> {
         Ok(ProjectInfo {
             path: self.path.display().to_string(),
@@ -239,6 +350,42 @@ mod tests {
             Project::open(&path),
             Err(Error::SchemaTooNew { .. })
         ));
+    }
+
+    #[test]
+    fn records_offloads_and_finds_previous_copies() {
+        use crate::offload::hash::HashAlgo;
+        use crate::offload::job::{execute, preflight, OffloadRequest, TemplateVars};
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("C0001.MP4"), b"video").unwrap();
+        let req = OffloadRequest {
+            source: src.clone(),
+            destinations: vec![dir.path().join("SSD1")],
+            template: "{carte}".into(),
+            vars: TemplateVars::default(),
+            algorithms: vec![HashAlgo::Xxh128],
+            operator: None,
+            notes: None,
+        };
+        let p = Project::create(&dir.path().join("p.veriflow"), None).unwrap();
+        let pre = preflight(&req).unwrap();
+        let fp = pre.fingerprint.clone();
+        assert!(p.previous_offloads(&fp).unwrap().is_empty());
+        let job = execute(
+            &req,
+            pre,
+            &std::sync::atomic::AtomicBool::new(false),
+            |_| {},
+            None,
+        )
+        .unwrap();
+        p.record_offload(&job, &src).unwrap();
+        let prev = p.previous_offloads(&fp).unwrap();
+        assert_eq!(prev.len(), 1);
+        assert_eq!(prev[0].source_name, "A001");
+        assert!(prev[0].destinations[0].ends_with("A001"));
     }
 
     #[test]

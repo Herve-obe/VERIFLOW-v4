@@ -2,6 +2,7 @@
 //! Ce fichier ne contient aucune logique métier : il traduit les appels.
 
 mod commands;
+mod offload;
 mod player;
 
 use std::sync::Mutex;
@@ -20,6 +21,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .manage(player::PlayerState::default())
+        .setup(|app| {
+            use tauri::Manager;
+            app.manage(offload::OffloadState::new(app.handle().clone()));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::project_create,
@@ -34,6 +40,12 @@ pub fn run() {
             player::audio_seek,
             player::audio_track,
             player::audio_status,
+            offload::offload_volumes,
+            offload::offload_preflight,
+            offload::offload_start,
+            offload::offload_cancel,
+            offload::offload_eject,
+            offload::reveal,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");
