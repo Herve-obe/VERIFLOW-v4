@@ -287,6 +287,23 @@ impl Project {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Dossiers de destination des offloads du projet (plus récents d'abord, sans doublon).
+    pub fn offload_roots(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT destinations FROM offloads ORDER BY id DESC")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out: Vec<String> = Vec::new();
+        for row in rows {
+            for d in serde_json::from_str::<Vec<String>>(&row?).unwrap_or_default() {
+                if !out.contains(&d) {
+                    out.push(d);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Modifie des champs sur un ou plusieurs médias (édition par lot).
     /// Une valeur vide efface le champ. Renvoie le nombre de champs écrits.
     pub fn set_media_meta(
@@ -461,6 +478,7 @@ mod tests {
         p.record_offload(&job, &src).unwrap();
         let prev = p.previous_offloads(&fp).unwrap();
         assert_eq!(prev.len(), 1);
+        assert_eq!(p.offload_roots().unwrap(), prev[0].destinations);
         assert_eq!(prev[0].source_name, "A001");
         assert!(prev[0].destinations[0].ends_with("A001"));
     }

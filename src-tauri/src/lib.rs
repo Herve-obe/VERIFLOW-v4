@@ -2,6 +2,7 @@
 //! Ce fichier ne contient aucune logique métier : il traduit les appels.
 
 mod commands;
+mod explorer;
 mod media;
 mod offload;
 mod player;
@@ -26,6 +27,7 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
+            app.manage(explorer::ExplorerState::new(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -48,6 +50,10 @@ pub fn run() {
             offload::offload_cancel,
             offload::offload_eject,
             offload::reveal,
+            explorer::explorer_list,
+            explorer::explorer_volumes,
+            explorer::explorer_project_roots,
+            explorer::explorer_watch,
             media::media_fields,
             media::media_list,
             media::media_describe,

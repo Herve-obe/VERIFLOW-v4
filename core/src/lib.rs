@@ -4,6 +4,7 @@
 //! et réutilisé par une autre interface (charte §5.5).
 
 pub mod error;
+pub mod explorer;
 pub mod media;
 pub mod offload;
 pub mod player;
