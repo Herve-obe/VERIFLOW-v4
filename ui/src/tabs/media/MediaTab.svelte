@@ -100,7 +100,26 @@
     }
   }
 
+  // Double-clic détecté ici plutôt que par l'événement natif : deux clics sur le
+  // même média, rapprochés dans le temps et dans l'espace. Un clic simple ne
+  // fait que sélectionner (et afficher les métadonnées).
+  const DOUBLE_MS = 400;
+  let lastClick: { path: string; at: number; x: number; y: number } | null = null;
+
   function click(e: MouseEvent, index: number, path: string) {
+    const now = performance.now();
+    const isDouble =
+      lastClick !== null &&
+      lastClick.path === path &&
+      now - lastClick.at < DOUBLE_MS &&
+      Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < 6 &&
+      !e.shiftKey && !e.ctrlKey && !e.metaKey;
+    lastClick = isDouble ? null : { path, at: now, x: e.clientX, y: e.clientY };
+    if (isDouble) {
+      const m = visible[index];
+      if (m) quick = m;
+      return;
+    }
     const next = new Set(e.ctrlKey || e.metaKey ? selected : []);
     if (e.shiftKey && anchor !== null) {
       const [a, b] = [Math.min(anchor, index), Math.max(anchor, index)];
@@ -241,7 +260,7 @@
           </thead>
           <tbody>
             {#each visible as e, i (e.path)}
-              <tr class:sel={selected.has(e.path)} onclick={(ev) => click(ev, i, e.path)} ondblclick={() => (quick = e)}>
+              <tr class:sel={selected.has(e.path)} onclick={(ev) => click(ev, i, e.path)}>
                 <td class="pv">
                   {#if e.kind === "audio"}<Wave path={e.path} width={80} height={28} />{:else}<Thumb path={e.path} width={64} />{/if}
                 </td>
@@ -261,7 +280,7 @@
       {:else}
         <div class="grid">
           {#each visible as e, i (e.path)}
-            <button class="card" class:sel={selected.has(e.path)} onclick={(ev) => click(ev, i, e.path)} ondblclick={() => (quick = e)}>
+            <button class="card" class:sel={selected.has(e.path)} onclick={(ev) => click(ev, i, e.path)}>
               {#if e.kind === "audio"}<Wave path={e.path} width={200} height={60} />{:else}<Thumb path={e.path} width={200} />{/if}
               <span class="cname" title={e.rel}>{e.name}</span>
               <span class="small mono">{duration(e)} {val(e, "scene") ? `· Sc ${val(e, "scene")}` : ""} {val(e, "take") ? `· T ${val(e, "take")}` : ""}</span>

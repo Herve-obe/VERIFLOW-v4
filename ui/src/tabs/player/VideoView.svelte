@@ -1,6 +1,6 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -173,8 +173,12 @@
     }
   }
 
+  // Ouverture au changement de chemin uniquement : sans `untrack`, l'effet
+  // dépendrait aussi du clip lu dans `load` et rouvrirait le fichier en boucle
+  // (chaque réouverture arrêtant la lecture).
   $effect(() => {
-    if (path) load(path);
+    const p = path;
+    if (p) untrack(() => load(p));
   });
 
   onDestroy(() => {

@@ -1,6 +1,6 @@
 <!-- PLAYER AUDIO : multipiste jusqu'à 32 pistes, SOLO / MUTE / niveau / panoramique, crêtes et LUFS. -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
@@ -158,8 +158,10 @@
   const fmt = (v: number | null) => (v === null ? "-inf" : v.toFixed(1));
   const fmtDb = (v: number) => (v <= -60 ? "-inf" : (v > 0 ? "+" : "") + v.toFixed(1));
 
+  // Ouverture au changement de fichiers uniquement (voir VideoView).
   $effect(() => {
-    if (initialPaths && initialPaths.length > 0) load(initialPaths);
+    const p = initialPaths;
+    if (p && p.length > 0) untrack(() => load(p));
   });
 
   onDestroy(close);
