@@ -41,6 +41,8 @@ pub struct MediaInfo {
     pub audio: Vec<AudioStream>,
     /// Timecode de début ("HH:MM:SS:FF"), si présent dans le fichier.
     pub start_timecode: Option<String>,
+    /// Étiquettes du conteneur et de la piste vidéo (clés en minuscules).
+    pub tags: std::collections::BTreeMap<String, String>,
 }
 
 impl MediaInfo {
@@ -63,6 +65,8 @@ struct RawProbe {
 #[derive(Deserialize, Default)]
 struct RawTags {
     timecode: Option<String>,
+    #[serde(flatten)]
+    other: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -119,6 +123,15 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
     let duration: f64 = num(&format.duration).unwrap_or(0.0);
 
     let mut start_timecode = format.tags.timecode.clone();
+    let mut tags = std::collections::BTreeMap::new();
+    let mut add_tags = |t: &RawTags| {
+        for (k, v) in &t.other {
+            if let Some(s) = v.as_str() {
+                tags.entry(k.to_lowercase()).or_insert_with(|| s.to_owned());
+            }
+        }
+    };
+    add_tags(&format.tags);
     let mut video = None;
     let mut audio = Vec::new();
     for s in &raw.streams {
@@ -127,6 +140,7 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
         }
         match s.codec_type.as_deref() {
             Some("video") if video.is_none() && s.disposition.attached_pic == 0 => {
+                add_tags(&s.tags);
                 let rate = s
                     .avg_frame_rate
                     .as_deref()
@@ -166,6 +180,7 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
         video,
         audio,
         start_timecode,
+        tags,
     })
 }
 
@@ -205,7 +220,8 @@ mod tests {
          "bits_per_raw_sample":"24"},
         {"index":2,"codec_type":"data","tags":{"timecode":"10:00:00:00"}}
       ],
-      "format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"20.000000","size":"167155457"}
+      "format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"20.000000","size":"167155457",
+                "tags":{"Reel_Name":"A001","encoder":"Lavf"}}
     }"#;
 
     #[test]
@@ -217,6 +233,7 @@ mod tests {
         assert_eq!(info.audio.len(), 1);
         assert_eq!(info.audio[0].bits, Some(24));
         assert_eq!(info.start_tc().unwrap().frames, 10 * 3600 * 25);
+        assert_eq!(info.tags.get("reel_name").map(String::as_str), Some("A001"));
     }
 
     #[test]
