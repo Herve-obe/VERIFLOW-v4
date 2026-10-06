@@ -10,6 +10,7 @@ use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 
+use crate::player::logs::{Color, Marker};
 use crate::{Error, Result, VERSION};
 
 /// Extension des fichiers projet.
@@ -65,6 +66,21 @@ const MIGRATIONS: &[&str] = &[
          updated_at TEXT NOT NULL,
          PRIMARY KEY (path, field)
      );",
+    // v4 : marqueurs et logs du PLAYER.
+    "CREATE TABLE player_markers (
+         id         INTEGER PRIMARY KEY,
+         path       TEXT NOT NULL,
+         frame      INTEGER NOT NULL,
+         in_frame   INTEGER,
+         out_frame  INTEGER,
+         color      TEXT NOT NULL,
+         comment    TEXT NOT NULL,
+         scene      TEXT NOT NULL,
+         take       TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+     );
+     CREATE INDEX player_markers_path ON player_markers (path, frame);",
 ];
 
 /// Version de schéma la plus récente connue de cette version de VERIFLOW.
@@ -372,6 +388,59 @@ impl Project {
         Ok(out)
     }
 
+    /// Enregistre un marqueur : création si `id` vaut 0, sinon mise à jour.
+    /// Renvoie le marqueur avec son identifiant.
+    pub fn save_marker(&self, marker: &Marker) -> Result<Marker> {
+        let at = now();
+        let mut m = marker.clone();
+        if m.id == 0 {
+            self.conn.execute(
+                "INSERT INTO player_markers (path, frame, in_frame, out_frame, color, comment, scene, take, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                params![m.path, m.frame, m.in_frame, m.out_frame, m.color.id(), m.comment, m.scene, m.take, at],
+            )?;
+            m.id = self.conn.last_insert_rowid();
+        } else {
+            let n = self.conn.execute(
+                "UPDATE player_markers SET path = ?2, frame = ?3, in_frame = ?4, out_frame = ?5, color = ?6,
+                     comment = ?7, scene = ?8, take = ?9, updated_at = ?10 WHERE id = ?1",
+                params![m.id, m.path, m.frame, m.in_frame, m.out_frame, m.color.id(), m.comment, m.scene, m.take, at],
+            )?;
+            if n == 0 {
+                return Err(Error::NotFound(format!("marqueur {}", m.id)));
+            }
+        }
+        Ok(m)
+    }
+
+    pub fn delete_marker(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM player_markers WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Marqueurs d'un média (tous les médias si `path` vaut `None`), par position.
+    pub fn markers(&self, path: Option<&str>) -> Result<Vec<Marker>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, frame, in_frame, out_frame, color, comment, scene, take FROM player_markers
+             WHERE ?1 IS NULL OR path = ?1 ORDER BY path, frame, id",
+        )?;
+        let rows = stmt.query_map([path], |r| {
+            Ok(Marker {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                frame: r.get(2)?,
+                in_frame: r.get(3)?,
+                out_frame: r.get(4)?,
+                color: Color::from_id(&r.get::<_, String>(5)?).unwrap_or_default(),
+                comment: r.get(6)?,
+                scene: r.get(7)?,
+                take: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn info(&self) -> Result<ProjectInfo> {
         Ok(ProjectInfo {
             path: self.path.display().to_string(),
@@ -385,6 +454,43 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markers_are_saved_updated_and_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Project::create(&dir.path().join("m"), None).unwrap();
+        let mut m = Marker {
+            id: 0,
+            path: "/r/a.mov".into(),
+            frame: 50,
+            in_frame: Some(25),
+            out_frame: Some(74),
+            color: Color::Green,
+            comment: "Bonne".into(),
+            scene: "12A".into(),
+            take: "3".into(),
+        };
+        m = p.save_marker(&m).unwrap();
+        assert!(m.id > 0);
+        let other = p
+            .save_marker(&Marker {
+                id: 0,
+                path: "/r/b.mov".into(),
+                frame: 3,
+                in_frame: None,
+                out_frame: None,
+                ..m.clone()
+            })
+            .unwrap();
+        m.comment = "Très bonne".into();
+        m.color = Color::Blue;
+        p.save_marker(&m).unwrap();
+        assert_eq!(p.markers(Some("/r/a.mov")).unwrap(), vec![m.clone()]);
+        assert_eq!(p.markers(None).unwrap().len(), 2);
+        p.delete_marker(other.id).unwrap();
+        assert_eq!(p.markers(None).unwrap(), vec![m.clone()]);
+        assert!(p.save_marker(&Marker { id: 999, ..m }).is_err());
+    }
 
     #[test]
     fn create_then_open_roundtrip() {
