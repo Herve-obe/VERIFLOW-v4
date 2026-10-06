@@ -2,21 +2,46 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
+  import OutputPicker from "../../components/OutputPicker.svelte";
+  import MarkersPanel from "./MarkersPanel.svelte";
   import { app } from "../../stores/app.svelte";
+  import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
   import { resolvePlayerAction } from "../../shortcuts";
   import { framesToTc, fps, type FrameRate } from "../../lib/timecode";
-  import { pickVideo, videoOpen, videoFrame, videoClose, type VideoClip, type Slot } from "../../lib/player";
+  import { markerCss, type Marker } from "../../lib/logs";
+  import {
+    pickVideo,
+    pickLut,
+    videoOpen,
+    videoFrame,
+    videoClose,
+    videoLut,
+    audioOpen,
+    audioClose,
+    audioSeek,
+    audioTransport,
+    audioStatus,
+    type VideoClip,
+    type Slot,
+    type AudioSlot,
+  } from "../../lib/player";
 
   // `slot` : emplacement du lecteur ; `path` : clip à ouvrir directement ;
-  // `active` : vrai quand les raccourcis clavier doivent agir sur cette vue.
+  // `active` : vrai quand les raccourcis clavier doivent agir sur cette vue ;
+  // `logs` : affiche le panneau des marqueurs.
   let {
     slot = "player",
     path = null,
     active = () => app.tab === "player" && app.mode === "video",
-  }: { slot?: Slot; path?: string | null; active?: () => boolean } = $props();
+    logs = true,
+  }: { slot?: Slot; path?: string | null; active?: () => boolean; logs?: boolean } = $props();
+
+  const avSlot = $derived(`${slot}-av` as AudioSlot);
+  const PREF_TC = "veriflow.player.tc.overlay";
 
   let clip = $state<VideoClip | null>(null);
+  let clipPath = $state<string | null>(null);
   let loading = $state(false);
   let shown = $state(0); // image affichée
   let speed = $state(0); // 0 = pause, négatif = arrière
@@ -26,6 +51,20 @@
   let ipcMs = $state(0); // temps de transfert d'une image depuis le cœur
   let drawMs = $state(0); // temps de dessin
   let canvas = $state<HTMLCanvasElement | null>(null);
+  let markers = $state<Marker[]>([]);
+  let panel = $state<{ add: () => Promise<void> } | null>(null);
+  let lut = $state<string | null>(null);
+  let tcOverlay = $state(readPref(PREF_TC) === "1");
+
+  // Son de la vidéo : ouvert dans le moteur audio, il sert d'horloge en lecture normale.
+  let avReady = $state(false);
+  let avError = $state("");
+  let soundOn = $state(true);
+  let audioPlaying = false;
+  let audioPos = 0; // position du son (s) au moment `audioAt`
+  let audioAt = 0;
+  let audioPolling = false;
+  let lastAudioPoll = 0;
 
   let position = 0; // position fractionnaire (images) pendant la lecture
   let requested = 0; // dernière image demandée (sert de base au pas à pas)
@@ -40,25 +79,64 @@
   const dropFrame = $derived(clip?.info.start_timecode?.includes(";") ?? false);
   const last = $derived(Math.max(0, (clip?.frame_count ?? 1) - 1));
   const tc = (i: number) => framesToTc((clip?.start_frame ?? 0) + i, rate, dropFrame);
+  const hasSound = $derived((clip?.info.audio.length ?? 0) > 0);
+  const lutName = $derived(lut?.split(/[\\/]/).pop() ?? "");
+
+  function readPref(k: string): string | null {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  }
+  function writePref(k: string, v: string) {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* stockage indisponible */
+    }
+  }
 
   async function open() {
     const picked = await pickVideo(t("player.filter.video"));
     if (picked) await load(picked);
   }
 
-  async function load(path: string) {
+  async function load(p: string) {
     stop();
     loading = true;
     try {
-      clip = await videoOpen(path, slot);
+      await closeSound();
+      clip = await videoOpen(p, slot);
+      clipPath = p;
       markIn = markOut = null;
+      if (lut) await videoLut(lut, slot).catch((e) => ((app.status = String(e)), (lut = null)));
       await show(0);
-      app.status = path;
+      app.status = p;
+      openSound(p);
     } catch (err) {
       app.status = String(err);
     } finally {
       loading = false;
     }
+  }
+
+  async function openSound(p: string) {
+    avReady = false;
+    avError = "";
+    if (!clip || clip.info.audio.length === 0) return;
+    try {
+      await audioOpen([p], avSlot, currentOutput());
+      if (clipPath === p) avReady = true;
+    } catch (e) {
+      avError = String(e);
+    }
+  }
+
+  async function closeSound() {
+    stopAudio();
+    if (avReady) await audioClose(avSlot).catch(() => {});
+    avReady = false;
   }
 
   /** Affiche l'image `i` ; une seule requête à la fois, la plus récente est conservée. */
@@ -103,19 +181,68 @@
     pending = null;
   }
 
+  // ---------- Son synchronisé ----------
+
+  const audioClock = () => avReady && soundOn && speed === 1;
+
+  async function startAudio(fromFrame: number) {
+    if (!audioClock() || audioPlaying) return;
+    audioPlaying = true;
+    const secs = fromFrame / fps(rate);
+    audioPos = secs;
+    audioAt = performance.now();
+    try {
+      await audioSeek(secs, avSlot);
+      await audioTransport("play", avSlot);
+      audioAt = performance.now();
+    } catch (e) {
+      audioPlaying = false;
+      app.status = String(e);
+    }
+  }
+
+  function stopAudio() {
+    if (!audioPlaying) return;
+    audioPlaying = false;
+    audioTransport("pause", avSlot).catch(() => {});
+  }
+
+  /** Relève la position réelle du son (au plus 10 fois par seconde). */
+  function pollAudio(now: number) {
+    if (audioPolling || now - lastAudioPoll < 100) return;
+    audioPolling = true;
+    lastAudioPoll = now;
+    audioStatus(avSlot)
+      .then((st) => {
+        if (audioPlaying && st.playing) {
+          audioPos = st.position;
+          audioAt = performance.now();
+        }
+      })
+      .catch(() => {})
+      .finally(() => (audioPolling = false));
+  }
+
   // Horloge de lecture : minuterie courte plutôt que requestAnimationFrame,
   // qui peut être suspendu par certains systèmes quand la fenêtre n'a pas le focus.
+  // En lecture normale avec le son, la position suit l'horloge de la carte son.
   function tick() {
     if (speed === 0) return;
     const ts = performance.now();
     const dt = lastTs ? (ts - lastTs) / 1000 : 0;
     lastTs = ts;
-    position += dt * fps(rate) * speed;
+    if (audioPlaying) {
+      pollAudio(ts);
+      position = (audioPos + (ts - audioAt) / 1000) * fps(rate);
+    } else {
+      position += dt * fps(rate) * speed;
+    }
     // Fin de clip (en avant) ou début (en arrière) : arrêt sur la dernière image.
     if ((speed > 0 && position >= last) || (speed < 0 && position <= 0)) {
       position = Math.min(Math.max(position, 0), last);
       show(position);
       speed = 0;
+      stopAudio();
       return;
     }
     // On ne demande une nouvelle image que lorsque la précédente est affichée :
@@ -134,11 +261,14 @@
       fpsSince = performance.now();
       timer = window.setTimeout(tick, 0);
     }
+    if (audioClock()) startAudio(Math.round(position));
+    else stopAudio();
   }
 
   function pause() {
     speed = 0;
     window.clearTimeout(timer);
+    stopAudio();
   }
 
   function stop() {
@@ -151,9 +281,48 @@
     show(requested + delta);
   }
 
+  function seek(frame: number) {
+    pause();
+    show(frame);
+  }
+
   const toggle = () => (speed === 0 ? setSpeed(1) : pause());
   const forward = () => setSpeed(speed <= 0 ? 1 : Math.min(speed * 2, 8));
   const back = () => setSpeed(speed >= 0 ? -1 : Math.max(speed * 2, -8));
+
+  function toggleSound() {
+    soundOn = !soundOn;
+    if (soundOn && speed === 1) {
+      position = shown;
+      startAudio(shown);
+    } else stopAudio();
+  }
+
+  // ---------- LUT et TC incrusté ----------
+
+  async function chooseLut() {
+    const picked = await pickLut(t("player.lut.filter"));
+    if (!picked || !clip) return;
+    try {
+      await videoLut(picked, slot);
+      lut = picked;
+      show(shown);
+    } catch (e) {
+      app.status = String(e);
+    }
+  }
+
+  async function removeLut() {
+    lut = null;
+    if (!clip) return;
+    await videoLut(null, slot).catch(() => {});
+    show(shown);
+  }
+
+  function toggleTc() {
+    tcOverlay = !tcOverlay;
+    writePref(PREF_TC, tcOverlay ? "1" : "0");
+  }
 
   function onKeydown(e: KeyboardEvent) {
     if (!clip || !active()) return;
@@ -170,6 +339,7 @@
       case "step.back": step(-1); break;
       case "mark.in": markIn = shown; break;
       case "mark.out": markOut = shown; break;
+      case "mark.add": panel?.add(); break;
     }
   }
 
@@ -181,9 +351,21 @@
     if (p) untrack(() => load(p));
   });
 
+  // Changement de sortie audio : le son de la vidéo est rouvert sur la nouvelle sortie.
+  $effect(() => {
+    void output.revision;
+    untrack(() => {
+      if (clipPath && hasSound) {
+        const p = clipPath;
+        closeSound().then(() => openSound(p));
+      }
+    });
+  });
+
   onDestroy(() => {
     pause();
     videoClose(slot).catch(() => {});
+    audioClose(avSlot).catch(() => {});
   });
 </script>
 
@@ -196,24 +378,40 @@
     <p class="hint">{t("player.shortcuts")}</p>
   </div>
 {:else}
+  <div class="layout" class:withlogs={logs}>
   <div class="video">
     <div class="screen">
       <canvas bind:this={canvas} width={clip.display_width} height={clip.display_height}></canvas>
+      {#if tcOverlay}<div class="tcover mono">{tc(shown)}</div>{/if}
     </div>
 
     <div class="bar">
       <span class="tc mono">{tc(shown)}</span>
-      <input
-        class="scrub"
-        type="range"
-        min="0"
-        max={last}
-        value={shown}
-        oninput={(e) => {
-          pause();
-          show(Number(e.currentTarget.value));
-        }}
-      />
+      <div class="scrubwrap">
+        <input
+          class="scrub"
+          type="range"
+          min="0"
+          max={last}
+          value={shown}
+          oninput={(e) => {
+            pause();
+            show(Number(e.currentTarget.value));
+          }}
+        />
+        {#each markers as m (m.id)}
+          {#if m.in_frame !== null && m.out_frame !== null}
+            <span
+              class="span"
+              style:left={`${(Math.min(m.in_frame, m.out_frame) / Math.max(1, last)) * 100}%`}
+              style:width={`${(Math.abs(m.out_frame - m.in_frame) / Math.max(1, last)) * 100}%`}
+              style:background={markerCss(m.color)}
+            ></span>
+          {:else}
+            <span class="tick" style:left={`${(m.frame / Math.max(1, last)) * 100}%`} style:background={markerCss(m.color)}></span>
+          {/if}
+        {/each}
+      </div>
       <span class="mono small">{t("player.frame")} {shown} / {last}</span>
     </div>
 
@@ -226,8 +424,28 @@
           <span>{t("player.duration")} {framesToTc(markOut - markIn + 1, rate, dropFrame)}</span>
         {/if}
       </div>
+      <div class="tools">
+        {#if hasSound}
+          <button class="opt" class:on={soundOn && avReady} onclick={toggleSound} title={avError || t("player.sound.hint")} disabled={!avReady}>
+            {t("player.sound")}
+          </button>
+        {/if}
+        <button class="opt" class:on={tcOverlay} onclick={toggleTc} title={t("player.tc.overlay.hint")}>{t("player.tc.overlay")}</button>
+        {#if lut}
+          <span class="lut" title={lut}>LUT {lutName}</span>
+          <button class="opt" onclick={removeLut} aria-label={t("player.lut.remove")} title={t("player.lut.remove")}>✕</button>
+        {:else}
+          <button class="opt" onclick={chooseLut} title={t("player.lut.hint")}>LUT</button>
+        {/if}
+      </div>
       <button class="change" onclick={open}>{t("player.change")}</button>
     </div>
+    {#if hasSound}
+      <div class="sound">
+        <OutputPicker />
+        {#if avError}<span class="err">{avError}</span>{/if}
+      </div>
+    {/if}
 
     <dl class="info">
       <dt>{t("player.codec")}</dt><dd>{clip.info.video?.codec} ({clip.info.video?.pix_fmt})</dd>
@@ -239,6 +457,20 @@
         {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
       </dd>
     </dl>
+  </div>
+  {#if logs}
+    <MarkersPanel
+      bind:this={panel}
+      path={clipPath}
+      frame={shown}
+      {tc}
+      {markIn}
+      {markOut}
+      onSeek={seek}
+      onRangeUsed={() => (markIn = markOut = null)}
+      onChange={(m) => (markers = m)}
+    />
+  {/if}
   </div>
 {/if}
 
@@ -273,16 +505,33 @@
     color: var(--vf-text);
     border: 1px solid var(--vf-border);
     font-weight: 400;
-    margin-left: auto;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: 100%;
+    min-height: 0;
+  }
+  .layout.withlogs {
+    grid-template-columns: 1fr 300px;
+    gap: var(--vf-space-2);
+    padding-right: var(--vf-space-3);
+    padding-block: var(--vf-space-3);
+  }
+  .layout.withlogs .video {
+    padding: 0 0 0 var(--vf-space-3);
   }
   .video {
     display: grid;
-    grid-template-rows: 1fr auto auto auto;
+    grid-template-rows: 1fr;
+    grid-auto-rows: auto;
     height: 100%;
+    min-height: 0;
     gap: var(--vf-space-2);
     padding: var(--vf-space-3);
   }
   .screen {
+    position: relative;
     min-height: 0;
     background: var(--vf-video-bg);
     border-radius: var(--vf-radius-md);
@@ -306,9 +555,83 @@
     color: var(--vf-accent);
     min-width: 11ch;
   }
+  .scrubwrap {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
   .scrub {
     flex: 1;
     accent-color: var(--vf-accent);
+  }
+  .tick,
+  .span {
+    position: absolute;
+    top: -6px;
+    height: 5px;
+    pointer-events: none;
+    border-radius: 1px;
+  }
+  .tick {
+    width: 3px;
+    margin-left: -1px;
+  }
+  .span {
+    opacity: 0.8;
+  }
+  .tcover {
+    position: absolute;
+    bottom: var(--vf-space-3);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 2px var(--vf-space-2);
+    background: var(--vf-tc-overlay-bg);
+    color: var(--vf-text);
+    font-size: var(--vf-text-lg);
+    border-radius: var(--vf-radius-sm);
+    pointer-events: none;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-1);
+    margin-left: auto;
+  }
+  .opt {
+    background: var(--vf-surface-high);
+    color: var(--vf-text-muted);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: 2px var(--vf-space-2);
+    font-size: var(--vf-text-sm);
+    cursor: pointer;
+  }
+  .opt.on {
+    color: var(--vf-on-accent);
+    background: var(--vf-accent);
+    border-color: var(--vf-accent);
+  }
+  .opt:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .lut {
+    font-size: var(--vf-text-sm);
+    color: var(--vf-accent);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sound {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-3);
+  }
+  .err {
+    color: var(--vf-error);
+    font-size: var(--vf-text-sm);
   }
   .small {
     font-size: var(--vf-text-sm);

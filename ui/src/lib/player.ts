@@ -33,7 +33,32 @@ export interface AudioOpened {
     frames: number;
     duration: number;
   };
-  output: { device: string; sample_rate: number; channels: number; resampling: boolean };
+  output: OutputInfo;
+}
+
+export interface OutputInfo {
+  device: string;
+  id: string;
+  host: string;
+  first_channel: number;
+  sample_rate: number;
+  channels: number;
+  resampling: boolean;
+}
+
+/** Sortie audio du poste (voir core/src/player/audio/engine.rs). */
+export interface OutputDevice {
+  id: string;
+  host: string;
+  name: string;
+  default: boolean;
+  channels: number;
+}
+
+/** Sortie demandée : `device` absent = sortie par défaut du système. */
+export interface OutputChoice {
+  device: string | null;
+  first_channel: number;
 }
 
 export interface AudioStatus {
@@ -47,7 +72,13 @@ export interface AudioStatus {
 }
 
 const VIDEO_EXT = ["mov", "mp4", "mxf", "mkv", "avi", "mts", "m2ts", "mpg", "mpeg", "m4v", "webm", "braw", "r3d"];
-const AUDIO_EXT = ["wav", "bwf", "rf64", "w64"];
+const AUDIO_EXT = ["wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
+const LUT_EXT = ["cube", "3dl", "dat", "m3d", "csp"];
+
+export async function pickLut(label: string): Promise<string | null> {
+  const r = await open({ multiple: false, filters: [{ name: label, extensions: LUT_EXT }] });
+  return typeof r === "string" ? r : null;
+}
 
 export async function pickVideo(label: string): Promise<string | null> {
   const r = await open({ multiple: false, filters: [{ name: label, extensions: VIDEO_EXT }] });
@@ -60,8 +91,10 @@ export async function pickAudio(label: string): Promise<string[]> {
   return Array.isArray(r) ? r : [r];
 }
 
-/** Emplacement du lecteur : « player » (onglet PLAYER) ou « preview » (lecteur rapide de MEDIA). */
+/** Emplacement du lecteur : « player » (onglet PLAYER) ou « preview » (lecteur rapide de MEDIA).
+ *  Le son d'une vidéo utilise l'emplacement audio « <emplacement>-av ». */
 export type Slot = "player" | "preview";
+export type AudioSlot = Slot | "player-av" | "preview-av";
 
 export const videoOpen = (path: string, slot: Slot = "player") => invoke<VideoClip>("video_open", { path, slot });
 /** Image JPEG encodée. Selon le canal IPC utilisé, Tauri renvoie un ArrayBuffer
@@ -71,12 +104,16 @@ export async function videoFrame(index: number, slot: Slot = "player"): Promise<
   return raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
 }
 export const videoClose = (slot: Slot = "player") => invoke<void>("video_close", { slot });
+/** LUT d'affichage ; `path` null pour la retirer. */
+export const videoLut = (path: string | null, slot: Slot = "player") => invoke<void>("video_lut", { path, slot });
 
-export const audioOpen = (paths: string[], slot: Slot = "player") => invoke<AudioOpened>("audio_open", { paths, slot });
-export const audioClose = (slot: Slot = "player") => invoke<void>("audio_close", { slot });
-export const audioTransport = (action: "play" | "pause" | "stop", slot: Slot = "player") =>
+export const audioOutputs = () => invoke<OutputDevice[]>("audio_outputs");
+export const audioOpen = (paths: string[], slot: AudioSlot = "player", output: OutputChoice | null = null) =>
+  invoke<AudioOpened>("audio_open", { paths, slot, output });
+export const audioClose = (slot: AudioSlot = "player") => invoke<void>("audio_close", { slot });
+export const audioTransport = (action: "play" | "pause" | "stop", slot: AudioSlot = "player") =>
   invoke<void>("audio_transport", { action, slot });
-export const audioSeek = (seconds: number, slot: Slot = "player") => invoke<void>("audio_seek", { seconds, slot });
-export const audioTrack = (index: number, gainDb: number, pan: number, mute: boolean, solo: boolean, slot: Slot = "player") =>
+export const audioSeek = (seconds: number, slot: AudioSlot = "player") => invoke<void>("audio_seek", { seconds, slot });
+export const audioTrack = (index: number, gainDb: number, pan: number, mute: boolean, solo: boolean, slot: AudioSlot = "player") =>
   invoke<void>("audio_track", { index, gainDb, pan, mute, solo, slot });
-export const audioStatus = (slot: Slot = "player") => invoke<AudioStatus>("audio_status", { slot });
+export const audioStatus = (slot: AudioSlot = "player") => invoke<AudioStatus>("audio_status", { slot });

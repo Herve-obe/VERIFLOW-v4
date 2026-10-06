@@ -37,7 +37,8 @@ export type PlayerAction =
   | "step.back"
   | "step.forward"
   | "mark.in"
-  | "mark.out";
+  | "mark.out"
+  | "mark.add";
 
 export const PLAYER_SHORTCUTS: Record<PlayerAction, Shortcut> = {
   "play.toggle": { key: " " },
@@ -49,4 +50,5 @@ export const PLAYER_SHORTCUTS: Record<PlayerAction, Shortcut> = {
   "step.forward": { key: "ArrowRight" },
   "mark.in": { key: "i" },
   "mark.out": { key: "o" },
+  "mark.add": { key: "m" },
 };

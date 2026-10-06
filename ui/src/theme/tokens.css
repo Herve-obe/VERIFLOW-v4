@@ -41,6 +41,17 @@
   --vf-video-bg: #000000;
   --vf-mark: #c77dff;
 
+  /* Couleurs des marqueurs du PLAYER (palette Avid). */
+  --vf-marker-red: #ff4d4f;
+  --vf-marker-green: #2ecc71;
+  --vf-marker-blue: #3b82f6;
+  --vf-marker-cyan: #22d3ee;
+  --vf-marker-magenta: #e040fb;
+  --vf-marker-yellow: #f5d020;
+  --vf-marker-black: #1b1e24;
+  --vf-marker-white: #f2f4f7;
+  --vf-tc-overlay-bg: rgb(0 0 0 / 0.55);
+
   /* Polices */
   --vf-font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
   --vf-font-mono: "JetBrains Mono Variable", "Consolas", ui-monospace, monospace;

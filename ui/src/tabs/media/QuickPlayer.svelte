@@ -17,9 +17,9 @@
     </header>
     <div class="body">
       {#if media.kind === "audio"}
-        <AudioView slot="preview" paths={[media.path]} active={() => true} />
+        <AudioView slot="preview" paths={[media.path]} active={() => true} logs={false} />
       {:else}
-        <VideoView slot="preview" path={media.path} active={() => true} />
+        <VideoView slot="preview" path={media.path} active={() => true} logs={false} />
       {/if}
     </div>
   </div>
