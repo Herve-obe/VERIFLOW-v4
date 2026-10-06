@@ -2,5 +2,6 @@
 
 pub mod catalog;
 pub mod fields;
+pub mod preview;
 pub mod probe;
 pub mod wav;
