@@ -203,5 +203,22 @@
   "media.tech.duration": "Durée",
   "media.tech.size": "Taille",
   "media.tech.audio": "Audio",
-  "media.tech.error": "Erreur"
+  "media.tech.error": "Erreur",
+  "explorer.title": "Explorateur",
+  "explorer.volumes": "Volumes",
+  "explorer.favorites": "Favoris",
+  "explorer.project": "Projet",
+  "explorer.no.volume": "Aucun volume",
+  "explorer.no.favorite": "Clic droit sur un dossier : Épingler",
+  "explorer.pin": "Épingler dans les favoris",
+  "explorer.unpin": "Retirer des favoris",
+  "explorer.show": "Afficher l'explorateur (Ctrl+B)",
+  "explorer.hide": "Masquer l'explorateur (Ctrl+B)",
+  "explorer.use.source": "Utiliser comme source",
+  "explorer.add.dest": "Ajouter comme destination",
+  "explorer.open.media": "Afficher les médias",
+  "explorer.reveal": "Ouvrir dans le système",
+  "offload.drop.source": "Glisse ici une carte ou un dossier",
+  "offload.drop.dest": "Glisse ici un disque ou un dossier",
+  "media.truncated": "limite atteinte : choisis un sous-dossier plus précis"
 }

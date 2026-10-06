@@ -63,7 +63,11 @@ fn skip(name: &str) -> bool {
         || name.ends_with(".vfpart")
 }
 
-/// Liste les médias d'un dossier (récursif ou non), triés par chemin.
+/// Nombre maximal de médias listés (protège d'un parcours involontaire d'un disque entier).
+pub const MAX_ENTRIES: usize = 5000;
+
+/// Liste les médias d'un dossier (récursif ou non), triés par chemin,
+/// dans la limite de `MAX_ENTRIES`.
 pub fn list(dir: &Path, recursive: bool) -> Result<Vec<MediaEntry>> {
     let mut out = Vec::new();
     let walker = WalkDir::new(dir)

@@ -6,6 +6,9 @@
   import Wave from "./Wave.svelte";
   import Inspector from "./Inspector.svelte";
   import QuickPlayer from "./QuickPlayer.svelte";
+  import Explorer from "../../components/explorer/Explorer.svelte";
+  import { explorer } from "../../stores/explorer.svelte";
+  import { watch, norm } from "../../lib/explorer";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
@@ -52,7 +55,7 @@
     details = new Map();
     try {
       entries = await list(path, recursive);
-      status = `${entries.length} ${t("media.count")}`;
+      status = `${entries.length} ${t("media.count")}${entries.length >= 5000 ? ` (${t("media.truncated")})` : ""}`;
       await describeAll(entries.map((e) => e.path));
     } catch (e) {
       status = String(e);
@@ -60,6 +63,32 @@
       loading = false;
     }
   }
+
+  // Mise à jour en direct : les médias qui arrivent (offload en cours) apparaissent,
+  // ceux qui disparaissent sont retirés ; les descriptions déjà faites sont conservées.
+  $effect(() => {
+    watch("media-list", dir ? [dir] : [], recursive).catch(() => {});
+  });
+
+  let refreshTimer = 0;
+  $effect(() => {
+    void explorer.revision;
+    const d = dir ? norm(dir) : "";
+    if (!d || !explorer.lastChanged.some((c) => c === d || c.startsWith(`${d}/`))) return;
+    window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(async () => {
+      try {
+        const fresh = await list(dir, recursive);
+        const known = new Set(entries.map((e) => e.path));
+        const added = fresh.filter((e) => !known.has(e.path) || details.get(e.path)?.details === undefined);
+        entries = fresh;
+        status = `${entries.length} ${t("media.count")}`;
+        if (added.length > 0) await describeAll(added.map((e) => e.path));
+      } catch {
+        /* dossier retiré : la liste reste en l'état */
+      }
+    }, 800);
+  });
 
   // Descriptions par lots : la liste s'affiche tout de suite, les colonnes se remplissent ensuite.
   async function describeAll(paths: string[]) {
@@ -162,6 +191,16 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+<div class="layout">
+<Explorer
+  owner="media"
+  selected={dir || null}
+  onSelect={(p) => load(p)}
+  actions={[
+    { label: t("explorer.open.media"), run: (p) => load(p) },
+    { label: t("explorer.reveal"), run: (p) => reveal(p).catch(() => {}) },
+  ]}
+/>
 <div class="media">
   <div class="toolbar">
     <button onclick={choose}>{t("media.open")}</button>
@@ -204,7 +243,7 @@
             {#each visible as e, i (e.path)}
               <tr class:sel={selected.has(e.path)} onclick={(ev) => click(ev, i, e.path)} ondblclick={() => (quick = e)}>
                 <td class="pv">
-                  {#if e.kind === "audio"}<Wave path={e.path} width={120} height={28} />{:else}<Thumb path={e.path} width={72} />{/if}
+                  {#if e.kind === "audio"}<Wave path={e.path} width={80} height={28} />{:else}<Thumb path={e.path} width={64} />{/if}
                 </td>
                 <td class="name" title={e.rel}>{e.rel}{#if details.get(e.path)?.edited.length}<span class="dot" title={t("media.edited")}></span>{/if}</td>
                 <td class="mono">{duration(e)}</td>
@@ -235,13 +274,21 @@
   </div>
   <div class="statusline small">{status} {selection.length > 0 ? `· ${selection.length} ${t("media.selected")}` : ""}</div>
 </div>
+</div>
 
 {#if quick}
   <QuickPlayer media={quick} onClose={() => (quick = null)} />
 {/if}
 
 <style>
+  .layout {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+  }
   .media {
+    flex: 1;
+    min-width: 0;
     display: grid;
     grid-template-rows: auto 1fr auto;
     height: 100%;
@@ -348,10 +395,10 @@
     background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
   }
   .pv {
-    width: 124px;
+    width: 84px;
   }
   .name {
-    max-width: 320px;
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
   }

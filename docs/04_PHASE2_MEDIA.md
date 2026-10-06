@@ -28,6 +28,18 @@ Les originaux ne sont **jamais modifiés** :
    - WAV : bloc iXML réécrit, audio et autres blocs (bext, fmt...) copiés à l'identique ;
    - vidéo : recopie sans réencodage avec les étiquettes, timecode conservé.
 
+## Explorateur de dossiers (OFFLOAD et MEDIA), ajouté à la demande d'Hervé
+| Fonction | Réalisation |
+|---|---|
+| Contenu | Dossiers uniquement, en trois sections : **Volumes** (nom lisible, espace libre, HDD, amovible), **Favoris** (épinglés par clic droit), **Projet** (dossiers des offloads du projet ouvert) |
+| Mise à jour en direct | Volumes branchés ou retirés détectés en 2 s ; dossiers dépliés surveillés par le système (FSEvents, ReadDirectoryChangesW, inotify) ; disques réseau relus toutes les 5 s |
+| Légèreté | Sous-dossiers lus au dépliage, seuls les dossiers dépliés sont surveillés, dossiers système et cachés masqués |
+| OFFLOAD | Glisser-déposer vers Source ou Destinations ; double-clic = source ; clic droit : utiliser comme source, ajouter comme destination, ouvrir dans le système, épingler |
+| MEDIA | Clic sur un dossier = affichage de ses médias ; **la liste se met à jour en direct** (un clip copié pendant un offload apparaît avec sa vignette) ; inventaire plafonné à 5 000 médias pour éviter de parcourir un disque entier par erreur |
+| Interface | Panneau redimensionnable, repliable (Ctrl+B), largeur et état mémorisés |
+
+Essai réel (Linux) : arbre des volumes, dossier créé pendant que l'application tourne (apparu dans l'arbre), clip copié dans le dossier affiché (apparu dans la liste avec sa vignette et son TC), menu contextuel et glisser-déposer vers la source. Captures : `phase2_explorateur_*`.
+
 ## Champs éditables (résultat de la recherche demandée en question 24)
 | Groupe | Champs | Correspondances |
 |---|---|---|

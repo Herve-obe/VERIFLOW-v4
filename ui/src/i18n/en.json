@@ -203,5 +203,22 @@
   "media.tech.duration": "Duration",
   "media.tech.size": "Size",
   "media.tech.audio": "Audio",
-  "media.tech.error": "Error"
+  "media.tech.error": "Error",
+  "explorer.title": "Explorer",
+  "explorer.volumes": "Volumes",
+  "explorer.favorites": "Favorites",
+  "explorer.project": "Project",
+  "explorer.no.volume": "No volume",
+  "explorer.no.favorite": "Right-click a folder: Pin",
+  "explorer.pin": "Pin to favorites",
+  "explorer.unpin": "Remove from favorites",
+  "explorer.show": "Show explorer (Ctrl+B)",
+  "explorer.hide": "Hide explorer (Ctrl+B)",
+  "explorer.use.source": "Use as source",
+  "explorer.add.dest": "Add as destination",
+  "explorer.open.media": "Show media",
+  "explorer.reveal": "Open in system",
+  "offload.drop.source": "Drop a card or folder here",
+  "offload.drop.dest": "Drop a drive or folder here",
+  "media.truncated": "limit reached: pick a more specific subfolder"
 }
