@@ -1,6 +1,7 @@
 <!-- Logs du PLAYER : marqueurs (point ou plage), couleur, commentaire, scène,
      prise ; exports EDL, ALE, CSV, FCPXML, OTIO. Enregistrés dans le projet. -->
 <script lang="ts">
+  import { tick } from "svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -106,8 +107,9 @@
     markers = [...markers, saved];
     onChange(markers);
     if (range) onRangeUsed();
-    // Saisie du commentaire tout de suite.
-    queueMicrotask(() => document.getElementById(`marker-comment-${saved.id}`)?.focus());
+    // Saisie du commentaire tout de suite, dès que la ligne est affichée.
+    await tick();
+    document.getElementById(`marker-comment-${saved.id}`)?.focus();
   }
 
   async function update(m: Marker, patch: Partial<Marker>) {

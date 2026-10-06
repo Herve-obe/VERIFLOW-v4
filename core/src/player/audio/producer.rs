@@ -39,11 +39,22 @@ pub struct SessionInfo {
 }
 
 /// Mesures partagées avec l'interface.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LoudnessMeters {
     pub momentary: AtomicF32,
     pub short_term: AtomicF32,
     pub integrated: AtomicF32,
+}
+
+impl Default for LoudnessMeters {
+    /// Rien de mesuré : -inf (affiché « -inf »), et non 0 LUFS.
+    fn default() -> Self {
+        Self {
+            momentary: AtomicF32::new(f32::NEG_INFINITY),
+            short_term: AtomicF32::new(f32::NEG_INFINITY),
+            integrated: AtomicF32::new(f32::NEG_INFINITY),
+        }
+    }
 }
 
 /// Source d'un fichier : WAV/BWF/RF64 lu directement, autre format décodé par FFmpeg.
