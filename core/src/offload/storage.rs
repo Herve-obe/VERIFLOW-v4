@@ -29,6 +29,38 @@ fn kind_str(k: DiskKind) -> &'static str {
     }
 }
 
+/// Nom lisible d'un volume : nom du dossier de montage (/Volumes/CARTE, /media/CARTE),
+/// sinon étiquette du disque, sinon point de montage. Windows : « Étiquette (C:) ».
+fn display_name(mount: &Path, label: &str) -> String {
+    let label = label.trim();
+    if cfg!(windows) {
+        let letter = mount
+            .display()
+            .to_string()
+            .trim_end_matches(['\\', '/'])
+            .to_owned();
+        return if label.is_empty() {
+            format!("Disque local ({letter})")
+        } else {
+            format!("{label} ({letter})")
+        };
+    }
+    if let Some(f) = mount
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .filter(|f| !f.is_empty())
+    {
+        return f;
+    }
+    if !label.is_empty() && !label.starts_with("/dev/") {
+        return label.to_owned();
+    }
+    if mount == Path::new("/") {
+        return "Système (/)".to_owned();
+    }
+    mount.display().to_string()
+}
+
 /// Volumes montés, hors volumes système virtuels.
 pub fn volumes() -> Vec<Volume> {
     let disks = Disks::new_with_refreshed_list();
@@ -42,19 +74,7 @@ pub fn volumes() -> Vec<Volume> {
         })
         .map(|d| Volume {
             mount_point: d.mount_point().to_path_buf(),
-            name: {
-                let n = d.name().to_string_lossy().into_owned();
-                let mp = d.mount_point();
-                // Sous macOS et Linux, le nom du dossier de montage est le nom du volume.
-                mp.file_name()
-                    .map(|f| f.to_string_lossy().into_owned())
-                    .filter(|f| !f.is_empty())
-                    .unwrap_or(if n.is_empty() {
-                        mp.display().to_string()
-                    } else {
-                        n
-                    })
-            },
+            name: display_name(d.mount_point(), &d.name().to_string_lossy()),
             file_system: d.file_system().to_string_lossy().into_owned(),
             total: d.total_space(),
             available: d.available_space(),
@@ -138,5 +158,13 @@ mod tests {
             assert!(v.total >= v.available);
         }
         let _ = is_hdd(dir.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readable_volume_names() {
+        assert_eq!(display_name(Path::new("/"), "/dev/vda"), "Système (/)");
+        assert_eq!(display_name(Path::new("/"), "Macintosh HD"), "Macintosh HD");
+        assert_eq!(display_name(Path::new("/Volumes/A001"), "disk4s1"), "A001");
     }
 }

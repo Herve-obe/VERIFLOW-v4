@@ -2,6 +2,8 @@
 //! Ce fichier ne contient aucune logique métier : il traduit les appels.
 
 mod commands;
+mod explorer;
+mod media;
 mod offload;
 mod player;
 
@@ -21,9 +23,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .manage(player::PlayerState::default())
+        .manage(media::MediaState::default())
         .setup(|app| {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
+            app.manage(explorer::ExplorerState::new(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -46,6 +50,18 @@ pub fn run() {
             offload::offload_cancel,
             offload::offload_eject,
             offload::reveal,
+            explorer::explorer_list,
+            explorer::explorer_volumes,
+            explorer::explorer_project_roots,
+            explorer::explorer_watch,
+            media::media_fields,
+            media::media_list,
+            media::media_describe,
+            media::media_thumbnail,
+            media::media_filmstrip,
+            media::media_waveform,
+            media::media_set,
+            media::media_export,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");

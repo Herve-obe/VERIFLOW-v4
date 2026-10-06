@@ -1,12 +1,20 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { resolvePlayerAction } from "../../shortcuts";
   import { framesToTc, fps, type FrameRate } from "../../lib/timecode";
-  import { pickVideo, videoOpen, videoFrame, videoClose, type VideoClip } from "../../lib/player";
+  import { pickVideo, videoOpen, videoFrame, videoClose, type VideoClip, type Slot } from "../../lib/player";
+
+  // `slot` : emplacement du lecteur ; `path` : clip à ouvrir directement ;
+  // `active` : vrai quand les raccourcis clavier doivent agir sur cette vue.
+  let {
+    slot = "player",
+    path = null,
+    active = () => app.tab === "player" && app.mode === "video",
+  }: { slot?: Slot; path?: string | null; active?: () => boolean } = $props();
 
   let clip = $state<VideoClip | null>(null);
   let loading = $state(false);
@@ -34,12 +42,15 @@
   const tc = (i: number) => framesToTc((clip?.start_frame ?? 0) + i, rate, dropFrame);
 
   async function open() {
-    const path = await pickVideo(t("player.filter.video"));
-    if (!path) return;
+    const picked = await pickVideo(t("player.filter.video"));
+    if (picked) await load(picked);
+  }
+
+  async function load(path: string) {
     stop();
     loading = true;
     try {
-      clip = await videoOpen(path);
+      clip = await videoOpen(path, slot);
       markIn = markOut = null;
       await show(0);
       app.status = path;
@@ -62,7 +73,7 @@
     inFlight = true;
     try {
       const t0 = performance.now();
-      const buf = await videoFrame(i);
+      const buf = await videoFrame(i, slot);
       const t1 = performance.now();
       // Décodage JPEG natif du moteur web (rapide et asynchrone).
       const bitmap = await createImageBitmap(new Blob([buf], { type: "image/jpeg" }));
@@ -145,7 +156,7 @@
   const back = () => setSpeed(speed >= 0 ? -1 : Math.max(speed * 2, -8));
 
   function onKeydown(e: KeyboardEvent) {
-    if (!clip || app.tab !== "player" || app.mode !== "video") return;
+    if (!clip || !active()) return;
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
@@ -162,9 +173,17 @@
     }
   }
 
+  // Ouverture au changement de chemin uniquement : sans `untrack`, l'effet
+  // dépendrait aussi du clip lu dans `load` et rouvrirait le fichier en boucle
+  // (chaque réouverture arrêtant la lecture).
+  $effect(() => {
+    const p = path;
+    if (p) untrack(() => load(p));
+  });
+
   onDestroy(() => {
     pause();
-    videoClose().catch(() => {});
+    videoClose(slot).catch(() => {});
   });
 </script>
 

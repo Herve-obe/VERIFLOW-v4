@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import TopBar from "./layout/TopBar.svelte";
   import StatusBar from "./layout/StatusBar.svelte";
+  import DragGhost from "./components/DragGhost.svelte";
   import OffloadTab from "./tabs/offload/OffloadTab.svelte";
   import MediaTab from "./tabs/media/MediaTab.svelte";
   import PlayerTab from "./tabs/player/PlayerTab.svelte";
@@ -51,6 +52,7 @@
   </main>
   <StatusBar {version} />
 </div>
+<DragGhost />
 
 <style>
   .shell {

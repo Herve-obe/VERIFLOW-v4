@@ -1,6 +1,6 @@
 <!-- PLAYER AUDIO : multipiste jusqu'à 32 pistes, SOLO / MUTE / niveau / panoramique, crêtes et LUFS. -->
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
@@ -17,7 +17,14 @@
     audioTrack,
     audioStatus,
     type AudioOpened,
+    type Slot,
   } from "../../lib/player";
+
+  let {
+    slot = "player",
+    paths: initialPaths = null,
+    active = () => app.tab === "player" && app.mode === "audio",
+  }: { slot?: Slot; paths?: string[] | null; active?: () => boolean } = $props();
 
   interface Strip {
     name: string;
@@ -48,12 +55,15 @@
   const tcStart = $derived(first?.time_reference != null ? first.time_reference / first.sample_rate : null);
 
   async function open() {
-    const paths = await pickAudio(t("player.filter.audio"));
-    if (paths.length === 0) return;
+    const picked = await pickAudio(t("player.filter.audio"));
+    if (picked.length > 0) await load(picked);
+  }
+
+  async function load(paths: string[]) {
     loading = true;
     try {
       await close();
-      session = await audioOpen(paths);
+      session = await audioOpen(paths, slot);
       strips = session.session.tracks.map((tr) => ({
         name: tr.name,
         gain: 0,
@@ -76,7 +86,7 @@
 
   async function close() {
     window.clearInterval(timer);
-    if (session) await audioClose().catch(() => {});
+    if (session) await audioClose(slot).catch(() => {});
     session = null;
   }
 
@@ -89,7 +99,7 @@
 
   async function poll() {
     try {
-      const s = await audioStatus();
+      const s = await audioStatus(slot);
       const now = performance.now();
       const dt = (now - lastPoll) / 1000;
       lastPoll = now;
@@ -121,24 +131,24 @@
 
   const send = (i: number) => {
     const s = strips[i];
-    audioTrack(i, s.gain <= -60 ? -200 : s.gain, s.pan, s.mute, s.solo).catch((e) => (app.status = String(e)));
+    audioTrack(i, s.gain <= -60 ? -200 : s.gain, s.pan, s.mute, s.solo, slot).catch((e) => (app.status = String(e)));
   };
-  const sendMaster = () => audioTrack(-1, master.gain <= -60 ? -200 : master.gain, 0, false, false);
+  const sendMaster = () => audioTrack(-1, master.gain <= -60 ? -200 : master.gain, 0, false, false, slot);
 
-  const toggle = () => audioTransport(playing ? "pause" : "play").then(() => (playing = !playing));
-  const stop = () => audioTransport("stop").then(() => (playing = false));
-  const seekBy = (s: number) => audioSeek(Math.min(Math.max(0, position + s), duration));
+  const toggle = () => audioTransport(playing ? "pause" : "play", slot).then(() => (playing = !playing));
+  const stop = () => audioTransport("stop", slot).then(() => (playing = false));
+  const seekBy = (s: number) => audioSeek(Math.min(Math.max(0, position + s), duration), slot);
 
   function onKeydown(e: KeyboardEvent) {
-    if (!session || app.tab !== "player" || app.mode !== "audio") return;
+    if (!session || !active()) return;
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
     switch (action) {
       case "play.toggle": toggle(); break;
       case "play.stop": stop(); break;
-      case "shuttle.forward": audioTransport("play"); break;
-      case "shuttle.pause": audioTransport("pause"); break;
+      case "shuttle.forward": audioTransport("play", slot); break;
+      case "shuttle.pause": audioTransport("pause", slot); break;
       case "shuttle.back": seekBy(-5); break;
       case "step.forward": seekBy(1); break;
       case "step.back": seekBy(-1); break;
@@ -147,6 +157,12 @@
 
   const fmt = (v: number | null) => (v === null ? "-inf" : v.toFixed(1));
   const fmtDb = (v: number) => (v <= -60 ? "-inf" : (v > 0 ? "+" : "") + v.toFixed(1));
+
+  // Ouverture au changement de fichiers uniquement (voir VideoView).
+  $effect(() => {
+    const p = initialPaths;
+    if (p && p.length > 0) untrack(() => load(p));
+  });
 
   onDestroy(close);
 </script>
@@ -186,7 +202,7 @@
       max={duration}
       step="0.01"
       value={position}
-      oninput={(e) => audioSeek(Number(e.currentTarget.value))}
+      oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
     />
 
     <div class="console">

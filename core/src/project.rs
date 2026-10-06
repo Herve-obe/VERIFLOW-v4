@@ -3,6 +3,7 @@
 //! Un projet = une production. Il est stocké dans un seul fichier, qui est une
 //! base SQLite : pas de serveur, copiable et archivable avec les rushes.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{SecondsFormat, Utc};
@@ -55,6 +56,14 @@ const MIGRATIONS: &[&str] = &[
          modified   TEXT NOT NULL,
          hashes     TEXT NOT NULL,
          statuses   TEXT NOT NULL
+     );",
+    // v3 : métadonnées éditées par l'utilisateur (jamais écrites dans les originaux).
+    "CREATE TABLE media_meta (
+         path       TEXT NOT NULL,
+         field      TEXT NOT NULL,
+         value      TEXT NOT NULL,
+         updated_at TEXT NOT NULL,
+         PRIMARY KEY (path, field)
      );",
 ];
 
@@ -278,6 +287,91 @@ impl Project {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Dossiers de destination des offloads du projet (plus récents d'abord, sans doublon).
+    pub fn offload_roots(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT destinations FROM offloads ORDER BY id DESC")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out: Vec<String> = Vec::new();
+        for row in rows {
+            for d in serde_json::from_str::<Vec<String>>(&row?).unwrap_or_default() {
+                if !out.contains(&d) {
+                    out.push(d);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Modifie des champs sur un ou plusieurs médias (édition par lot).
+    /// Une valeur vide efface le champ. Renvoie le nombre de champs écrits.
+    pub fn set_media_meta(
+        &self,
+        paths: &[String],
+        values: &BTreeMap<String, String>,
+    ) -> Result<usize> {
+        use crate::media::fields::{is_valid, normalize};
+        let tx = self.conn.unchecked_transaction()?;
+        let mut count = 0;
+        let at = now();
+        for path in paths {
+            for (field, value) in values {
+                if !is_valid(field) {
+                    continue;
+                }
+                let v = normalize(field, value);
+                if v.is_empty() {
+                    tx.execute(
+                        "DELETE FROM media_meta WHERE path = ?1 AND field = ?2",
+                        params![path, field],
+                    )?;
+                } else {
+                    tx.execute(
+                        "INSERT INTO media_meta (path, field, value, updated_at) VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(path, field) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        params![path, field, v, at],
+                    )?;
+                }
+                count += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// Champs édités d'un média.
+    pub fn media_meta(&self, path: &str) -> Result<BTreeMap<String, String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT field, value FROM media_meta WHERE path = ?1")?;
+        let rows = stmt.query_map([path], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Champs édités de tous les médias d'un dossier (préfixe de chemin).
+    pub fn media_meta_under(
+        &self,
+        dir: &str,
+    ) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, field, value FROM media_meta WHERE substr(path, 1, length(?1)) = ?1",
+        )?;
+        let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        let rows = stmt.query_map([dir], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (p, f, v) = row?;
+            out.entry(p).or_default().insert(f, v);
+        }
+        Ok(out)
+    }
+
     pub fn info(&self) -> Result<ProjectInfo> {
         Ok(ProjectInfo {
             path: self.path.display().to_string(),
@@ -384,8 +478,32 @@ mod tests {
         p.record_offload(&job, &src).unwrap();
         let prev = p.previous_offloads(&fp).unwrap();
         assert_eq!(prev.len(), 1);
+        assert_eq!(p.offload_roots().unwrap(), prev[0].destinations);
         assert_eq!(prev[0].source_name, "A001");
         assert!(prev[0].destinations[0].ends_with("A001"));
+    }
+
+    #[test]
+    fn edits_media_metadata_in_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Project::create(&dir.path().join("p.veriflow"), None).unwrap();
+        let paths = vec!["/r/A/C1.MOV".to_string(), "/r/A/C2.MOV".to_string()];
+        let mut v = BTreeMap::new();
+        v.insert("scene".into(), "12".into());
+        v.insert("circled".into(), "oui".into());
+        v.insert("inconnu".into(), "x".into());
+        assert_eq!(p.set_media_meta(&paths, &v).unwrap(), 4);
+        let m = p.media_meta("/r/A/C2.MOV").unwrap();
+        assert_eq!(m.get("scene").map(String::as_str), Some("12"));
+        assert_eq!(m.get("circled").map(String::as_str), Some("true"));
+        assert!(!m.contains_key("inconnu"));
+        // Valeur vide : champ effacé pour un seul média.
+        let mut clear = BTreeMap::new();
+        clear.insert("scene".into(), String::new());
+        p.set_media_meta(&paths[..1], &clear).unwrap();
+        let all = p.media_meta_under("/r/A/").unwrap();
+        assert!(!all["/r/A/C1.MOV"].contains_key("scene"));
+        assert_eq!(all["/r/A/C2.MOV"]["scene"], "12");
     }
 
     #[test]

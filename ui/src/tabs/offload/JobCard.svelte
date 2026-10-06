@@ -8,6 +8,12 @@
 
   let { job }: { job: Job } = $props();
   let showAll = $state(false);
+  let openError = $state("");
+
+  const open = (path: string) => {
+    openError = "";
+    reveal(path).catch((e) => (openError = String(e)));
+  };
 
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
   const eta = $derived(job.rate > 0 && job.total > 0 ? ((job.total - job.done) / (job.rate * (1 + job.roots.length))) : NaN);
@@ -65,12 +71,13 @@
     {/if}
     <div class="actions">
       {#each job.result.reports as r, i (r.pdf)}
-        <button onclick={() => reveal(r.pdf)}>{t("offload.report.pdf")} {i + 1}</button>
+        <button onclick={() => open(r.pdf)}>{t("offload.report.pdf")} {i + 1}</button>
       {/each}
       {#each job.result.roots as root, i (root)}
-        <button class="ghost" onclick={() => reveal(root)}>{t("offload.open.folder")} {i + 1}</button>
+        <button class="ghost" onclick={() => open(root)}>{t("offload.open.folder")} {i + 1}</button>
       {/each}
     </div>
+    {#if openError}<div class="small err">{openError}</div>{/if}
   {/if}
 
   {#if job.error}

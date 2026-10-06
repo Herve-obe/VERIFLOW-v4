@@ -1,5 +1,6 @@
 //! Commandes du PLAYER : lecture vidéo image par image et moteur audio multipiste.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -15,10 +16,12 @@ use veriflow_core::player::video::{FrameFormat, VideoClip, VideoPlayer};
 /// Taille maximale des images envoyées à l'interface (aperçu).
 const PREVIEW_MAX: (u32, u32) = (1280, 720);
 
+/// Lecteurs ouverts, par emplacement : « player » (onglet PLAYER) et
+/// « preview » (lecteur rapide de l'onglet MEDIA). Les deux sont indépendants.
 #[derive(Default)]
 pub struct PlayerState {
-    video: Arc<Mutex<Option<VideoPlayer>>>,
-    audio: Mutex<Option<AudioEngine>>,
+    video: Arc<Mutex<HashMap<String, VideoPlayer>>>,
+    audio: Mutex<HashMap<String, AudioEngine>>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -30,13 +33,17 @@ fn text<E: std::fmt::Display>(e: E) -> String {
 // ---------- Vidéo ----------
 
 #[tauri::command]
-pub async fn video_open(path: PathBuf, state: State<'_, PlayerState>) -> CmdResult<VideoClip> {
-    let slot = state.video.clone();
+pub async fn video_open(
+    path: PathBuf,
+    slot: String,
+    state: State<'_, PlayerState>,
+) -> CmdResult<VideoClip> {
+    let players = state.video.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let player = VideoPlayer::open(&path, PREVIEW_MAX.0, PREVIEW_MAX.1, FrameFormat::Jpeg)
             .map_err(text)?;
         let clip = player.clip().clone();
-        *slot.lock().map_err(text)? = Some(player);
+        players.lock().map_err(text)?.insert(slot, player);
         Ok(clip)
     })
     .await
@@ -45,11 +52,15 @@ pub async fn video_open(path: PathBuf, state: State<'_, PlayerState>) -> CmdResu
 
 /// Renvoie l'image demandée, encodée en JPEG (taille d'affichage du clip).
 #[tauri::command]
-pub async fn video_frame(index: i64, state: State<'_, PlayerState>) -> CmdResult<Response> {
-    let slot = state.video.clone();
+pub async fn video_frame(
+    index: i64,
+    slot: String,
+    state: State<'_, PlayerState>,
+) -> CmdResult<Response> {
+    let players = state.video.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut guard = slot.lock().map_err(text)?;
-        let player = guard.as_mut().ok_or("aucun clip vidéo ouvert")?;
+        let mut guard = players.lock().map_err(text)?;
+        let player = guard.get_mut(&slot).ok_or("aucun clip vidéo ouvert")?;
         let frame = player
             .frame(index)
             .map_err(text)?
@@ -61,8 +72,8 @@ pub async fn video_frame(index: i64, state: State<'_, PlayerState>) -> CmdResult
 }
 
 #[tauri::command]
-pub fn video_close(state: State<'_, PlayerState>) -> CmdResult<()> {
-    *state.video.lock().map_err(text)? = None;
+pub fn video_close(slot: String, state: State<'_, PlayerState>) -> CmdResult<()> {
+    state.video.lock().map_err(text)?.remove(&slot);
     Ok(())
 }
 
@@ -77,10 +88,11 @@ pub struct AudioOpened {
 #[tauri::command]
 pub async fn audio_open(
     paths: Vec<PathBuf>,
+    slot: String,
     state: State<'_, PlayerState>,
 ) -> CmdResult<AudioOpened> {
-    // Ferme la session précédente avant d'ouvrir la carte son.
-    *state.audio.lock().map_err(text)? = None;
+    // Ferme la session précédente de cet emplacement avant d'ouvrir la carte son.
+    state.audio.lock().map_err(text)?.remove(&slot);
     let engine = tauri::async_runtime::spawn_blocking(move || AudioEngine::open(&paths))
         .await
         .map_err(text)?
@@ -89,26 +101,34 @@ pub async fn audio_open(
         session: engine.info().clone(),
         output: engine.output().clone(),
     };
-    *state.audio.lock().map_err(text)? = Some(engine);
+    state.audio.lock().map_err(text)?.insert(slot, engine);
     Ok(opened)
 }
 
 #[tauri::command]
-pub fn audio_close(state: State<'_, PlayerState>) -> CmdResult<()> {
-    *state.audio.lock().map_err(text)? = None;
+pub fn audio_close(slot: String, state: State<'_, PlayerState>) -> CmdResult<()> {
+    state.audio.lock().map_err(text)?.remove(&slot);
     Ok(())
 }
 
-fn with_audio<T>(state: &PlayerState, f: impl FnOnce(&AudioEngine) -> T) -> CmdResult<T> {
+fn with_audio<T>(
+    state: &PlayerState,
+    slot: &str,
+    f: impl FnOnce(&AudioEngine) -> T,
+) -> CmdResult<T> {
     let guard = state.audio.lock().map_err(text)?;
-    let engine = guard.as_ref().ok_or("aucune session audio ouverte")?;
+    let engine = guard.get(slot).ok_or("aucune session audio ouverte")?;
     Ok(f(engine))
 }
 
 /// Transport : "play", "pause" ou "stop".
 #[tauri::command]
-pub fn audio_transport(action: String, state: State<'_, PlayerState>) -> CmdResult<()> {
-    with_audio(&state, |e| match action.as_str() {
+pub fn audio_transport(
+    action: String,
+    slot: String,
+    state: State<'_, PlayerState>,
+) -> CmdResult<()> {
+    with_audio(&state, &slot, |e| match action.as_str() {
         "play" => e.play(),
         "pause" => e.pause(),
         "stop" => e.stop(),
@@ -117,8 +137,8 @@ pub fn audio_transport(action: String, state: State<'_, PlayerState>) -> CmdResu
 }
 
 #[tauri::command]
-pub fn audio_seek(seconds: f64, state: State<'_, PlayerState>) -> CmdResult<()> {
-    with_audio(&state, |e| {
+pub fn audio_seek(seconds: f64, slot: String, state: State<'_, PlayerState>) -> CmdResult<()> {
+    with_audio(&state, &slot, |e| {
         e.seek((seconds.max(0.0) * e.info().sample_rate as f64) as u64)
     })
 }
@@ -131,9 +151,10 @@ pub fn audio_track(
     pan: f32,
     mute: bool,
     solo: bool,
+    slot: String,
     state: State<'_, PlayerState>,
 ) -> CmdResult<()> {
-    with_audio(&state, |e| {
+    with_audio(&state, &slot, |e| {
         let c = e.controls();
         if index < 0 {
             c.master_gain.set(db_to_gain(gain_db));
@@ -163,8 +184,8 @@ fn finite(v: f32) -> Option<f32> {
 }
 
 #[tauri::command]
-pub fn audio_status(state: State<'_, PlayerState>) -> CmdResult<AudioStatus> {
-    with_audio(&state, |e| {
+pub fn audio_status(slot: String, state: State<'_, PlayerState>) -> CmdResult<AudioStatus> {
+    with_audio(&state, &slot, |e| {
         let c = e.controls();
         let l = e.loudness();
         AudioStatus {

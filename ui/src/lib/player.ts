@@ -60,19 +60,23 @@ export async function pickAudio(label: string): Promise<string[]> {
   return Array.isArray(r) ? r : [r];
 }
 
-export const videoOpen = (path: string) => invoke<VideoClip>("video_open", { path });
+/** Emplacement du lecteur : « player » (onglet PLAYER) ou « preview » (lecteur rapide de MEDIA). */
+export type Slot = "player" | "preview";
+
+export const videoOpen = (path: string, slot: Slot = "player") => invoke<VideoClip>("video_open", { path, slot });
 /** Image JPEG encodée. Selon le canal IPC utilisé, Tauri renvoie un ArrayBuffer
  *  (canal rapide) ou un tableau de nombres (canal de secours) : on normalise. */
-export async function videoFrame(index: number): Promise<Uint8Array<ArrayBuffer>> {
-  const raw = await invoke<ArrayBuffer | number[]>("video_frame", { index });
+export async function videoFrame(index: number, slot: Slot = "player"): Promise<Uint8Array<ArrayBuffer>> {
+  const raw = await invoke<ArrayBuffer | number[]>("video_frame", { index, slot });
   return raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
 }
-export const videoClose = () => invoke<void>("video_close");
+export const videoClose = (slot: Slot = "player") => invoke<void>("video_close", { slot });
 
-export const audioOpen = (paths: string[]) => invoke<AudioOpened>("audio_open", { paths });
-export const audioClose = () => invoke<void>("audio_close");
-export const audioTransport = (action: "play" | "pause" | "stop") => invoke<void>("audio_transport", { action });
-export const audioSeek = (seconds: number) => invoke<void>("audio_seek", { seconds });
-export const audioTrack = (index: number, gainDb: number, pan: number, mute: boolean, solo: boolean) =>
-  invoke<void>("audio_track", { index, gainDb, pan, mute, solo });
-export const audioStatus = () => invoke<AudioStatus>("audio_status");
+export const audioOpen = (paths: string[], slot: Slot = "player") => invoke<AudioOpened>("audio_open", { paths, slot });
+export const audioClose = (slot: Slot = "player") => invoke<void>("audio_close", { slot });
+export const audioTransport = (action: "play" | "pause" | "stop", slot: Slot = "player") =>
+  invoke<void>("audio_transport", { action, slot });
+export const audioSeek = (seconds: number, slot: Slot = "player") => invoke<void>("audio_seek", { seconds, slot });
+export const audioTrack = (index: number, gainDb: number, pan: number, mute: boolean, solo: boolean, slot: Slot = "player") =>
+  invoke<void>("audio_track", { index, gainDb, pan, mute, solo, slot });
+export const audioStatus = (slot: Slot = "player") => invoke<AudioStatus>("audio_status", { slot });

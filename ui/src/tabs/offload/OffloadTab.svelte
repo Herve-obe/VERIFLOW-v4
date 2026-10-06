@@ -4,11 +4,13 @@
   import { onMount } from "svelte";
   import { open, confirm } from "@tauri-apps/plugin-dialog";
   import JobCard from "./JobCard.svelte";
+  import Explorer from "../../components/explorer/Explorer.svelte";
+  import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, reveal, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -101,6 +103,23 @@
     if (typeof r === "string" && !destinations.includes(r)) destinations = [...destinations, r];
   }
 
+  let picked = $state<string | null>(null);
+
+  function addDestPath(p: string) {
+    if (p && p !== source && !destinations.includes(p)) destinations = [...destinations, p];
+  }
+
+  // Dépôts depuis l'explorateur de VERIFLOW ou depuis le système.
+  startNativeDrop();
+  const sourceZone = { name: "source", accept: (paths: string[]) => (source = paths[0]) };
+  const destZone = { name: "dest", accept: (paths: string[]) => paths.forEach(addDestPath) };
+
+  const explorerActions = [
+    { label: t("explorer.use.source"), run: (p: string) => (source = p) },
+    { label: t("explorer.add.dest"), run: addDestPath },
+    { label: t("explorer.reveal"), run: (p: string) => reveal(p).catch(() => {}) },
+  ];
+
   function toggleAlgo(id: HashAlgo) {
     algorithms = algorithms.includes(id) ? algorithms.filter((a) => a !== id) : [...algorithms, id];
   }
@@ -132,11 +151,25 @@
   });
 </script>
 
+<div class="layout">
+<Explorer
+  owner="offload"
+  selected={picked}
+  onSelect={(p) => (picked = p)}
+  onActivate={(p) => (source = p)}
+  actions={explorerActions}
+/>
 <div class="offload">
   <section class="setup">
     <h2>{t("offload.title")} <span class="mode">{t("mode." + app.mode)}</span></h2>
 
-    <div class="block">
+    <div
+      class="block drop"
+      class:over={drag.over === "source"}
+      role="region"
+      aria-label={t("offload.source")}
+      use:dropZone={sourceZone}
+    >
       <div class="row">
         <h3>{t("offload.source")}</h3>
         <button class="ghost small" onclick={refreshVolumes}>{t("offload.refresh")}</button>
@@ -155,9 +188,16 @@
         <input class="path" readonly value={source} placeholder={t("offload.source.none")} />
         <button onclick={pickSource}>{t("offload.browse")}</button>
       </div>
+      <p class="muted small">{t("offload.drop.source")}</p>
     </div>
 
-    <div class="block">
+    <div
+      class="block drop"
+      class:over={drag.over === "dest"}
+      role="region"
+      aria-label={t("offload.destinations")}
+      use:dropZone={destZone}
+    >
       <h3>{t("offload.destinations")}</h3>
       {#each destinations as d, i (d)}
         <div class="row dest">
@@ -168,6 +208,7 @@
         </div>
       {/each}
       <button class="add" onclick={addDestination}>+ {t("offload.dest.add")}</button>
+      <p class="muted small">{t("offload.drop.dest")}</p>
     </div>
 
     <div class="block grid">
@@ -224,9 +265,21 @@
     {/each}
   </section>
 </div>
+</div>
 
 <style>
+  .layout {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+  }
+  .drop.over {
+    border-color: var(--vf-accent);
+    box-shadow: inset 0 0 0 1px var(--vf-accent);
+  }
   .offload {
+    flex: 1;
+    min-width: 0;
     display: grid;
     grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
     gap: var(--vf-space-4);
