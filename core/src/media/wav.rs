@@ -52,6 +52,23 @@ pub struct WavInfo {
 }
 
 impl WavInfo {
+    /// Description d'un flux décodé par FFmpeg (flottant 32 bits entrelacé),
+    /// pour les médias qui ne sont pas des WAV (son des vidéos, MP3, FLAC...).
+    pub(crate) fn decoded(path: &Path, channels: u16, sample_rate: u32, frames: u64) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            channels,
+            sample_rate,
+            bits: 32,
+            format: SampleFormat::Float,
+            frames,
+            time_reference: None,
+            ixml: IxmlInfo::default(),
+            data_offset: 0,
+            block_align: channels * 4,
+        }
+    }
+
     pub fn duration(&self) -> f64 {
         self.frames as f64 / self.sample_rate as f64
     }

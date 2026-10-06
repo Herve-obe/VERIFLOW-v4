@@ -11,6 +11,7 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler};
 use serde::Serialize;
 
+use super::decoded::DecodedReader;
 use super::mixer::{mix, AtomicF32, MixerControls};
 use crate::media::wav::{WavInfo, WavReader};
 use crate::{Error, Result};
@@ -45,8 +46,43 @@ pub struct LoudnessMeters {
     pub integrated: AtomicF32,
 }
 
+/// Source d'un fichier : WAV/BWF/RF64 lu directement, autre format décodé par FFmpeg.
+enum Source {
+    Wav(WavReader),
+    Decoded(DecodedReader),
+}
+
+impl Source {
+    /// Sources d'un fichier : une pour un WAV, une par piste son sinon.
+    fn open(path: &std::path::Path) -> Result<Vec<Self>> {
+        match WavReader::open(path) {
+            Ok(r) => Ok(vec![Source::Wav(r)]),
+            Err(wav_err) => match DecodedReader::open_all(path) {
+                Ok(r) => Ok(r.into_iter().map(Source::Decoded).collect()),
+                // FFmpeg absent : l'erreur WAV est plus parlante.
+                Err(Error::ToolMissing(_)) => Err(wav_err),
+                Err(e) => Err(e),
+            },
+        }
+    }
+
+    fn info(&self) -> &WavInfo {
+        match self {
+            Source::Wav(r) => r.info(),
+            Source::Decoded(r) => r.info(),
+        }
+    }
+
+    fn read(&mut self, start: u64, frames: usize, out: &mut Vec<f32>) -> Result<usize> {
+        match self {
+            Source::Wav(r) => r.read(start, frames, out),
+            Source::Decoded(r) => r.read(start, frames, out),
+        }
+    }
+}
+
 pub struct Producer {
-    readers: Vec<WavReader>,
+    readers: Vec<Source>,
     info: SessionInfo,
     controls: Arc<MixerControls>,
     meters: Arc<LoudnessMeters>,
@@ -71,8 +107,11 @@ impl Producer {
         }
         let readers = paths
             .iter()
-            .map(|p| WavReader::open(p))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|p| Source::open(p))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         let sample_rate = readers[0].info().sample_rate;
         if let Some(r) = readers.iter().find(|r| r.info().sample_rate != sample_rate) {
             return Err(Error::Unsupported(format!(
