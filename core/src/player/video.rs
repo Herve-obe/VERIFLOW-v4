@@ -107,6 +107,7 @@ impl Decoder {
         timing: Timing,
         size: (u32, u32),
         format: FrameFormat,
+        lut: Option<&Path>,
     ) -> Result<Self> {
         // Saut précis à l'image, y compris en GOP long avec images B :
         // 1. on se place une seconde avant la cible (FFmpeg repart de l'image
@@ -116,10 +117,14 @@ impl Decoder {
         //    précédente pour être insensible aux arrondis.
         let target = timing.start_time + (start as f64 - 0.5) * timing.frame_duration;
         let seek = (target - timing.preroll).max(0.0);
-        let filter = format!(
+        let mut filter = format!(
             "select=gte(t\\,{target:.6}),scale={}:{}:flags=bilinear",
             size.0, size.1
         );
+        // LUT d'affichage appliquée sur l'image réduite (rapide), jamais au fichier.
+        if let Some(lut) = lut {
+            filter += &lut_filter(lut);
+        }
         let mut child = tools::command("ffmpeg")?
             .args(["-v", "error", "-nostdin", "-copyts", "-noaccurate_seek"])
             .args(["-ss", &format!("{seek:.6}"), "-i"])
@@ -203,6 +208,63 @@ impl Drop for Decoder {
     }
 }
 
+/// Filtre `lut3d` pour un fichier LUT (.cube, .3dl...). FFmpeg demande deux
+/// niveaux d'échappement : valeur de l'option (`\` `'` `:`), puis graphe de
+/// filtres (`\` `'` `[` `]` `,` `;`). Les barres obliques inverses de Windows
+/// sont remplacées par des barres obliques, acceptées par FFmpeg.
+fn lut_filter(lut: &Path) -> String {
+    let path = lut.display().to_string().replace('\\', "/");
+    let mut option = String::new();
+    for c in path.chars() {
+        if matches!(c, '\\' | '\'' | ':') {
+            option.push('\\');
+        }
+        option.push(c);
+    }
+    let mut graph = String::new();
+    for c in option.chars() {
+        if matches!(c, '\\' | '\'' | '[' | ']' | ',' | ';') {
+            graph.push('\\');
+        }
+        graph.push(c);
+    }
+    format!(",lut3d=file={graph}:interp=tetrahedral")
+}
+
+/// Vérifie qu'une LUT est lisible par FFmpeg (message d'erreur explicite sinon).
+pub fn check_lut(lut: &Path) -> Result<()> {
+    if !lut.is_file() {
+        return Err(Error::NotFound(lut.display().to_string()));
+    }
+    let out = tools::command("ffmpeg")?
+        .args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=16x16:duration=0.04",
+        ])
+        .args(["-frames:v", "1", "-vf"])
+        .arg(format!("scale=16:16{}", lut_filter(lut)))
+        .args(["-f", "null", "-"])
+        .stdin(Stdio::null())
+        .output()?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Tool {
+            tool: "ffmpeg".into(),
+            message: format!(
+                "LUT illisible ({}) : {}",
+                lut.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        })
+    }
+}
+
 /// Informations envoyées à l'interface à l'ouverture d'un clip.
 #[derive(Debug, Clone, Serialize)]
 pub struct VideoClip {
@@ -221,6 +283,7 @@ pub struct VideoPlayer {
     format: FrameFormat,
     decoder: Option<Decoder>,
     cache: VecDeque<(i64, FrameData)>,
+    lut: Option<PathBuf>,
 }
 
 impl VideoPlayer {
@@ -253,11 +316,28 @@ impl VideoPlayer {
             format,
             decoder: None,
             cache: VecDeque::with_capacity(CACHE),
+            lut: None,
         })
     }
 
     pub fn clip(&self) -> &VideoClip {
         &self.clip
+    }
+
+    /// Applique (ou retire avec `None`) une LUT d'affichage. Les images déjà
+    /// décodées sont oubliées.
+    pub fn set_lut(&mut self, lut: Option<&Path>) -> Result<()> {
+        if let Some(l) = lut {
+            check_lut(l)?;
+        }
+        self.lut = lut.map(Path::to_path_buf);
+        self.cache.clear();
+        self.decoder = None;
+        Ok(())
+    }
+
+    pub fn lut(&self) -> Option<&Path> {
+        self.lut.as_deref()
     }
 
     fn remember(&mut self, index: i64, frame: FrameData) {
@@ -283,6 +363,7 @@ impl VideoPlayer {
                 self.timing,
                 (self.clip.display_width, self.clip.display_height),
                 self.format,
+                self.lut.as_deref(),
             )?);
         }
         loop {
@@ -319,6 +400,30 @@ mod tests {
         assert_eq!(read_jpeg(&mut r).unwrap().unwrap(), a);
         assert_eq!(read_jpeg(&mut r).unwrap().unwrap(), b);
         assert!(read_jpeg(&mut r).unwrap().is_none());
+    }
+
+    #[test]
+    fn lut_paths_are_escaped_for_ffmpeg() {
+        assert_eq!(
+            lut_filter(Path::new("C:\\LUTs\\a b.cube")),
+            ",lut3d=file=C\\\\:/LUTs/a b.cube:interp=tetrahedral"
+        );
+        if tools::locate("ffmpeg").is_none() {
+            return;
+        }
+        // Nom réel contenant « : » et « , » (possible sous Linux et macOS).
+        let dir = tempfile::tempdir().unwrap();
+        let lut = dir.path().join("Rec709:LogC,v2.cube");
+        let mut cube = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 {
+            for g in 0..2 {
+                for r in 0..2 {
+                    cube += &format!("{r} {g} {b}\n");
+                }
+            }
+        }
+        std::fs::write(&lut, cube).unwrap();
+        check_lut(&lut).unwrap();
     }
 
     #[test]

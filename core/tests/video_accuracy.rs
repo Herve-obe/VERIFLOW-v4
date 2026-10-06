@@ -82,3 +82,45 @@ fn frame_accurate_seeks() {
     );
     check_seek_accuracy(&ntsc);
 }
+
+#[test]
+fn display_lut_is_applied_and_removed() {
+    if tools::locate("ffmpeg").is_none() || tools::locate("ffprobe").is_none() {
+        eprintln!("FFmpeg absent : test ignoré");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let clip = make_clip(dir.path(), "lut.mov", "25", &["-c:v", "mjpeg", "-q:v", "2"]);
+    // LUT 2x2x2 qui inverse les couleurs (rouge varie le plus vite).
+    let mut cube = String::from("TITLE \"inverse\"\nLUT_3D_SIZE 2\n");
+    for b in 0..2 {
+        for g in 0..2 {
+            for r in 0..2 {
+                cube += &format!("{} {} {}\n", 1 - r, 1 - g, 1 - b);
+            }
+        }
+    }
+    // Chemin avec espace et apostrophe : vérifie l'échappement du filtre.
+    let lut = dir.path().join("L'inverse 1.cube");
+    std::fs::write(&lut, cube).unwrap();
+
+    let mut p = VideoPlayer::open(&clip, 320, 180, FrameFormat::Rgba).unwrap();
+    let plain = p.frame(10).unwrap().unwrap();
+    p.set_lut(Some(&lut)).unwrap();
+    let graded = p.frame(10).unwrap().unwrap();
+    // Chaque composante devient environ 255 - composante (tolérance de compression).
+    let mut err = 0u64;
+    for (a, b) in plain.chunks(4).zip(graded.chunks(4)) {
+        for c in 0..3 {
+            err += (255 - a[c] as i64 - b[c] as i64).unsigned_abs();
+        }
+    }
+    let mean = err as f64 / (plain.len() / 4 * 3) as f64;
+    assert!(mean < 6.0, "écart moyen à l'inverse : {mean}");
+    p.set_lut(None).unwrap();
+    assert_eq!(p.frame(10).unwrap().unwrap(), plain);
+
+    let bad = dir.path().join("faux.cube");
+    std::fs::write(&bad, "pas une LUT").unwrap();
+    assert!(p.set_lut(Some(&bad)).is_err());
+}
