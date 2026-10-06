@@ -40,7 +40,7 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 - Preuve de non-modification : le PDF et le HTML impriment l'empreinte SHA-256 du CSV de données et des MHL ; l'empreinte du PDF est dans `<rapport>.pdf.sha256`.
 
 ## Essais
-- 59 tests automatiques du cœur passent, dont :
+- 50 tests automatiques du cœur passent (49 unitaires, 1 d'intégration vidéo), dont :
   - empreintes identiques aux vecteurs de l'outil de référence ASC ;
   - copie vers deux destinations ;
   - reprise sans recopie ;
