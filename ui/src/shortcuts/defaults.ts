@@ -26,3 +26,27 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, Shortcut> = {
   "tab.transcode": { key: "5", alt: true },
   "tab.report": { key: "6", alt: true },
 };
+
+// Raccourcis de lecture, communs aux modes VIDEO et AUDIO (charte §7.3).
+export type PlayerAction =
+  | "play.toggle"
+  | "play.stop"
+  | "shuttle.back"
+  | "shuttle.pause"
+  | "shuttle.forward"
+  | "step.back"
+  | "step.forward"
+  | "mark.in"
+  | "mark.out";
+
+export const PLAYER_SHORTCUTS: Record<PlayerAction, Shortcut> = {
+  "play.toggle": { key: " " },
+  "play.stop": { key: "Enter" },
+  "shuttle.back": { key: "j" },
+  "shuttle.pause": { key: "k" },
+  "shuttle.forward": { key: "l" },
+  "step.back": { key: "ArrowLeft" },
+  "step.forward": { key: "ArrowRight" },
+  "mark.in": { key: "i" },
+  "mark.out": { key: "o" },
+};

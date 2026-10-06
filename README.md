@@ -5,7 +5,7 @@ copie sécurisée avec checksums et ASC MHL, visionnage, logs, synchronisation, 
 
 Windows 10/11, macOS 12+ (Apple Silicon et Intel), Linux.
 
-**Statut : développement (phase 0, socle).** La charte du projet est dans [`docs/01_CHARTE.md`](docs/01_CHARTE.md).
+**Statut : développement (phase 0 bis : prototype du PLAYER validé).** La charte du projet est dans [`docs/01_CHARTE.md`](docs/01_CHARTE.md).
 
 ## Onglets
 
@@ -14,7 +14,14 @@ Deux modes, **VIDEO** et **AUDIO** (bascule avec `Tab`), contenant chacun :
 
 ## Développement
 
-Prérequis : Node.js 22, Rust stable, et les [dépendances système de Tauri 2](https://v2.tauri.app/start/prerequisites/).
+Prérequis : Node.js 22, Rust stable, FFmpeg (ffmpeg et ffprobe dans le PATH) et les [dépendances système de Tauri 2](https://v2.tauri.app/start/prerequisites/).
+
+Les installeurs embarquent FFmpeg 9.0.2 (GPL). Pour produire un installeur complet en local :
+
+```bash
+bash scripts/fetch-ffmpeg.sh x86_64-unknown-linux-gnu   # ou x86_64-pc-windows-msvc, universal-apple-darwin
+npm run tauri build -- --config src-tauri/tauri.ffmpeg.conf.json
+```
 
 ```bash
 npm ci                    # dépendances

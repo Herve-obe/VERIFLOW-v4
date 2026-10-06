@@ -118,8 +118,8 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Interface | Svelte 5 + TypeScript | MIT | Onglets, formulaires, tableaux |
 | Cœur | Rust | GPL-3.0-or-later (VERIFLOW) | Logique métier |
 | Copie et checksums | Rust (crates `xxhash-rust`, RustCrypto `md-5`, `sha1`, `sha2`) | BSL-1.0 / MIT / Apache 2.0 | OFFLOAD |
-| Décodage, encodage, analyse | FFmpeg compilé avec `--enable-gpl` (x264, x265), lié dynamiquement | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
-| Lecture vidéo | Décodage FFmpeg + rendu GPU natif (wgpu) | MIT / Apache 2.0 | PLAYER VIDEO, image par image |
+| Décodage, encodage, analyse | Programmes `ffmpeg` et `ffprobe` 9.0.2 (build GPL statique avec x264, x265) **intégrés à l'installeur** (décision du 05/10/2026 : outil autonome, sans Internet) et pilotés en processus séparé | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
+| Lecture vidéo | Décodage FFmpeg avec saut exact à l'image, aperçu JPEG 4:4:4 affiché dans l'interface | GPL / navigateur intégré | PLAYER VIDEO, image par image (validé en phase 0 bis) |
 | Audio temps réel | `cpal` (WASAPI, CoreAudio, ALSA/JACK) | Apache 2.0 | PLAYER AUDIO |
 | Rééchantillonnage | `rubato` | MIT | Conversion si la carte son ne suit pas |
 | Mesures | `ebur128` (LUFS) + crête maison | MIT | Vumètres |
@@ -127,7 +127,7 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Rapports PDF | Typst (moteur embarqué) | Apache 2.0 | REPORT, rapports d'offload |
 | Formats d'échange | Écrits par VERIFLOW : MHL v2 (XML), EDL CMX3600, ALE, CSV, FCPXML, OTIO (JSON) | Propriétaire | Exports |
 
-Risque technique principal : **la lecture vidéo fluide et précise à l'image dans Tauri**. La WebView ne sait pas lire ProRes, DNxHR ou XAVC. Le décodage se fait donc en Rust via FFmpeg et le rendu dans une surface GPU native. **Ce point sera prototypé en premier (preuve de concept)** avant de développer l'onglet PLAYER. Solution de repli : libmpv (GPL/LGPL).
+Risque technique principal : **la lecture vidéo fluide et précise à l'image dans Tauri**. **Levé en phase 0 bis** (voir `docs/02_PHASE0BIS_PROTOTYPE.md`) : FFmpeg tourne en processus séparé (un rush corrompu ne peut pas faire planter VERIFLOW, aucune compilation de bibliothèque par plateforme), le saut est exact à l'image y compris en GOP long, et l'aperçu JPEG 4:4:4 permet la lecture à pleine cadence. Solution de repli si un besoin d'affichage étalonné apparaît : rendu GPU natif ou libmpv.
 
 ### 5.3 Données : "un fichier projet + SQLite", expliqué
 
