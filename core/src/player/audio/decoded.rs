@@ -239,7 +239,8 @@ mod tests {
 
         // Moteur complet : la vidéo s'ouvre comme une session de 2 pistes.
         let mut p =
-            crate::player::audio::producer::Producer::open(&[clip.clone()], 48_000).unwrap();
+            crate::player::audio::producer::Producer::open(std::slice::from_ref(&clip), 48_000)
+                .unwrap();
         assert_eq!(p.info().tracks.len(), 2);
         assert_eq!(p.info().tracks[1].name, "Piste 2");
         let mut block = Vec::new();
