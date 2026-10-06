@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 use veriflow_core::offload::engine::{run, Event, OffloadSpec};
 use veriflow_core::offload::hash::HashAlgo;
 use veriflow_core::offload::mhl::{write_generation, MhlAuthor};
+use veriflow_core::offload::report::{write_reports, ReportData, ReportInfo};
 use veriflow_core::offload::scan::scan;
 
 fn main() {
@@ -36,8 +37,15 @@ fn main() {
         "{:.2} s, {} en échec",
         summary.duration_s, summary.failed_files
     );
+    let mut mhl = Vec::new();
     for (i, d) in destinations.iter().enumerate() {
         let p = write_generation(&inv, &summary, i, d, &algos, &MhlAuthor::default()).unwrap();
         println!("MHL : {}", p.display());
+        mhl.push(Some(p));
+    }
+    let info = ReportInfo { project: Some("Démo VERIFLOW".into()), operator: Some("DIT".into()), notes: None };
+    let data = ReportData { inv: &inv, summary: &summary, spec: &spec, info: &info, mhl: &mhl };
+    for r in write_reports(&data).unwrap() {
+        println!("Rapport : {}", r.pdf.display());
     }
 }

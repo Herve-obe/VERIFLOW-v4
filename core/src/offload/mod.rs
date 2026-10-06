@@ -4,4 +4,5 @@ pub mod engine;
 pub mod hash;
 mod io;
 pub mod mhl;
+pub mod report;
 pub mod scan;
