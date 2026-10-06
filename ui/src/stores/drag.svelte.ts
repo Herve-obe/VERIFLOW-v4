@@ -56,6 +56,8 @@ export function beginDrag(e: PointerEvent, path: string) {
       drag.active = true;
       document.body.classList.add("vf-dragging");
     }
+    // Le bouton enfoncé étend sinon une sélection de texte sur la page.
+    window.getSelection()?.removeAllRanges();
     drag.x = m.clientX;
     drag.y = m.clientY;
     drag.over = zoneAt(m.clientX, m.clientY)?.name ?? null;
