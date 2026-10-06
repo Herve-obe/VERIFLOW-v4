@@ -194,7 +194,7 @@ pub fn digest_bytes(algo: HashAlgo, digest: &str) -> Option<Vec<u8>> {
     if algo == HashAlgo::C4 {
         return c4_decode(digest);
     }
-    if digest.len() % 2 != 0 {
+    if !digest.len().is_multiple_of(2) {
         return None;
     }
     (0..digest.len())

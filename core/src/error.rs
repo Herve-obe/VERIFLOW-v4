@@ -27,6 +27,9 @@ pub enum Error {
     #[error("échec de {tool} : {message}")]
     Tool { tool: String, message: String },
 
+    #[error("opération annulée")]
+    Cancelled,
+
     #[error("audio : {0}")]
     Audio(String),
 
