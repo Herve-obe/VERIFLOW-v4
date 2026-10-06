@@ -34,11 +34,20 @@ pub struct SourceFile {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SourceDir {
+    pub rel: String,
+    #[serde(skip)]
+    pub modified: SystemTime,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SourceInventory {
     pub root: PathBuf,
     /// Nom de la source (nom du dossier ou de la carte).
     pub name: String,
     pub files: Vec<SourceFile>,
+    /// Dossiers (relatifs), y compris les dossiers vides, triés.
+    pub dirs: Vec<SourceDir>,
     pub total_bytes: u64,
     /// Empreinte de la liste (chemins, tailles, dates) : identifie une carte
     /// déjà copiée sans relire son contenu.
@@ -65,12 +74,22 @@ pub fn source_name(root: &Path) -> String {
         .unwrap_or_else(|| "SOURCE".to_owned())
 }
 
+fn rel_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .expect("chemin sous la racine")
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Parcourt la source (ordre stable, trié par chemin).
 pub fn scan(root: &Path) -> Result<SourceInventory> {
     if !root.is_dir() {
         return Err(Error::NotFound(root.display().to_string()));
     }
     let mut files = Vec::new();
+    let mut dirs = Vec::new();
     let walker = WalkDir::new(root)
         .follow_links(false)
         .sort_by_file_name()
@@ -78,23 +97,26 @@ pub fn scan(root: &Path) -> Result<SourceInventory> {
         .filter_entry(|e| e.depth() == 0 || !is_ignored(&e.file_name().to_string_lossy()));
     for entry in walker {
         let entry = entry.map_err(|e| Error::Io(e.into()))?;
+        let meta = entry.metadata().map_err(|e| Error::Io(e.into()))?;
+        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        if entry.file_type().is_dir() {
+            if entry.depth() > 0 {
+                dirs.push(SourceDir {
+                    rel: rel_path(root, entry.path()),
+                    modified,
+                });
+            }
+            continue;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
-        let meta = entry.metadata().map_err(|e| Error::Io(e.into()))?;
-        let rel = entry
-            .path()
-            .strip_prefix(root)
-            .expect("chemin sous la racine")
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+        let rel = rel_path(root, entry.path());
         files.push(SourceFile {
             rel,
             path: entry.path().to_path_buf(),
             size: meta.len(),
-            modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            modified,
         });
     }
     let total_bytes = files.iter().map(|f| f.size).sum();
@@ -112,6 +134,7 @@ pub fn scan(root: &Path) -> Result<SourceInventory> {
     Ok(SourceInventory {
         name: source_name(root),
         root: root.to_path_buf(),
+        dirs,
         fingerprint: hash_data(HashAlgo::Xxh128, listing.as_bytes()),
         total_bytes,
         files,
@@ -131,6 +154,7 @@ mod tests {
         std::fs::write(card.join("PRIVATE/M4ROOT/CLIP/C0001.MP4"), b"1").unwrap();
         std::fs::write(card.join(".DS_Store"), b"x").unwrap();
         std::fs::create_dir_all(card.join(".Spotlight-V100")).unwrap();
+        std::fs::create_dir_all(card.join("PRIVATE/M4ROOT/SUB")).unwrap();
         std::fs::write(card.join(".Spotlight-V100/db"), b"x").unwrap();
         let inv = scan(&card).unwrap();
         let rels: Vec<_> = inv.files.iter().map(|f| f.rel.as_str()).collect();
@@ -142,6 +166,16 @@ mod tests {
             ]
         );
         assert_eq!(inv.total_bytes, 3);
+        let dirs: Vec<_> = inv.dirs.iter().map(|d| d.rel.as_str()).collect();
+        assert_eq!(
+            dirs,
+            [
+                "PRIVATE",
+                "PRIVATE/M4ROOT",
+                "PRIVATE/M4ROOT/CLIP",
+                "PRIVATE/M4ROOT/SUB"
+            ]
+        );
         assert_eq!(inv.name, "A001");
         // Même contenu : même empreinte d'inventaire.
         assert_eq!(scan(&card).unwrap().fingerprint, inv.fingerprint);

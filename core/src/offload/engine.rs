@@ -388,6 +388,23 @@ fn offload_file(
     })
 }
 
+/// Recrée les dossiers vides et rétablit les dates des dossiers d'origine
+/// (l'écriture des fichiers modifie la date des dossiers parents).
+fn restore_directories(inv: &SourceInventory, destinations: &[PathBuf]) {
+    for dest in destinations {
+        for dir in &inv.dirs {
+            let _ = fs::create_dir_all(dest.join(&dir.rel));
+        }
+        // Du plus profond au moins profond, pour ne pas modifier un parent après coup.
+        for dir in inv.dirs.iter().rev() {
+            let _ = filetime::set_file_mtime(
+                dest.join(&dir.rel),
+                filetime::FileTime::from_system_time(dir.modified),
+            );
+        }
+    }
+}
+
 /// Lance l'offload complet d'une source inventoriée.
 pub fn run(
     inv: &SourceInventory,
@@ -441,6 +458,9 @@ pub fn run(
             }
             Err(e) => return Err(e),
         }
+    }
+    if !cancelled {
+        restore_directories(inv, &spec.destinations);
     }
     counter.flush(&mut emit);
     let finished_at = SystemTime::now();
