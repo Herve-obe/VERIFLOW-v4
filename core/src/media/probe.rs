@@ -161,6 +161,8 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
                     start_time: num(&s.start_time).unwrap_or(0.0),
                 });
             }
+            // Piste timecode (tmcd) : les caméras y rangent souvent le nom de bobine.
+            Some("data") => add_tags(&s.tags),
             Some("audio") => audio.push(AudioStream {
                 index: s.index,
                 codec: s.codec_name.clone().unwrap_or_default(),

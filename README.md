@@ -5,7 +5,7 @@ copie sécurisée avec checksums et ASC MHL, visionnage, logs, synchronisation, 
 
 Windows 10/11, macOS 12+ (Apple Silicon et Intel), Linux.
 
-**Statut : développement (phase 1 : OFFLOAD).** La charte du projet est dans [`docs/01_CHARTE.md`](docs/01_CHARTE.md).
+**Statut : développement (phase 2 : MEDIA).** La charte du projet est dans [`docs/01_CHARTE.md`](docs/01_CHARTE.md).
 
 ## Onglets
 
