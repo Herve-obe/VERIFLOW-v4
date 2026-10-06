@@ -118,9 +118,13 @@ pub fn local_date() -> String {
 
 /// Inventorie la source et contrôle les destinations, sans rien écrire.
 pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
-    let inv = scan(&req.source)?;
+    let inv = scan(&crate::absolute_path(&req.source))?;
     let rel = render_template(&req.template, &inv.name, &req.vars, &local_date());
-    let roots: Vec<PathBuf> = req.destinations.iter().map(|d| d.join(&rel)).collect();
+    let roots: Vec<PathBuf> = req
+        .destinations
+        .iter()
+        .map(|d| crate::absolute_path(&d.join(&rel)))
+        .collect();
     Ok(Preflight {
         source_name: inv.name.clone(),
         files: inv.files.len(),
@@ -157,7 +161,7 @@ pub fn execute(
 ) -> Result<JobResult> {
     let inv = match pre.inventory {
         Some(inv) => inv,
-        None => scan(&req.source)?,
+        None => scan(&crate::absolute_path(&req.source))?,
     };
     let spec = OffloadSpec {
         destinations: pre.roots.clone(),

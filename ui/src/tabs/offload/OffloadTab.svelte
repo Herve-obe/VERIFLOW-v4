@@ -5,7 +5,7 @@
   import { open, confirm } from "@tauri-apps/plugin-dialog";
   import JobCard from "./JobCard.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
-  import { DRAG_TYPE } from "../../lib/explorer";
+  import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -104,17 +104,15 @@
   }
 
   let picked = $state<string | null>(null);
-  let dropOver = $state<"source" | "dest" | null>(null);
 
   function addDestPath(p: string) {
     if (p && p !== source && !destinations.includes(p)) destinations = [...destinations, p];
   }
 
-  function dropped(e: DragEvent): string | null {
-    e.preventDefault();
-    dropOver = null;
-    return e.dataTransfer?.getData(DRAG_TYPE) || e.dataTransfer?.getData("text/plain") || null;
-  }
+  // Dépôts depuis l'explorateur de VERIFLOW ou depuis le système.
+  startNativeDrop();
+  const sourceZone = { name: "source", accept: (paths: string[]) => (source = paths[0]) };
+  const destZone = { name: "dest", accept: (paths: string[]) => paths.forEach(addDestPath) };
 
   const explorerActions = [
     { label: t("explorer.use.source"), run: (p: string) => (source = p) },
@@ -167,18 +165,10 @@
 
     <div
       class="block drop"
-      class:over={dropOver === "source"}
+      class:over={drag.over === "source"}
       role="region"
       aria-label={t("offload.source")}
-      ondragover={(e) => {
-        e.preventDefault();
-        dropOver = "source";
-      }}
-      ondragleave={() => (dropOver = null)}
-      ondrop={(e) => {
-        const p = dropped(e);
-        if (p) source = p;
-      }}
+      use:dropZone={sourceZone}
     >
       <div class="row">
         <h3>{t("offload.source")}</h3>
@@ -203,18 +193,10 @@
 
     <div
       class="block drop"
-      class:over={dropOver === "dest"}
+      class:over={drag.over === "dest"}
       role="region"
       aria-label={t("offload.destinations")}
-      ondragover={(e) => {
-        e.preventDefault();
-        dropOver = "dest";
-      }}
-      ondragleave={() => (dropOver = null)}
-      ondrop={(e) => {
-        const p = dropped(e);
-        if (p) addDestPath(p);
-      }}
+      use:dropZone={destZone}
     >
       <h3>{t("offload.destinations")}</h3>
       {#each destinations as d, i (d)}

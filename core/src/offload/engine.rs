@@ -13,7 +13,7 @@
 //! ils sont seulement revérifiés (reprise après coupure).
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender};
@@ -200,17 +200,41 @@ fn hash_from_disk(
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let mut f = open_uncached(path)?;
+    let size = f.metadata()?.len();
     let mut buf = AlignedBuf::new(CHUNK);
+    hash_uncached(&mut f, size, buf.as_mut_slice(), algos, cancel)
+}
+
+/// Lecture sans cache : sous Windows (FILE_FLAG_NO_BUFFERING), chaque lecture
+/// doit partir d'une position alignée sur le secteur. Après la dernière
+/// lecture, partielle, la position ne l'est plus : on s'arrête donc à la
+/// taille connue du fichier au lieu de relire pour constater la fin
+/// (relecture qui échouait avec « Paramètre incorrect », os error 87).
+fn hash_uncached(
+    f: &mut impl Read,
+    size: u64,
+    buf: &mut [u8],
+    algos: &[HashAlgo],
+    cancel: &AtomicBool,
+) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let mut hasher = MultiHasher::new(algos);
-    loop {
+    let mut done = 0u64;
+    while done < size {
         if cancel.load(Ordering::Relaxed) {
             return Err(std::io::Error::other("annulé"));
         }
-        let n = read_full(&mut f, buf.as_mut_slice())?;
+        // Lecture du tampon entier : la taille demandée reste un multiple du secteur.
+        let n = loop {
+            match f.read(buf) {
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                r => break r?,
+            }
+        };
         if n == 0 {
-            break;
+            break; // fichier raccourci pendant la lecture : l'empreinte différera
         }
-        hasher.update(&buf.as_mut_slice()[..n]);
+        hasher.update(&buf[..n]);
+        done += n as u64;
     }
     Ok(hasher.finish())
 }
@@ -482,6 +506,54 @@ pub fn run(
 mod tests {
     use super::*;
     use crate::offload::scan::scan;
+
+    /// Lecteur qui reproduit FILE_FLAG_NO_BUFFERING (Windows) : erreur 87 si
+    /// une lecture part d'une position ou demande une taille non alignée.
+    struct Unbuffered {
+        data: Vec<u8>,
+        pos: usize,
+    }
+
+    impl Read for Unbuffered {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            const SECTOR: usize = 4096;
+            if !self.pos.is_multiple_of(SECTOR) || !buf.len().is_multiple_of(SECTOR) {
+                return Err(std::io::Error::from_raw_os_error(87));
+            }
+            // Comme Windows, renvoie parfois moins que demandé (sans dépasser la fin).
+            let want = buf.len().min(SECTOR * 3);
+            let n = want.min(self.data.len() - self.pos);
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn uncached_read_stops_at_file_size_without_unaligned_read() {
+        let cancel = AtomicBool::new(false);
+        let mut buf = AlignedBuf::new(CHUNK);
+        for size in [0usize, 128, 4096, 39_117, CHUNK, CHUNK * 2 + 777] {
+            let data: Vec<u8> = (0..size).map(|i| (i % 253) as u8).collect();
+            let mut r = Unbuffered {
+                data: data.clone(),
+                pos: 0,
+            };
+            let got = hash_uncached(
+                &mut r,
+                size as u64,
+                buf.as_mut_slice(),
+                &[HashAlgo::Xxh128],
+                &cancel,
+            )
+            .unwrap_or_else(|e| panic!("taille {size} : {e}"));
+            assert_eq!(
+                got[0].1,
+                crate::offload::hash::hash_data(HashAlgo::Xxh128, &data),
+                "taille {size}"
+            );
+        }
+    }
 
     fn card(dir: &Path) -> PathBuf {
         let root = dir.join("A001");

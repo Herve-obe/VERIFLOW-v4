@@ -55,3 +55,10 @@ textarea {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Pendant le glisser d'un dossier : pas de sélection de texte parasite. */
+body.vf-dragging,
+body.vf-dragging * {
+  user-select: none;
+  cursor: grabbing;
+}

@@ -38,7 +38,12 @@ export function toggleFavorite(path: string) {
   saveFavorites();
 }
 
+/** Chemin d'origine de chaque dossier lu : la forme normalisée perd la barre
+ *  finale des racines Windows (« D:\ » devient « D: », relatif au lecteur). */
+const origin = new Map<string, string>();
+
 export async function loadChildren(path: string): Promise<DirEntry[]> {
+  origin.set(norm(path), path);
   try {
     const list = await listDirs(path);
     explorer.children[norm(path)] = list;
@@ -66,7 +71,7 @@ export function startExplorer() {
     // Relit les dossiers affichés concernés (le dossier lui-même ou son parent).
     for (const key of Object.keys(explorer.children)) {
       if (changed.some((c) => c === key || c.startsWith(`${key}/`) && !c.slice(key.length + 1).includes("/"))) {
-        loadChildren(key);
+        loadChildren(origin.get(key) ?? key);
       }
     }
     explorer.lastChanged = changed;

@@ -245,6 +245,12 @@ pub fn offload_eject(mount_point: PathBuf) -> CmdResult<()> {
 /// Ouvre un fichier (rapport) ou un dossier avec l'application du système.
 #[tauri::command]
 pub fn reveal(path: PathBuf) -> CmdResult<()> {
+    // Chemin absolu aux séparateurs natifs : l'Explorateur Windows ouvre
+    // « Documents » sans message d'erreur s'il ne comprend pas le chemin.
+    let path = veriflow_core::absolute_path(&path);
+    if !path.exists() {
+        return Err(format!("{} : introuvable", path.display()));
+    }
     open_with_system(&path).map_err(text)
 }
 

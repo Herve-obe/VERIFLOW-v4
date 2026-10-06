@@ -2,7 +2,8 @@
 <script lang="ts">
   import TreeNode from "./TreeNode.svelte";
   import { explorer, loadChildren } from "../../stores/explorer.svelte";
-  import { norm, DRAG_TYPE, type DirEntry } from "../../lib/explorer";
+  import { norm, type DirEntry } from "../../lib/explorer";
+  import { beginDrag } from "../../stores/drag.svelte";
 
   let {
     entry,
@@ -45,12 +46,8 @@
   aria-selected={selected !== null && norm(selected) === key}
   aria-expanded={entry.has_children ? open : undefined}
   tabindex="-1"
-  draggable="true"
   title={entry.path}
-  ondragstart={(e) => {
-    e.dataTransfer?.setData(DRAG_TYPE, entry.path);
-    e.dataTransfer?.setData("text/plain", entry.path);
-  }}
+  onpointerdown={(e) => beginDrag(e, entry.path)}
   onclick={() => onSelect(entry.path)}
   ondblclick={() => onActivate(entry.path)}
   oncontextmenu={(e) => {
@@ -92,6 +89,7 @@
     font-size: var(--vf-text-sm);
     cursor: default;
     white-space: nowrap;
+    user-select: none;
     border-radius: var(--vf-radius-sm);
   }
   .row:hover {

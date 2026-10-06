@@ -35,6 +35,8 @@ fn subdirs(dir: &Path) -> impl Iterator<Item = (PathBuf, String)> {
 
 /// Sous-dossiers d'un dossier, triés sans tenir compte de la casse.
 pub fn list_dirs(dir: &Path) -> Result<Vec<DirEntry>> {
+    // « D: » seul désigne le dossier courant du lecteur, pas sa racine.
+    let dir = &crate::absolute_path(dir);
     std::fs::read_dir(dir)?; // erreur explicite si le dossier est illisible
     let mut out: Vec<DirEntry> = subdirs(dir)
         .map(|(path, name)| DirEntry {

@@ -19,8 +19,5 @@ export const watch = (owner: string, paths: string[], recursive = false) =>
 export const onExplorer = (cb: (n: ExplorerNotice) => void): Promise<UnlistenFn> =>
   listen<ExplorerNotice>("explorer", (e) => cb(e.payload));
 
-/** Type de donnée utilisé pour le glisser-déposer d'un dossier. */
-export const DRAG_TYPE = "application/x-veriflow-path";
-
 /** Normalise un chemin pour les comparaisons (séparateurs, barre finale). */
 export const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
