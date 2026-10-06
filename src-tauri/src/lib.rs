@@ -3,6 +3,7 @@
 
 mod commands;
 mod explorer;
+mod logs;
 mod media;
 mod offload;
 mod player;
@@ -38,6 +39,8 @@ pub fn run() {
             player::video_open,
             player::video_frame,
             player::video_close,
+            player::video_lut,
+            player::audio_outputs,
             player::audio_open,
             player::audio_close,
             player::audio_transport,
@@ -62,6 +65,10 @@ pub fn run() {
             media::media_waveform,
             media::media_set,
             media::media_export,
+            logs::markers_list,
+            logs::marker_save,
+            logs::marker_delete,
+            logs::logs_export,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");

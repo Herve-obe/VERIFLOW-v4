@@ -7,10 +7,16 @@
 //! les contient. Un clip sans plage est exporté en entier. Les positions sont
 //! en images depuis le début du clip, à la cadence du clip.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::timecode::{FrameRate, Timecode};
+use crate::Result;
+
+/// Cadence de la grille des marqueurs posés sur un fichier son (sans image).
+pub const AUDIO_LOG_RATE: FrameRate = FrameRate::new(25, 1);
 
 /// Couleurs disponibles : celles des marqueurs Avid, reconnues aussi par
 /// Premiere, Resolve et OpenTimelineIO.
@@ -137,6 +143,61 @@ pub struct LogClip {
 }
 
 impl LogClip {
+    /// Décrit un média pour l'export : cadence, timecode de départ et durée
+    /// lus dans le fichier (vidéo), ou grille de 25 i/s et timecode BWF (son).
+    pub fn from_media(path: &Path, markers: Vec<Marker>) -> Result<Self> {
+        let info = crate::media::probe::probe(path)?;
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let audio_channels = info.audio.iter().map(|a| a.channels).sum();
+        let audio_rate = info.audio.first().map(|a| a.sample_rate).unwrap_or(0);
+        let reel = ["reel_name", "com.apple.quicktime.reelname", "tape_name"]
+            .iter()
+            .find_map(|k| info.tags.get(*k).cloned())
+            .filter(|r| !r.trim().is_empty());
+        let mut clip = LogClip {
+            path: path.display().to_string(),
+            name,
+            reel,
+            start_frame: 0,
+            frame_count: 0,
+            rate: AUDIO_LOG_RATE,
+            drop_frame: false,
+            width: 0,
+            height: 0,
+            has_video: false,
+            audio_channels,
+            audio_rate,
+            markers,
+        };
+        if let Some(v) = &info.video {
+            clip.rate = v.rate;
+            clip.frame_count = v.frame_count;
+            clip.width = v.width;
+            clip.height = v.height;
+            clip.has_video = true;
+            clip.drop_frame = info
+                .start_timecode
+                .as_deref()
+                .is_some_and(|t| t.contains(';'));
+            clip.start_frame = info.start_tc().map(|t| t.frames).unwrap_or(0);
+        } else {
+            clip.frame_count = (info.duration * AUDIO_LOG_RATE.as_f64()).round() as i64;
+            if let Ok(w) = crate::media::wav::read_info(path) {
+                if let Some(tr) = w.time_reference {
+                    let secs = tr as f64 / w.sample_rate.max(1) as f64;
+                    clip.start_frame = (secs * AUDIO_LOG_RATE.as_f64()).round() as i64;
+                }
+                if clip.reel.is_none() {
+                    clip.reel = w.ixml.tape.clone().filter(|t| !t.trim().is_empty());
+                }
+            }
+        }
+        Ok(clip)
+    }
+
     fn tc(&self, frame: i64) -> Timecode {
         Timecode::from_frames(self.start_frame + frame, self.rate, self.drop_frame)
     }
@@ -897,6 +958,79 @@ pub(crate) mod tests {
         assert_eq!(clips[0]["markers"].as_array().unwrap().len(), 2);
         assert_eq!(clips[0]["markers"][1]["color"], "RED");
         assert_eq!(clips[0]["source_range"]["start_time"]["value"], 900_025.0);
+    }
+
+    #[test]
+    fn clip_description_from_real_files() {
+        use crate::tools;
+        if tools::locate("ffmpeg").is_none() || tools::locate("ffprobe").is_none() {
+            eprintln!("FFmpeg absent : test ignoré");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mov = dir.path().join("A001C007.mov");
+        let out = tools::command("ffmpeg")
+            .unwrap()
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=640x360:rate=25:duration=2",
+            ])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=r=48000:cl=stereo:d=2",
+                "-shortest",
+            ])
+            .args([
+                "-c:v",
+                "mjpeg",
+                "-c:a",
+                "pcm_s24le",
+                "-timecode",
+                "10:00:00:00",
+            ])
+            .arg(&mov)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let c = LogClip::from_media(&mov, vec![]).unwrap();
+        assert_eq!(c.name, "A001C007");
+        assert_eq!(c.rate, FrameRate::new(25, 1));
+        assert_eq!(c.start_frame, 900_000);
+        assert_eq!(c.frame_count, 50);
+        assert_eq!((c.width, c.height, c.has_video), (640, 360, true));
+        assert_eq!((c.audio_channels, c.audio_rate), (2, 48_000));
+
+        // Son BWF : grille de 25 i/s et TC lu dans le time reference (01:00:00:00).
+        let wav = dir.path().join("12A_T3.wav");
+        crate::media::wav::write_test_wav(&wav, 2, 48_000, 24, false, 96_000, None, |_, _| 0.0)
+            .unwrap();
+        let mut bytes = std::fs::read(&wav).unwrap();
+        // Insère un bloc bext minimal avec time reference = 3600 s.
+        let mut bext = vec![0u8; 602];
+        bext[338..346].copy_from_slice(&(3600u64 * 48_000).to_le_bytes());
+        let mut chunk = b"bext".to_vec();
+        chunk.extend_from_slice(&(bext.len() as u32).to_le_bytes());
+        chunk.extend_from_slice(&bext);
+        bytes.splice(12..12, chunk);
+        let riff = (bytes.len() - 8) as u32;
+        bytes[4..8].copy_from_slice(&riff.to_le_bytes());
+        std::fs::write(&wav, bytes).unwrap();
+        let a = LogClip::from_media(&wav, vec![]).unwrap();
+        assert!(!a.has_video);
+        assert_eq!(a.rate, AUDIO_LOG_RATE);
+        assert_eq!(a.start_frame, 90_000);
+        assert_eq!(a.frame_count, 50);
     }
 
     #[test]

@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::State;
-use veriflow_core::player::audio::engine::{AudioEngine, OutputInfo};
+use veriflow_core::player::audio::engine::{
+    output_devices, AudioEngine, OutputChoice, OutputDevice, OutputInfo,
+};
 use veriflow_core::player::audio::mixer::{db_to_gain, gain_to_db};
 use veriflow_core::player::audio::producer::SessionInfo;
 use veriflow_core::player::video::{FrameFormat, VideoClip, VideoPlayer};
@@ -71,6 +73,23 @@ pub async fn video_frame(
     .map_err(text)?
 }
 
+/// Applique ou retire (`path` absent) une LUT d'affichage.
+#[tauri::command]
+pub async fn video_lut(
+    path: Option<PathBuf>,
+    slot: String,
+    state: State<'_, PlayerState>,
+) -> CmdResult<()> {
+    let players = state.video.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = players.lock().map_err(text)?;
+        let player = guard.get_mut(&slot).ok_or("aucun clip vidéo ouvert")?;
+        player.set_lut(path.as_deref()).map_err(text)
+    })
+    .await
+    .map_err(text)?
+}
+
 #[tauri::command]
 pub fn video_close(slot: String, state: State<'_, PlayerState>) -> CmdResult<()> {
     state.video.lock().map_err(text)?.remove(&slot);
@@ -85,18 +104,29 @@ pub struct AudioOpened {
     output: OutputInfo,
 }
 
+/// Sorties audio de tous les pilotes (WASAPI, ASIO, CoreAudio, ALSA...).
+#[tauri::command]
+pub async fn audio_outputs() -> CmdResult<Vec<OutputDevice>> {
+    tauri::async_runtime::spawn_blocking(output_devices)
+        .await
+        .map_err(text)
+}
+
 #[tauri::command]
 pub async fn audio_open(
     paths: Vec<PathBuf>,
     slot: String,
+    output: Option<OutputChoice>,
     state: State<'_, PlayerState>,
 ) -> CmdResult<AudioOpened> {
     // Ferme la session précédente de cet emplacement avant d'ouvrir la carte son.
     state.audio.lock().map_err(text)?.remove(&slot);
-    let engine = tauri::async_runtime::spawn_blocking(move || AudioEngine::open(&paths))
-        .await
-        .map_err(text)?
-        .map_err(text)?;
+    let choice = output.unwrap_or_default();
+    let engine =
+        tauri::async_runtime::spawn_blocking(move || AudioEngine::open_with(&paths, &choice))
+            .await
+            .map_err(text)?
+            .map_err(text)?;
     let opened = AudioOpened {
         session: engine.info().clone(),
         output: engine.output().clone(),
