@@ -43,8 +43,18 @@ fn main() {
         println!("MHL : {}", p.display());
         mhl.push(Some(p));
     }
-    let info = ReportInfo { project: Some("Démo VERIFLOW".into()), operator: Some("DIT".into()), notes: None };
-    let data = ReportData { inv: &inv, summary: &summary, spec: &spec, info: &info, mhl: &mhl };
+    let info = ReportInfo {
+        project: Some("Démo VERIFLOW".into()),
+        operator: Some("DIT".into()),
+        notes: None,
+    };
+    let data = ReportData {
+        inv: &inv,
+        summary: &summary,
+        spec: &spec,
+        info: &info,
+        mhl: &mhl,
+    };
     for r in write_reports(&data).unwrap() {
         println!("Rapport : {}", r.pdf.display());
     }
