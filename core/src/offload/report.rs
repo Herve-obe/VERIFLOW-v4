@@ -6,7 +6,7 @@
 //! l'empreinte du PDF est écrite à côté, dans `<rapport>.pdf.sha256`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use serde::Serialize;
