@@ -103,6 +103,31 @@ export async function videoFrame(index: number, slot: Slot = "player"): Promise<
   const raw = await invoke<ArrayBuffer | number[]>("video_frame", { index, slot });
   return raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
 }
+/** Dessine une image JPEG. `createImageBitmap` (rapide, asynchrone) n'existe
+ *  qu'à partir de Safari 15 : sur un macOS plus ancien (Catalina), on passe par
+ *  un élément image. */
+export async function drawJpeg(ctx: CanvasRenderingContext2D | null | undefined, data: Uint8Array<ArrayBuffer>) {
+  const blob = new Blob([data], { type: "image/jpeg" });
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    ctx?.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("image illisible"));
+      img.src = url;
+    });
+    ctx?.drawImage(img, 0, 0);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export const videoClose = (slot: Slot = "player") => invoke<void>("video_close", { slot });
 /** LUT d'affichage ; `path` null pour la retirer. */
 export const videoLut = (path: string | null, slot: Slot = "player") => invoke<void>("video_lut", { path, slot });

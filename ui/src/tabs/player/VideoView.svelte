@@ -17,6 +17,7 @@
     videoFrame,
     videoClose,
     videoLut,
+    drawJpeg,
     audioOpen,
     audioClose,
     audioSeek,
@@ -153,10 +154,8 @@
       const t0 = performance.now();
       const buf = await videoFrame(i, slot);
       const t1 = performance.now();
-      // Décodage JPEG natif du moteur web (rapide et asynchrone).
-      const bitmap = await createImageBitmap(new Blob([buf], { type: "image/jpeg" }));
-      canvas?.getContext("2d")?.drawImage(bitmap, 0, 0);
-      bitmap.close();
+      // Décodage JPEG natif du moteur web.
+      await drawJpeg(canvas?.getContext("2d"), buf);
       const t2 = performance.now();
       ipcMs = ipcMs * 0.8 + (t1 - t0) * 0.2;
       drawMs = drawMs * 0.8 + (t2 - t1) * 0.2;

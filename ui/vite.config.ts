@@ -14,7 +14,7 @@ export default defineConfig({
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
   },
   build: {
-    target: "es2021",
+    target: ["safari13", "chrome105"],
     outDir: "dist",
     emptyOutDir: true,
   },
