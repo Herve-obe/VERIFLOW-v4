@@ -44,8 +44,8 @@ mr_sha() {
 
 ev_sha() {
   case "$1" in
-    ffmpeg) echo "" ;;
-    ffprobe) echo "" ;;
+    ffmpeg) echo "4acc0be580f9b2788029eb7bd4d645ff87968911b0a62aeeb3940d42d54558d5" ;;
+    ffprobe) echo "24a9c968cd4da72d99c7245e914b921815835eb6dff01d99868031aebaf1d439" ;;
   esac
 }
 

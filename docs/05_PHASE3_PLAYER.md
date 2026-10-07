@@ -86,6 +86,11 @@ Captures : `docs/captures/phase3_logs_tc_incruste.png`, `phase3_lut_affichage.pn
 - **Décalage son/image à la mise en lecture** : il peut atteindre une cinquantaine de millisecondes (tampon de la carte), puis il est rattrapé dès la première relève de position (10 fois par seconde).
 - **Pistes son vidéo** : leur décalage éventuel de départ par rapport à l'image (start time différent dans le conteneur) n'est pas encore compensé.
 
+## Compatibilité macOS Catalina (ajout du 07/10/2026)
+- **FFmpeg Intel** : il vient désormais d'evermeet.cx (9.0.2, GPL, statique). Vérifié par la génération des installeurs : il exige macOS 10.13 et n'utilise que des bibliothèques du système. Le script refuse tout binaire Intel exigeant plus que 10.15.
+- **Application** : version minimale déclarée à macOS 10.15 ; interface compilée pour Safari 13 ; affichage des images sans `createImageBitmap` sur les moteurs antérieurs à Safari 15.
+- **Diagnostic de démarrage** (`ui/public/boot.js`, JavaScript ES5) : si l'interface ne démarre pas, la fenêtre affiche la cause et la version du moteur web au lieu d'un écran noir.
+
 ## Reste à faire (hors de cette PR)
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).
