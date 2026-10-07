@@ -4,6 +4,7 @@
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
+  import SoundTracks from "./SoundTracks.svelte";
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -23,6 +24,8 @@
     audioSeek,
     audioTransport,
     audioStatus,
+    audioLtcScan,
+    type LtcDetection,
     type VideoClip,
     type Slot,
     type AudioSlot,
@@ -71,7 +74,12 @@
   let audioTrusted = false;
   let audioStartSecs = 0;
   let audioStartAt = 0;
-  const AUDIO_STALL_MS = 700;
+  // Au premier lancement, FFmpeg (et l'antivirus sous Windows) peut mettre
+  // quelques secondes à démarrer : l'image attend le son jusqu'à ce délai.
+  const AUDIO_STALL_MS = 5000;
+  let avTracks = $state<string[]>([]);
+  let avLtc = $state<(LtcDetection | null)[]>([]);
+  let trackPeaks = $state<(number | null)[]>([]);
 
   let position = 0; // position fractionnaire (images) pendant la lecture
   let requested = 0; // dernière image demandée (sert de base au pas à pas)
@@ -133,8 +141,17 @@
     avError = "";
     if (!clip || clip.info.audio.length === 0) return;
     try {
-      await audioOpen([p], avSlot, currentOutput());
-      if (clipPath === p) avReady = true;
+      const opened = await audioOpen([p], avSlot, currentOutput());
+      if (clipPath !== p) return;
+      avTracks = opened.session.tracks.map((tr) => tr.name);
+      avLtc = [];
+      avReady = true;
+      // Timecode LTC sur une piste ? Elle sera coupée (protection de l'écoute).
+      audioLtcScan([p])
+        .then((r) => {
+          if (clipPath === p) avLtc = r;
+        })
+        .catch(() => {});
     } catch (e) {
       avError = String(e);
     }
@@ -224,7 +241,9 @@
       .then((st) => {
         if (!audioPlaying) return;
         const at = performance.now();
+        trackPeaks = st.track_peaks;
         if (st.playing && st.position > audioStartSecs + 0.02) {
+          if (!audioTrusted && avError === t("player.sound.stalled")) avError = "";
           audioTrusted = true;
           audioPos = st.position;
           audioAt = at;
@@ -248,6 +267,11 @@
     const dt = lastTs ? (ts - lastTs) / 1000 : 0;
     lastTs = ts;
     if (audioPlaying) pollAudio(ts);
+    if (audioPlaying && !audioTrusted) {
+      // Le son n'a pas encore démarré : l'image l'attend, pour partir synchrone.
+      timer = window.setTimeout(tick, 4);
+      return;
+    }
     if (audioPlaying && audioTrusted) {
       position = (audioPos + (ts - audioAt) / 1000) * fps(rate);
     } else {
@@ -461,6 +485,9 @@
         <OutputPicker />
         {#if avError}<span class="err">{avError}</span>{/if}
       </div>
+      {#if avReady}
+        <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
+      {/if}
     {/if}
 
     <dl class="info">

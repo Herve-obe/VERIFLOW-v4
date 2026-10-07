@@ -255,5 +255,12 @@
   "player.lut.filter": "LUT",
   "player.lut.remove": "Remove LUT",
   "player.lut.hint": "Display LUT (.cube, .3dl): the file is never modified",
-  "player.sound.stalled": "Sound does not start on this output: playing without sound. Check the selected audio output."
+  "player.sound.stalled": "Sound does not start on this output: playing without sound. Check the selected audio output.",
+  "sound.ltc.found": "Audio timecode (LTC) detected:",
+  "sound.ltc.muted": "Track muted to protect your ears.",
+  "sound.ltc.keep": "Keep muted",
+  "sound.ltc.low": "Lower to -30 dB",
+  "sound.ltc.on": "Unmute",
+  "sound.gain": "Volume",
+  "sound.mute": "Mute track"
 }

@@ -20,6 +20,8 @@
     audioSeek,
     audioTrack,
     audioStatus,
+    audioLtcScan,
+    type LtcDetection,
     type AudioOpened,
     type Slot,
   } from "../../lib/player";
@@ -77,7 +79,39 @@
     if (picked.length > 0) await load(picked);
   }
 
-  async function load(paths: string[]) {
+  // Pistes portant un timecode LTC : coupées d'office pour protéger l'écoute.
+  let ltc = $state<(LtcDetection | null)[]>([]);
+  let ltcNotice = $state(false);
+  const ltcTracks = $derived(ltc.map((d, i) => (d ? i : -1)).filter((i) => i >= 0));
+
+  function scanLtc(paths: string[]) {
+    ltc = [];
+    ltcNotice = false;
+    audioLtcScan(paths)
+      .then((r) => {
+        if (loaded !== paths) return;
+        ltc = r;
+        r.forEach((d, i) => {
+          if (d && strips[i]) {
+            strips[i].mute = true;
+            send(i);
+          }
+        });
+        ltcNotice = r.some((d) => d);
+      })
+      .catch(() => {});
+  }
+
+  function setLtc(mode: "mute" | "low" | "on") {
+    for (const i of ltcTracks) {
+      strips[i].mute = mode === "mute";
+      strips[i].gain = mode === "low" ? -30 : 0;
+      send(i);
+    }
+    ltcNotice = false;
+  }
+
+  async function load(paths: string[], scan = true) {
     loading = true;
     try {
       await close();
@@ -97,6 +131,7 @@
       position = 0;
       timer = window.setInterval(poll, 33);
       app.status = paths.join(", ");
+      if (scan) scanLtc(paths);
     } catch (err) {
       app.status = String(err);
     } finally {
@@ -187,7 +222,8 @@
     const keep = strips.map((s) => ({ ...s }));
     const gain = master.gain;
     const at = position;
-    await load(loaded);
+    // Même fichiers : l'analyse LTC et les réglages de l'utilisateur sont conservés.
+    await load(loaded, false);
     if (!session) return;
     keep.forEach((k, i) => {
       if (!strips[i]) return;
@@ -226,6 +262,19 @@
 {:else}
   <div class="layout" class:withlogs={logs}>
   <div class="audio">
+    <div class="top">
+    {#if ltcNotice}
+      <div class="ltcnotice" role="status">
+        <span>
+          {t("sound.ltc.found")}
+          {ltcTracks.map((i) => `${strips[i]?.name} (${ltc[i]?.timecode}, ${ltc[i]?.fps} i/s)`).join(", ")}.
+          {t("sound.ltc.muted")}
+        </span>
+        <button onclick={() => setLtc("mute")}>{t("sound.ltc.keep")}</button>
+        <button onclick={() => setLtc("low")}>{t("sound.ltc.low")}</button>
+        <button onclick={() => setLtc("on")}>{t("sound.ltc.on")}</button>
+      </div>
+    {/if}
     <header>
       <div class="clock">
         <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
@@ -251,6 +300,7 @@
       </div>
       <button class="change" onclick={open}>{t("player.change")}</button>
     </header>
+    </div>
 
     <div class="scrubwrap">
       <input
@@ -280,7 +330,7 @@
       <div class="strips">
         {#each strips as s, i (i)}
           <div class="strip" class:muted={s.mute} class:soloed={s.solo}>
-            <span class="name" title={s.name}>{s.name}</span>
+            <span class="name" title={s.name}>{#if ltc[i]}<b class="ltc" title={`LTC ${ltc[i]?.timecode}`}>LTC</b> {/if}{s.name}</span>
             <div class="meter-fader">
               <Meter db={s.level} hold={s.hold} />
               <Fader bind:value={s.gain} label={s.name} onchange={() => send(i)} />
@@ -411,6 +461,38 @@
   }
   .marks {
     color: var(--vf-mark);
+  }
+  .top {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-2);
+  }
+  .ltcnotice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--vf-space-2);
+    padding: var(--vf-space-1) var(--vf-space-2);
+    border: 1px solid var(--vf-warning);
+    border-radius: var(--vf-radius-sm);
+    color: var(--vf-warning);
+    font-size: var(--vf-text-sm);
+  }
+  .ltcnotice button {
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: 1px var(--vf-space-2);
+    font-size: var(--vf-text-sm);
+    cursor: pointer;
+  }
+  .ltc {
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--vf-warning);
+    color: var(--vf-on-accent);
+    font-size: var(--vf-text-xs);
   }
   .audio {
     min-height: 0;
