@@ -92,6 +92,35 @@ impl Source {
     }
 }
 
+/// Cherche un timecode LTC sur chaque piste des fichiers (analyse des
+/// `seconds` premières secondes). Résultat indexé comme les pistes de la
+/// session : `None` pour une piste de son ordinaire.
+pub fn scan_ltc(
+    paths: &[PathBuf],
+    seconds: f64,
+) -> Result<Vec<Option<crate::media::ltc::LtcDetection>>> {
+    let mut out = Vec::new();
+    for path in paths {
+        for mut source in Source::open(path)? {
+            let info = source.info().clone();
+            let frames = ((seconds * info.sample_rate as f64) as usize).min(info.frames as usize);
+            let mut buf = Vec::new();
+            let got = source.read(0, frames, &mut buf)?;
+            let ch = info.channels as usize;
+            for c in 0..ch {
+                let mono: Vec<f32> = buf[..got * ch]
+                    .iter()
+                    .skip(c)
+                    .step_by(ch)
+                    .copied()
+                    .collect();
+                out.push(crate::media::ltc::detect(&mono, info.sample_rate));
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub struct Producer {
     readers: Vec<Source>,
     info: SessionInfo,

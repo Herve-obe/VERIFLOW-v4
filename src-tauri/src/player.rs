@@ -8,11 +8,12 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::State;
+use veriflow_core::media::ltc::LtcDetection;
 use veriflow_core::player::audio::engine::{
     output_devices, AudioEngine, OutputChoice, OutputDevice, OutputInfo,
 };
 use veriflow_core::player::audio::mixer::{db_to_gain, gain_to_db};
-use veriflow_core::player::audio::producer::SessionInfo;
+use veriflow_core::player::audio::producer::{scan_ltc, SessionInfo};
 use veriflow_core::player::video::{FrameFormat, VideoClip, VideoPlayer};
 
 /// Taille maximale des images envoyées à l'interface (aperçu).
@@ -133,6 +134,15 @@ pub async fn audio_open(
     };
     state.audio.lock().map_err(text)?.insert(slot, engine);
     Ok(opened)
+}
+
+/// Cherche un timecode LTC sur chaque piste (4 premières secondes) : la piste
+/// concernée peut être coupée avant l'écoute.
+#[tauri::command]
+pub async fn audio_ltc_scan(paths: Vec<PathBuf>) -> CmdResult<Vec<Option<LtcDetection>>> {
+    tauri::async_runtime::spawn_blocking(move || scan_ltc(&paths, 4.0).map_err(text))
+        .await
+        .map_err(text)?
 }
 
 #[tauri::command]

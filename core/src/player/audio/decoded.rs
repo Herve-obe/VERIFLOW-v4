@@ -49,7 +49,7 @@ impl DecodedReader {
                 .map(|c| Some(format!("Piste {}", channel + c + 1)))
                 .collect();
             channel += channels as usize;
-            out.push(Self {
+            let mut reader = Self {
                 info,
                 stream,
                 child: None,
@@ -57,7 +57,12 @@ impl DecodedReader {
                 next: 0,
                 ended: false,
                 carry: Vec::new(),
-            });
+            };
+            // Décodage lancé dès l'ouverture : au premier lancement, FFmpeg
+            // (et l'antivirus sous Windows) peut mettre plusieurs secondes à
+            // démarrer ; mieux vaut que ce soit avant d'appuyer sur lecture.
+            let _ = reader.spawn(0);
+            out.push(reader);
         }
         Ok(out)
     }
@@ -237,6 +242,11 @@ mod tests {
         // Au-delà de la fin : rien.
         assert_eq!(r.read(200_000, 4800, &mut buf).unwrap(), 0);
 
+        // Analyse LTC : aucune des deux pistes n'en contient.
+        let scan =
+            crate::player::audio::producer::scan_ltc(std::slice::from_ref(&clip), 2.0).unwrap();
+        assert_eq!(scan, vec![None, None]);
+
         // Moteur complet : la vidéo s'ouvre comme une session de 2 pistes.
         let mut p =
             crate::player::audio::producer::Producer::open(std::slice::from_ref(&clip), 48_000)
@@ -246,5 +256,74 @@ mod tests {
         let mut block = Vec::new();
         assert!(p.next(&mut block).unwrap() > 0);
         assert!(peak(&block) > 0.05, "son mixé audible");
+    }
+
+    #[test]
+    fn finds_ltc_on_right_channel_of_a_video() {
+        if !ffmpeg_available() {
+            eprintln!("FFmpeg absent : test ignoré");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // Gauche : sinus (micro) ; droite : LTC 14:59:23:03 à 25 i/s.
+        let ltc = crate::media::ltc::tests::encode((14, 59, 23, 3), 25, 100, 48_000);
+        let wav = dir.path().join("son.wav");
+        crate::media::wav::write_test_wav(
+            &wav,
+            2,
+            48_000,
+            24,
+            false,
+            ltc.len() as u64,
+            None,
+            |n, c| {
+                if c == 0 {
+                    (n as f64 * 2.0 * std::f64::consts::PI * 440.0 / 48_000.0).sin() * 0.3
+                } else {
+                    ltc[n as usize] as f64
+                }
+            },
+        )
+        .unwrap();
+        let clip = dir.path().join("cam.mov");
+        let out = tools::command("ffmpeg")
+            .unwrap()
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x180:rate=25:duration=4",
+            ])
+            .arg("-i")
+            .arg(&wav)
+            .args([
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-c:v",
+                "mjpeg",
+                "-c:a",
+                "pcm_s24be",
+                "-shortest",
+            ])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let scan =
+            crate::player::audio::producer::scan_ltc(std::slice::from_ref(&clip), 3.0).unwrap();
+        assert_eq!(scan.len(), 2);
+        assert!(scan[0].is_none(), "le micro n'est pas du LTC");
+        let d = scan[1].as_ref().expect("LTC sur la piste droite");
+        // Première trame complète de l'extrait (la trame 03 commence avant lui).
+        assert_eq!(d.timecode, "14:59:23:04");
     }
 }

@@ -52,6 +52,7 @@ pub fn run() {
             player::video_close,
             player::video_lut,
             player::audio_outputs,
+            player::audio_ltc_scan,
             player::audio_open,
             player::audio_close,
             player::audio_transport,

@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod export;
 pub mod fields;
+pub mod ltc;
 pub mod preview;
 pub mod probe;
 pub mod wav;

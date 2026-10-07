@@ -132,6 +132,15 @@ export const videoClose = (slot: Slot = "player") => invoke<void>("video_close",
 /** LUT d'affichage ; `path` null pour la retirer. */
 export const videoLut = (path: string | null, slot: Slot = "player") => invoke<void>("video_lut", { path, slot });
 
+/** Timecode LTC trouvé sur une piste (voir core/src/media/ltc.rs). */
+export interface LtcDetection {
+  timecode: string;
+  fps: number;
+  frames: number;
+}
+/** Une entrée par piste : null pour une piste de son ordinaire. */
+export const audioLtcScan = (paths: string[]) => invoke<(LtcDetection | null)[]>("audio_ltc_scan", { paths });
+
 export const audioOutputs = () => invoke<OutputDevice[]>("audio_outputs");
 export const audioOpen = (paths: string[], slot: AudioSlot = "player", output: OutputChoice | null = null) =>
   invoke<AudioOpened>("audio_open", { paths, slot, output });
