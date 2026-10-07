@@ -91,6 +91,20 @@ Captures : `docs/captures/phase3_logs_tc_incruste.png`, `phase3_lut_affichage.pn
 - **Application** : version minimale déclarée à macOS 10.15 ; interface compilée pour Safari 13 ; affichage des images sans `createImageBitmap` sur les moteurs antérieurs à Safari 15.
 - **Diagnostic de démarrage** (`ui/public/boot.js`, JavaScript ES5) : si l'interface ne démarre pas, la fenêtre affiche la cause et la version du moteur web au lieu d'un écran noir.
 
+## Pistes son des vidéos et timecode LTC (ajout du 07/10/2026, demande d'Hervé)
+- **Pistes son** : sous l'image, chaque piste son de la vidéo a son niveau (mesuré avant le volume, donc visible même coupée), son volume (-60 à +12 dB) et sa coupure.
+- **Détection du LTC** :
+  - chaque piste est analysée à l'ouverture (4 premières secondes) par un décodeur SMPTE 12M intégré (`core/src/media/ltc.rs`) ;
+  - une piste qui porte du LTC (Tentacle Sync sur l'entrée droite d'une caméra, par exemple) est **coupée d'office** et marquée « LTC » ;
+  - un message propose de la laisser coupée, de la baisser à -30 dB ou de la réactiver ;
+  - c'est la même chose en mode AUDIO, pour les pistes LTC des enregistreurs.
+- **Contrôle du décodeur** : signaux générés par libltc, la bibliothèque de référence, à 25, 29,97 et 24 i/s ; timecodes relus à l'identique. Test automatique sur un MOV (micro à gauche, LTC à droite).
+- **Démarrage du son** :
+  - le décodage FFmpeg est lancé dès l'ouverture du clip ;
+  - en lecture, l'image attend que le son ait démarré (5 s au plus) pour partir synchrone ;
+  - au-delà, la lecture continue sans le son, avec un message.
+  - Cause du « son absent » sous Windows : au premier lancement, FFmpeg et l'antivirus mettaient plus que le délai accordé.
+
 ## Reste à faire (hors de cette PR)
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).
