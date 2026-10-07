@@ -20,3 +20,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 notify = "8"
 tokio = { version = "1", features = ["sync"] }
+
+# macOS : recalage de la vue web au redimensionnement (voir src/macos.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "objc2"] }

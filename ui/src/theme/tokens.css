@@ -51,6 +51,8 @@
   --vf-marker-black: #1b1e24;
   --vf-marker-white: #f2f4f7;
   --vf-tc-overlay-bg: rgb(0 0 0 / 0.55);
+  /* Sélection (repli des navigateurs sans color-mix). */
+  --vf-selection: rgb(59 167 255 / 0.24);
 
   /* Polices */
   --vf-font-ui: "Inter Variable", "Segoe UI", system-ui, sans-serif;
@@ -91,4 +93,5 @@
 }
 :root[data-mode="audio"] {
   --vf-accent: var(--vf-accent-audio);
+  --vf-selection: rgb(255 176 32 / 0.24);
 }

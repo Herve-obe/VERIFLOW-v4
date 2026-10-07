@@ -254,5 +254,6 @@
   "player.tc.overlay.hint": "Burnt-in timecode (display only)",
   "player.lut.filter": "LUT",
   "player.lut.remove": "Remove LUT",
-  "player.lut.hint": "Display LUT (.cube, .3dl): the file is never modified"
+  "player.lut.hint": "Display LUT (.cube, .3dl): the file is never modified",
+  "player.sound.stalled": "Sound does not start on this output: playing without sound. Check the selected audio output."
 }

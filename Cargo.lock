@@ -4431,6 +4431,8 @@ name = "veriflow"
 version = "4.0.0-1"
 dependencies = [
  "notify",
+ "objc2",
+ "objc2-core-foundation",
  "serde",
  "tauri",
  "tauri-build",

@@ -4,6 +4,8 @@
 mod commands;
 mod explorer;
 mod logs;
+#[cfg(target_os = "macos")]
+mod macos;
 mod media;
 mod offload;
 mod player;
@@ -29,6 +31,15 @@ pub fn run() {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
+            #[cfg(target_os = "macos")]
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = main.clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(_) = event {
+                        macos::refresh_webview_frame(&handle);
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

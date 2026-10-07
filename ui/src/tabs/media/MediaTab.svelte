@@ -411,6 +411,7 @@
   }
   tr.sel,
   .card.sel {
+    background: var(--vf-selection); /* Safari < 16.2 : sans color-mix */
     background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
   }
   .pv {

@@ -66,6 +66,12 @@
   let audioAt = 0;
   let audioPolling = false;
   let lastAudioPoll = 0;
+  // Le son ne sert d'horloge qu'une fois qu'il avance réellement : sinon
+  // (sortie muette, pilote bloqué) l'image resterait figée sur sa première image.
+  let audioTrusted = false;
+  let audioStartSecs = 0;
+  let audioStartAt = 0;
+  const AUDIO_STALL_MS = 700;
 
   let position = 0; // position fractionnaire (images) pendant la lecture
   let requested = 0; // dernière image demandée (sert de base au pas à pas)
@@ -187,9 +193,12 @@
   async function startAudio(fromFrame: number) {
     if (!audioClock() || audioPlaying) return;
     audioPlaying = true;
+    audioTrusted = false;
     const secs = fromFrame / fps(rate);
     audioPos = secs;
     audioAt = performance.now();
+    audioStartSecs = secs;
+    audioStartAt = audioAt;
     try {
       await audioSeek(secs, avSlot);
       await audioTransport("play", avSlot);
@@ -213,9 +222,17 @@
     lastAudioPoll = now;
     audioStatus(avSlot)
       .then((st) => {
-        if (audioPlaying && st.playing) {
+        if (!audioPlaying) return;
+        const at = performance.now();
+        if (st.playing && st.position > audioStartSecs + 0.02) {
+          audioTrusted = true;
           audioPos = st.position;
-          audioAt = performance.now();
+          audioAt = at;
+        } else if (!audioTrusted && at - audioStartAt > AUDIO_STALL_MS) {
+          // Le son n'avance pas : lecture poursuivie sur l'horloge de l'image.
+          stopAudio();
+          avError = t("player.sound.stalled");
+          app.status = avError;
         }
       })
       .catch(() => {})
@@ -230,8 +247,8 @@
     const ts = performance.now();
     const dt = lastTs ? (ts - lastTs) / 1000 : 0;
     lastTs = ts;
-    if (audioPlaying) {
-      pollAudio(ts);
+    if (audioPlaying) pollAudio(ts);
+    if (audioPlaying && audioTrusted) {
       position = (audioPos + (ts - audioAt) / 1000) * fps(rate);
     } else {
       position += dt * fps(rate) * speed;
@@ -534,13 +551,17 @@
     min-height: 0;
     background: var(--vf-video-bg);
     border-radius: var(--vf-radius-md);
-    display: grid;
-    place-items: center;
     overflow: hidden;
   }
+  /* Image ajustée à la zone disponible, sans jamais l'agrandir : en
+     position absolue, sa taille réelle ne pousse pas la mise en page
+     (indispensable avec le moteur web de macOS Catalina). */
   canvas {
-    max-width: 100%;
-    max-height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
   }
   .bar,

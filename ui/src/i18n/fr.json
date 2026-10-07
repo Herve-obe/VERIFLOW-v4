@@ -254,5 +254,6 @@
   "player.tc.overlay.hint": "Timecode incrusté dans l'image (affichage seulement)",
   "player.lut.filter": "LUT",
   "player.lut.remove": "Retirer la LUT",
-  "player.lut.hint": "LUT d'affichage (.cube, .3dl) : le fichier n'est jamais modifié"
+  "player.lut.hint": "LUT d'affichage (.cube, .3dl) : le fichier n'est jamais modifié",
+  "player.sound.stalled": "Le son ne démarre pas sur cette sortie : lecture sans le son. Vérifie la sortie audio choisie."
 }

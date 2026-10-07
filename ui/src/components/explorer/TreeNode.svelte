@@ -96,6 +96,7 @@
     background: var(--vf-surface-hover);
   }
   .row.sel {
+    background: var(--vf-selection); /* Safari < 16.2 : sans color-mix */
     background: color-mix(in srgb, var(--vf-accent) 25%, transparent);
   }
   .twisty {
