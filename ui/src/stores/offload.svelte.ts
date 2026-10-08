@@ -33,6 +33,12 @@ export const offload = $state({
   resume: null as OffloadRequest | null,
 });
 
+/** Retire une fiche de la file (les fichiers sur les disques ne sont pas touchés). */
+export function removeJob(id: number) {
+  offload.jobs = offload.jobs.filter((j) => j.id !== id);
+  delete offload.requests[id];
+}
+
 /** Vrai si la copie s'est arrêtée avant d'être complète et vérifiée. */
 export function interrupted(j: Job): boolean {
   if (j.state === "failed") return true;
