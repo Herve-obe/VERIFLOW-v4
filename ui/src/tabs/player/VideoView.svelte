@@ -234,7 +234,7 @@
 
   /** Relève la position réelle du son (au plus 10 fois par seconde). */
   function pollAudio(now: number) {
-    if (audioPolling || now - lastAudioPoll < 100) return;
+    if (audioPolling || now - lastAudioPoll < (audioTrusted ? 100 : 25)) return;
     audioPolling = true;
     lastAudioPoll = now;
     const asked = performance.now();
@@ -312,6 +312,7 @@
   }
 
   function setSpeed(s: number) {
+    cancelResume();
     const wasStopped = speed === 0;
     speed = s;
     if (s !== 0 && wasStopped) {
@@ -325,10 +326,17 @@
     else stopAudio();
   }
 
-  function pause() {
+  /** Arrêt de l'horloge et du son, sans toucher à une reprise prévue. */
+  function halt() {
     speed = 0;
     window.clearTimeout(timer);
     stopAudio();
+    primeAudio();
+  }
+
+  function pause() {
+    cancelResume();
+    halt();
   }
 
   function stop() {
@@ -336,17 +344,64 @@
     if (clip) show(0);
   }
 
-  function step(delta: number) {
-    pause();
-    show(requested + delta);
+  // ---------- Déplacement pendant la lecture ----------
+  // Un clic sur la barre ou une image par image pendant la lecture déplace la
+  // tête puis la lecture reprend d'elle-même à la nouvelle position.
+
+  const RESUME_MS = 250;
+  let resumeSpeed = 0;
+  let resumeTimer = 0;
+
+  function cancelResume() {
+    resumeSpeed = 0;
+    window.clearTimeout(resumeTimer);
   }
 
-  function seek(frame: number) {
-    pause();
+  /** Va à l'image `frame` ; si la lecture était en cours, elle reprendra. */
+  function jump(frame: number, resumeNow = true) {
+    if (speed !== 0) resumeSpeed = speed;
+    halt();
     show(frame);
+    window.clearTimeout(resumeTimer);
+    if (resumeSpeed !== 0 && resumeNow) resumeTimer = window.setTimeout(resume, RESUME_MS);
   }
 
-  const toggle = () => (speed === 0 ? setSpeed(1) : pause());
+  function resume() {
+    // On attend que l'image demandée soit affichée : la lecture part d'elle.
+    if (inFlight || pending !== null) {
+      resumeTimer = window.setTimeout(resume, 20);
+      return;
+    }
+    const s = resumeSpeed;
+    resumeSpeed = 0;
+    if (s !== 0) setSpeed(s);
+  }
+
+  /** Relâchement de la barre : reprise immédiate si la lecture était en cours. */
+  function scrubEnd() {
+    window.clearTimeout(resumeTimer);
+    if (resumeSpeed !== 0) resume();
+  }
+
+  const step = (delta: number) => jump(requested + delta);
+  const seek = (frame: number) => jump(frame);
+
+  // ---------- Préparation du son ----------
+  // Après une pause ou un déplacement, le son est placé à la position de
+  // l'image : son décodeur démarre pendant l'arrêt et la lecture repart vite.
+
+  let primeTimer = 0;
+  function primeAudio() {
+    window.clearTimeout(primeTimer);
+    primeTimer = window.setTimeout(() => {
+      if (!avReady || !soundOn || audioPlaying || speed !== 0) return;
+      if (inFlight || pending !== null) return primeAudio();
+      audioSeek(shown / fps(rate), avSlot).catch(() => {});
+    }, 150);
+  }
+
+  // Une reprise en attente compte comme une lecture en cours.
+  const toggle = () => (speed === 0 && resumeSpeed === 0 ? setSpeed(1) : pause());
   const forward = () => setSpeed(speed <= 0 ? 1 : Math.min(speed * 2, 8));
   const back = () => setSpeed(speed >= 0 ? -1 : Math.max(speed * 2, -8));
 
@@ -425,6 +480,7 @@
 
   onDestroy(() => {
     pause();
+    window.clearTimeout(primeTimer);
     videoClose(slot).catch(() => {});
     audioClose(avSlot).catch(() => {});
   });
@@ -460,10 +516,8 @@
           min="0"
           max={last}
           value={shown}
-          oninput={(e) => {
-            pause();
-            show(Number(e.currentTarget.value));
-          }}
+          oninput={(e) => jump(Number(e.currentTarget.value), false)}
+          onchange={scrubEnd}
         />
         {#each markers as m (m.id)}
           {#if m.in_frame !== null && m.out_frame !== null}

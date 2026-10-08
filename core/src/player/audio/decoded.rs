@@ -110,6 +110,17 @@ impl DecodedReader {
         Ok(())
     }
 
+    /// Lance le décodage à `start` sans attendre la lecture : le démarrage de
+    /// FFmpeg se fait pendant la pause, pas au moment d'appuyer sur lecture.
+    pub fn prepare(&mut self, start: u64) -> Result<()> {
+        if start < self.info.frames
+            && (start != self.next || (self.stdout.is_none() && !self.ended))
+        {
+            self.spawn(start)?;
+        }
+        Ok(())
+    }
+
     /// Même contrat que `WavReader::read` : jusqu'à `frames` images à partir
     /// de `start`, entrelacées, dans `out` ; 0 en fin de média.
     pub fn read(&mut self, start: u64, frames: usize, out: &mut Vec<f32>) -> Result<usize> {

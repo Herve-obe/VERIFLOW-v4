@@ -84,6 +84,13 @@ impl Source {
         }
     }
 
+    fn prepare(&mut self, start: u64) -> Result<()> {
+        match self {
+            Source::Wav(_) => Ok(()),
+            Source::Decoded(r) => r.prepare(start),
+        }
+    }
+
     fn read(&mut self, start: u64, frames: usize, out: &mut Vec<f32>) -> Result<usize> {
         match self {
             Source::Wav(r) => r.read(start, frames, out),
@@ -235,6 +242,14 @@ impl Producer {
         if let Some(r) = self.resampler.as_mut() {
             r.reset();
         }
+    }
+
+    /// Prépare les décodeurs à la position courante (après un saut).
+    pub fn prepare(&mut self) -> Result<()> {
+        for r in &mut self.readers {
+            r.prepare(self.pos)?;
+        }
+        Ok(())
     }
 
     /// Remet la loudness intégrée à zéro.

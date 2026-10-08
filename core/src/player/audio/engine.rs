@@ -373,6 +373,8 @@ fn reader_loop(
                 Command::ResetLoudness => producer.reset_loudness(),
                 Command::Seek(frame) => {
                     producer.seek(frame);
+                    // Décodeurs relancés tout de suite, pendant la pause.
+                    let _ = producer.prepare();
                     block.clear();
                     sent = 0;
                     // Demande à la carte son de vider le tampon, puis attend.

@@ -1,7 +1,10 @@
 //! Analyse d'un fichier média via FFprobe (charte §7.2).
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -188,6 +191,38 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
 
 /// Analyse un fichier avec FFprobe.
 pub fn probe(path: &Path) -> Result<MediaInfo> {
+    // Un même média est analysé plusieurs fois à l'ouverture (image, son,
+    // recherche de LTC) : FFprobe ne tourne qu'une fois tant que le fichier
+    // ne change pas (taille et date de modification).
+    let key = std::fs::metadata(path)
+        .ok()
+        .map(|m| (path.to_path_buf(), m.len(), m.modified().ok()));
+    if let Some(k) = &key {
+        if let Some(info) = cache().lock().ok().and_then(|c| c.get(k).cloned()) {
+            return Ok(info);
+        }
+    }
+    let info = run_ffprobe(path)?;
+    if let (Some(k), Ok(mut c)) = (key, cache().lock()) {
+        if c.len() >= PROBE_CACHE {
+            c.clear();
+        }
+        c.insert(k, info.clone());
+    }
+    Ok(info)
+}
+
+/// Nombre maximal d'analyses gardées en mémoire.
+const PROBE_CACHE: usize = 512;
+
+type ProbeKey = (PathBuf, u64, Option<SystemTime>);
+
+fn cache() -> &'static Mutex<HashMap<ProbeKey, MediaInfo>> {
+    static CACHE: OnceLock<Mutex<HashMap<ProbeKey, MediaInfo>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn run_ffprobe(path: &Path) -> Result<MediaInfo> {
     let output = tools::command("ffprobe")?
         .args([
             "-v",
