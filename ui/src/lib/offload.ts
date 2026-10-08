@@ -36,6 +36,8 @@ export interface OffloadRequest {
   existing?: ExistingMode;
   /** Date du modèle {date} (reprise d'une copie : même dossier). */
   date?: string | null;
+  /** Dossiers finals imposés (reprise d'une copie trouvée dans un autre dossier). */
+  roots?: string[] | null;
 }
 
 export type ExistingMode = "verify" | "complete" | "replace";
@@ -69,6 +71,8 @@ export interface PreflightView {
   already_in_destination: boolean[];
   present: Present[];
   date: string;
+  /** Par destination : copies de cette carte trouvées dans d'autres dossiers. */
+  elsewhere: (Present & { root: string })[][];
   hdd: boolean[];
   source_hdd: boolean;
   previous: { finished_at: string; source_name: string; destinations: string[] }[];
@@ -120,6 +124,8 @@ export const volumes = () => invoke<Volume[]>("offload_volumes");
 export const preflight = (request: OffloadRequest) => invoke<PreflightView>("offload_preflight", { request });
 export const start = (request: OffloadRequest, eject: boolean, check: number | null = null) =>
   invoke<number>("offload_start", { request, eject, check });
+export const templatePreview = (template: string, vars: OffloadRequest["vars"], card: string, date: string | null) =>
+  invoke<string>("offload_template_preview", { template, vars, card, date });
 export const checkExisting = (request: OffloadRequest) => invoke<CheckView>("offload_check_existing", { request });
 export const checkCancel = () => invoke<void>("offload_check_cancel");
 export const onCheckProgress = (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>

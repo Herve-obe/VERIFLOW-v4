@@ -11,7 +11,7 @@
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -52,6 +52,10 @@
   let resumeSource = "";
   // Demande en attente du choix « compléter / tout recopier ».
   let existingFor = $state<OffloadRequest | null>(null);
+  // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
+  // dossier), valables tant que source, destinations et modèle ne changent pas.
+  let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
+  const formKey = () => JSON.stringify([source, destinations, template, jour, camera]);
   let summaryEl = $state<HTMLElement | null>(null);
   let revealSummary = false;
 
@@ -73,6 +77,34 @@
     operator: operator || null,
     notes: notes || null,
     date: source && source === resumeSource ? resumeDate : null,
+    roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
+  });
+
+  /** Reprend la copie dans les dossiers où elle a été trouvée. */
+  function useElsewhere() {
+    if (!pre) return;
+    rootsOverride = { key: formKey(), roots: pre.roots.map((r, i) => pre!.elsewhere[i][0]?.root ?? r) };
+  }
+
+  // Aperçu du chemin produit par le modèle, sous le champ.
+  let preview = $state("");
+  let previewTimer = 0;
+  $effect(() => {
+    const vars = { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null };
+    const card = source.split(/[\\/]/).filter(Boolean).pop() ?? "A001";
+    const base = destinations[0] ?? "";
+    const sep = base.includes("\\") ? "\\" : "/";
+    const tpl = template;
+    const date = source && source === resumeSource ? resumeDate : null;
+    window.clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(() => {
+      templatePreview(tpl, vars, card, date)
+        .then((rel) => {
+          const relNative = rel.split(/[\\/]/).join(sep);
+          preview = base ? `${base.replace(/[\\/]+$/, "")}${sep}${relNative}` : relNative;
+        })
+        .catch(() => (preview = ""));
+    }, 150);
   });
 
   // « Reprendre la copie » depuis la file d'attente : formulaire rempli avec
@@ -91,6 +123,7 @@
     notes = r.notes ?? "";
     jour = r.vars.jour ?? "";
     camera = r.vars.camera ?? "";
+    rootsOverride = r.roots ? { key: formKey(), roots: [...r.roots] } : null;
     revealSummary = true;
   });
 
@@ -274,6 +307,9 @@
 
     <div class="block grid">
       <label>{t("offload.template")}<input class="mono" bind:value={template} /></label>
+      {#if preview}
+        <p class="wide preview small">{t("offload.template.example")} <span class="mono">{request().roots?.[0] ?? preview}</span></p>
+      {/if}
       <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" /></label>
       <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" /></label>
       <label>{t("offload.operator")}<input bind:value={operator} /></label>
@@ -310,6 +346,22 @@
             {:else if pre.already_in_destination[i]}<span class="warn"> {t("offload.warn.existing.short")}</span>{/if}
           </p>
         {/each}
+        {#if request().roots}
+          <p class="note small">
+            {t("offload.elsewhere.forced")}
+            <button class="link" onclick={() => (rootsOverride = null)}>{t("offload.elsewhere.back")}</button>
+          </p>
+        {:else if pre.elsewhere.some((l) => l.length > 0)}
+          <div class="elsewhere">
+            <p class="warn">{t("offload.elsewhere.found")}</p>
+            {#each pre.elsewhere as list, i (i)}
+              {#if list[0]}
+                <p class="mono small">{i + 1}. {list[0].root} : {list[0].files} {t("offload.files")} ({bytes(list[0].bytes)})</p>
+              {/if}
+            {/each}
+            <button onclick={useElsewhere}>{t("offload.elsewhere.use")}</button>
+          </div>
+        {/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}
         {#if pre.source_hdd || pre.hdd.some((h) => h)}<p class="warn">{t("offload.hdd")}</p>{/if}
       {:else}
@@ -503,6 +555,39 @@
   .muted {
     color: var(--vf-text-muted);
     margin: 0;
+  }
+  .preview {
+    margin: -2px 0 0;
+    color: var(--vf-text-muted);
+    overflow-wrap: anywhere;
+  }
+  .preview .mono {
+    color: var(--vf-text);
+  }
+  .elsewhere {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--vf-space-1);
+    padding: var(--vf-space-2);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+  }
+  .elsewhere p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .note {
+    margin: 0;
+    color: var(--vf-text-muted);
+  }
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--vf-accent);
+    cursor: pointer;
+    text-decoration: underline;
   }
   .warn {
     color: var(--vf-warning);

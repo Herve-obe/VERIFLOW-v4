@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use serde::{Deserialize, Serialize};
 
 use super::engine::{check_space, run, Event, OffloadSpec, OffloadSummary};
-use super::existing::{self, ExistingMode, Known, Present};
+use super::existing::{self, Elsewhere, ExistingMode, Known, Present};
 use super::hash::HashAlgo;
 use super::mhl::{write_generation, MhlAuthor};
 use super::report::{write_reports, ReportData, ReportFiles, ReportInfo};
@@ -45,6 +45,10 @@ pub struct OffloadRequest {
     /// reprise garde la date de la copie interrompue (même dossier).
     #[serde(default)]
     pub date: Option<String>,
+    /// Dossiers finals imposés (un par destination), à la place du modèle :
+    /// reprise d'une copie trouvée dans un autre dossier.
+    #[serde(default)]
+    pub roots: Option<Vec<PathBuf>>,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -120,6 +124,9 @@ pub struct Preflight {
     pub present: Vec<Present>,
     /// Date utilisée pour le modèle `{date}`.
     pub date: String,
+    /// Par destination, si le dossier final ne contient encore rien : copies
+    /// de cette carte trouvées dans d'autres dossiers (autre date...).
+    pub elsewhere: Vec<Vec<Elsewhere>>,
     #[serde(skip)]
     pub inventory: Option<SourceInventory>,
 }
@@ -133,10 +140,28 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
     let inv = scan(&crate::absolute_path(&req.source))?;
     let date = req.date.clone().unwrap_or_else(local_date);
     let rel = render_template(&req.template, &inv.name, &req.vars, &date);
-    let roots: Vec<PathBuf> = req
-        .destinations
+    let roots: Vec<PathBuf> = match &req.roots {
+        Some(r) if r.len() == req.destinations.len() => {
+            r.iter().map(|p| crate::absolute_path(p)).collect()
+        }
+        _ => req
+            .destinations
+            .iter()
+            .map(|d| crate::absolute_path(&d.join(&rel)))
+            .collect(),
+    };
+    let present: Vec<Present> = roots.iter().map(|r| existing::present(&inv, r)).collect();
+    let elsewhere = roots
         .iter()
-        .map(|d| crate::absolute_path(&d.join(&rel)))
+        .zip(&req.destinations)
+        .zip(&present)
+        .map(|((root, base), p)| {
+            if p.files > 0 || p.partial > 0 {
+                Vec::new()
+            } else {
+                existing::find_elsewhere(&inv, &crate::absolute_path(base), root)
+            }
+        })
         .collect();
     Ok(Preflight {
         source_name: inv.name.clone(),
@@ -148,7 +173,8 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
             .iter()
             .map(|r| r.join("ascmhl/ascmhl_chain.xml").exists())
             .collect(),
-        present: roots.iter().map(|r| existing::present(&inv, r)).collect(),
+        present,
+        elsewhere,
         date,
         roots,
         inventory: Some(inv),
@@ -292,6 +318,7 @@ mod tests {
             notes: None,
             existing: ExistingMode::Verify,
             date: None,
+            roots: None,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);

@@ -61,6 +61,70 @@ pub fn present(inv: &SourceInventory, root: &Path) -> Present {
     p
 }
 
+/// Copie (partielle ou complète) de la carte trouvée dans un autre dossier
+/// d'une destination.
+#[derive(Debug, Clone, Serialize)]
+pub struct Elsewhere {
+    pub root: PathBuf,
+    #[serde(flatten)]
+    pub present: Present,
+}
+
+/// Nombre maximal de dossiers examinés par niveau lors de la recherche.
+const SEARCH_LIMIT: usize = 5000;
+
+/// Cherche sous `base` d'autres dossiers contenant déjà des rushes de la
+/// source : dossiers de même nom que le dossier final `root`, à la même
+/// profondeur (la même carte rangée sous une autre date, par exemple). Le
+/// plus fourni d'abord.
+pub fn find_elsewhere(inv: &SourceInventory, base: &Path, root: &Path) -> Vec<Elsewhere> {
+    let (Ok(rel), Some(name)) = (root.strip_prefix(base), root.file_name()) else {
+        return Vec::new();
+    };
+    let depth = rel.components().count();
+    if depth < 2 {
+        return Vec::new(); // dossier final directement sous la destination
+    }
+    // Dossiers parents possibles, niveau par niveau (dossiers cachés et
+    // historiques ascmhl ignorés).
+    let mut level = vec![base.to_path_buf()];
+    for _ in 0..depth - 1 {
+        let mut next = Vec::new();
+        for dir in &level {
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                if n.starts_with('.') || n == "ascmhl" {
+                    continue;
+                }
+                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    next.push(e.path());
+                }
+                if next.len() >= SEARCH_LIMIT {
+                    break;
+                }
+            }
+        }
+        level = next;
+    }
+    let mut found: Vec<Elsewhere> = level
+        .into_iter()
+        .map(|parent| parent.join(name))
+        .filter(|c| c.as_path() != root && c.is_dir())
+        .map(|c| Elsewhere {
+            present: present(inv, &c),
+            root: c,
+        })
+        .filter(|e| e.present.files > 0 || e.present.partial > 0)
+        .collect();
+    found.sort_by_key(|e| std::cmp::Reverse(e.present.files));
+    found.truncate(5);
+    found
+}
+
 /// Résultat de la vérification d'une destination.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DestCheck {
@@ -312,6 +376,27 @@ mod tests {
         assert!(!dest.join("CLIP/C0001.MP4").exists());
         assert!(!dest.join("CLIP/.C0002.MP4.vfpart").exists());
         assert!(dest.join("notes.txt").exists());
+    }
+
+    #[test]
+    fn finds_a_partial_copy_under_another_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let inv = scan(&src).unwrap();
+        let base = dir.path().join("SSD");
+        // Copie partielle de la veille, et une autre carte sans rapport.
+        let old = base.join("2026-10-07/A001/CLIP");
+        fs::create_dir_all(&old).unwrap();
+        fs::copy(src.join("CLIP/C0001.MP4"), old.join("C0001.MP4")).unwrap();
+        fs::create_dir_all(base.join("2026-10-07/B002/CLIP")).unwrap();
+        fs::create_dir_all(base.join("2026-10-06/A001")).unwrap();
+        let today = base.join("2026-10-08/A001");
+        let found = find_elsewhere(&inv, &base, &today);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].root, base.join("2026-10-07/A001"));
+        assert_eq!(found[0].present.files, 1);
+        // Modèle sans sous-dossier : rien à chercher.
+        assert!(find_elsewhere(&inv, &base, &base.join("A001")).is_empty());
     }
 
     #[test]

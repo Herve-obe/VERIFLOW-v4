@@ -12,7 +12,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use veriflow_core::offload::engine::Event;
 use veriflow_core::offload::existing::{self, CheckProgress, DestCheck, Known};
-use veriflow_core::offload::job::{execute, preflight, JobResult, OffloadRequest, Preflight};
+use veriflow_core::offload::job::{
+    execute, local_date, preflight, render_template, JobResult, OffloadRequest, Preflight,
+    TemplateVars,
+};
 use veriflow_core::offload::storage::{self, Volume};
 use veriflow_core::project::PreviousOffload;
 
@@ -160,6 +163,20 @@ fn run_job(app: &AppHandle, job: Job) {
             error: e.to_string(),
         }),
     }
+}
+
+/// Chemin relatif produit par le modèle d'arborescence, pour l'aperçu sous le
+/// champ (date du jour, ou date imposée d'une reprise).
+#[tauri::command]
+pub fn offload_template_preview(
+    template: String,
+    vars: TemplateVars,
+    card: String,
+    date: Option<String>,
+) -> String {
+    render_template(&template, &card, &vars, &date.unwrap_or_else(local_date))
+        .display()
+        .to_string()
 }
 
 #[tauri::command]
