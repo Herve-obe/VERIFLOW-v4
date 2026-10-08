@@ -6,8 +6,8 @@
   import AudioView from "./AudioView.svelte";
 </script>
 
-<div class="view" class:hidden={app.mode !== "video"}><VideoView /></div>
-<div class="view" class:hidden={app.mode !== "audio"}><AudioView /></div>
+<div class="view" class:hidden={app.mode !== "video"}><VideoView path={app.playerVideo} /></div>
+<div class="view" class:hidden={app.mode !== "audio"}><AudioView paths={app.playerAudio} /></div>
 
 <style>
   .view {

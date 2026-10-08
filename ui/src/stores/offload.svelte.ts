@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { onNotice, type FileResult, type JobResult, type Notice } from "../lib/offload";
+import { onNotice, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "running" | "done" | "failed";
 
@@ -25,7 +25,26 @@ export interface Job {
 
 const RECENT = 200; // lignes affichées dans le tableau d'avancement
 
-export const offload = $state({ jobs: [] as Job[] });
+export const offload = $state({
+  jobs: [] as Job[],
+  /** Demande de chaque copie (reprise après interruption). */
+  requests: {} as Record<number, OffloadRequest>,
+  /** Copie à reprendre : le formulaire est rempli avec cette demande. */
+  resume: null as OffloadRequest | null,
+});
+
+/** Retire une fiche de la file (les fichiers sur les disques ne sont pas touchés). */
+export function removeJob(id: number) {
+  offload.jobs = offload.jobs.filter((j) => j.id !== id);
+  delete offload.requests[id];
+}
+
+/** Vrai si la copie s'est arrêtée avant d'être complète et vérifiée. */
+export function interrupted(j: Job): boolean {
+  if (j.state === "failed") return true;
+  if (j.state !== "done" || !j.result) return false;
+  return j.result.summary.cancelled || j.result.summary.failed_files > 0;
+}
 
 function job(id: number): Job | undefined {
   return offload.jobs.find((j) => j.id === id);

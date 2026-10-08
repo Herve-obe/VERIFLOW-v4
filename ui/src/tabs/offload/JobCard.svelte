@@ -4,7 +4,8 @@
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
   import { cancel, reveal, type DestStatus } from "../../lib/offload";
-  import type { Job } from "../../stores/offload.svelte";
+  import { confirm } from "@tauri-apps/plugin-dialog";
+  import { offload, interrupted, removeJob, type Job } from "../../stores/offload.svelte";
 
   let { job }: { job: Job } = $props();
   let showAll = $state(false);
@@ -21,6 +22,25 @@
   const barState = $derived(job.state === "failed" || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
 
+  // Reprise proposée tant que la carte n'a pas été recopiée avec succès depuis.
+  const resumable = $derived(
+    interrupted(job) &&
+      !!offload.requests[job.id] &&
+      !offload.jobs.some((o) => o.id > job.id && o.source === job.source && o.state === "done" && !interrupted(o)),
+  );
+
+  /** Retire la fiche après confirmation ; une copie en cours est d'abord annulée. */
+  async function remove() {
+    const active = job.state === "queued" || job.state === "running";
+    const ok = await confirm(t(active ? "offload.remove.active" : "offload.remove.done"), {
+      title: t("offload.remove.title"),
+      kind: "warning",
+    });
+    if (!ok) return;
+    if (active) await cancel(job.id).catch(() => {});
+    removeJob(job.id);
+  }
+
   const label = (d: DestStatus) =>
     d.state === "verified" ? t("offload.status.verified") : d.state === "resumed_verified" ? t("offload.status.resumed") : t("offload.status.failed");
 </script>
@@ -29,11 +49,18 @@
   <header>
     <div>
       <h3>{job.result?.source_name ?? job.source}</h3>
-      <span class="state">{t(`offload.job.${job.state}`)}</span>
+      <span class="state">{t(`offload.job.${job.result?.summary.cancelled ? "cancelled" : job.state}`)}</span>
     </div>
-    {#if job.state === "queued" || job.state === "running"}
-      <button class="ghost" onclick={() => cancel(job.id)}>{t("offload.cancel")}</button>
-    {/if}
+    <div class="tools">
+      {#if job.state === "queued" || job.state === "running"}
+        <button class="ghost" onclick={() => cancel(job.id)}>{t("offload.cancel")}</button>
+      {:else if resumable}
+        <button onclick={() => (offload.resume = offload.requests[job.id])}>{t("offload.resume")}</button>
+      {/if}
+      <button class="close" onclick={remove} title={t("offload.remove.title")} aria-label={t("offload.remove.title")}>
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+      </button>
+    </div>
   </header>
 
   <ProgressBar value={job.state === "done" ? 1 : progress} state={barState} />
@@ -143,7 +170,35 @@
   header {
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--vf-space-2);
+  }
+  .tools {
+    display: flex;
     align-items: center;
+    gap: var(--vf-space-2);
+    flex: none;
+  }
+  .close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--vf-text-muted);
+    border-radius: var(--vf-radius-sm);
+    cursor: pointer;
+  }
+  .close:hover {
+    background: var(--vf-surface-hover);
+    color: var(--vf-text);
+  }
+  .close svg {
+    width: 12px;
+    height: 12px;
   }
   h3 {
     margin: 0;

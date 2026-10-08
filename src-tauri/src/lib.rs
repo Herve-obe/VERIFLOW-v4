@@ -3,6 +3,9 @@
 
 mod commands;
 mod explorer;
+mod logs;
+#[cfg(target_os = "macos")]
+mod macos;
 mod media;
 mod offload;
 mod player;
@@ -28,6 +31,15 @@ pub fn run() {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
+            #[cfg(target_os = "macos")]
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = main.clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Resized(_) = event {
+                        macos::refresh_webview_frame(&handle);
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -38,6 +50,9 @@ pub fn run() {
             player::video_open,
             player::video_frame,
             player::video_close,
+            player::video_lut,
+            player::audio_outputs,
+            player::audio_ltc_scan,
             player::audio_open,
             player::audio_close,
             player::audio_transport,
@@ -47,6 +62,9 @@ pub fn run() {
             offload::offload_volumes,
             offload::offload_preflight,
             offload::offload_start,
+            offload::offload_check_existing,
+            offload::offload_template_preview,
+            offload::offload_check_cancel,
             offload::offload_cancel,
             offload::offload_eject,
             offload::reveal,
@@ -62,6 +80,10 @@ pub fn run() {
             media::media_waveform,
             media::media_set,
             media::media_export,
+            logs::markers_list,
+            logs::marker_save,
+            logs::marker_delete,
+            logs::logs_export,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");

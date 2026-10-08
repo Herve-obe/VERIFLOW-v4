@@ -4,6 +4,15 @@ import { listDirs, volumes as fetchVolumes, onExplorer, norm, type DirEntry } fr
 import type { Volume } from "../lib/offload";
 
 const FAV_KEY = "veriflow.explorer.favorites";
+const EXPANDED_KEY = "veriflow.explorer.expanded";
+
+function loadExpanded(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
 
 function loadFavorites(): string[] {
   try {
@@ -16,6 +25,9 @@ function loadFavorites(): string[] {
 export const explorer = $state({
   volumes: [] as Volume[],
   favorites: loadFavorites(),
+  /** Dossiers dépliés (chemins normalisés) : communs aux onglets OFFLOAD et
+   *  MEDIA et conservés d'une session à l'autre. */
+  expanded: new Set<string>(loadExpanded()),
   /** Sous-dossiers déjà lus, par chemin normalisé. */
   children: {} as Record<string, DirEntry[]>,
   /** Incrémenté à chaque changement signalé (pour rafraîchir les vues). */
@@ -41,6 +53,24 @@ export function toggleFavorite(path: string) {
 /** Chemin d'origine de chaque dossier lu : la forme normalisée perd la barre
  *  finale des racines Windows (« D:\ » devient « D: », relatif au lecteur). */
 const origin = new Map<string, string>();
+
+/** Déplie ou replie un dossier (dans tous les explorateurs). */
+export function toggleExpanded(path: string) {
+  const k = norm(path);
+  origin.set(k, path);
+  const next = new Set(explorer.expanded);
+  if (next.has(k)) next.delete(k);
+  else next.add(k);
+  explorer.expanded = next;
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
+/** Chemin d'origine d'un dossier à partir de sa forme normalisée. */
+export const originOf = (key: string) => origin.get(key) ?? key;
 
 export async function loadChildren(path: string): Promise<DirEntry[]> {
   origin.set(norm(path), path);

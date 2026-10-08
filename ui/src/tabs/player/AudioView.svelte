@@ -4,10 +4,15 @@
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
+  import OutputPicker from "../../components/OutputPicker.svelte";
+  import MarkersPanel from "./MarkersPanel.svelte";
+  import LtcNotice from "./LtcNotice.svelte";
+  import { output, currentOutput } from "../../stores/output.svelte";
+  import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { resolvePlayerAction } from "../../shortcuts";
-  import { secondsToClock } from "../../lib/timecode";
+  import { secondsToClock, framesToTc } from "../../lib/timecode";
   import {
     pickAudio,
     audioOpen,
@@ -16,6 +21,8 @@
     audioSeek,
     audioTrack,
     audioStatus,
+    audioLtcScan,
+    type LtcDetection,
     type AudioOpened,
     type Slot,
   } from "../../lib/player";
@@ -24,7 +31,8 @@
     slot = "player",
     paths: initialPaths = null,
     active = () => app.tab === "player" && app.mode === "audio",
-  }: { slot?: Slot; paths?: string[] | null; active?: () => boolean } = $props();
+    logs = true,
+  }: { slot?: Slot; paths?: string[] | null; active?: () => boolean; logs?: boolean } = $props();
 
   interface Strip {
     name: string;
@@ -49,21 +57,68 @@
   let loading = $state(false);
   let timer = 0;
   let lastPoll = performance.now();
+  let loaded = $state<string[]>([]);
+  let markers = $state<Marker[]>([]);
+  let markIn = $state<number | null>(null);
+  let markOut = $state<number | null>(null);
+  let panel = $state<{ add: () => Promise<void> } | null>(null);
+
 
   const duration = $derived(session?.session.duration ?? 0);
   const first = $derived(session?.session.files[0]);
   const tcStart = $derived(first?.time_reference != null ? first.time_reference / first.sample_rate : null);
+
+  // Marqueurs sur une grille de 25 i/s (comme le cœur), TC de départ BWF.
+  const LOG_RATE = { num: AUDIO_LOG_FPS, den: 1 };
+  const logFrame = $derived(Math.round(position * AUDIO_LOG_FPS));
+  const lastFrame = $derived(Math.max(1, Math.round(duration * AUDIO_LOG_FPS)));
+  const startFrame = $derived(Math.round((tcStart ?? 0) * AUDIO_LOG_FPS));
+  const tc = (f: number) => framesToTc(startFrame + f, LOG_RATE, false);
 
   async function open() {
     const picked = await pickAudio(t("player.filter.audio"));
     if (picked.length > 0) await load(picked);
   }
 
-  async function load(paths: string[]) {
+  // Pistes portant un timecode LTC : coupées d'office pour protéger l'écoute.
+  let ltc = $state<(LtcDetection | null)[]>([]);
+  let ltcNotice = $state(false);
+  const ltcTracks = $derived(ltc.map((d, i) => (d ? i : -1)).filter((i) => i >= 0));
+
+  function scanLtc(paths: string[]) {
+    ltc = [];
+    ltcNotice = false;
+    audioLtcScan(paths)
+      .then((r) => {
+        if (loaded !== paths) return;
+        ltc = r;
+        r.forEach((d, i) => {
+          if (d && strips[i]) {
+            strips[i].mute = true;
+            send(i);
+          }
+        });
+        ltcNotice = r.some((d) => d);
+      })
+      .catch(() => {});
+  }
+
+  function setLtc(mode: "mute" | "low" | "on") {
+    for (const i of ltcTracks) {
+      strips[i].mute = mode === "mute";
+      strips[i].gain = mode === "low" ? -30 : 0;
+      send(i);
+    }
+    ltcNotice = false;
+  }
+
+  async function load(paths: string[], scan = true) {
     loading = true;
     try {
       await close();
-      session = await audioOpen(paths, slot);
+      session = await audioOpen(paths, slot, currentOutput());
+      loaded = paths;
+      markIn = markOut = null;
       strips = session.session.tracks.map((tr) => ({
         name: tr.name,
         gain: 0,
@@ -77,6 +132,7 @@
       position = 0;
       timer = window.setInterval(poll, 33);
       app.status = paths.join(", ");
+      if (scan) scanLtc(paths);
     } catch (err) {
       app.status = String(err);
     } finally {
@@ -152,11 +208,40 @@
       case "shuttle.back": seekBy(-5); break;
       case "step.forward": seekBy(1); break;
       case "step.back": seekBy(-1); break;
+      case "mark.in": markIn = logFrame; break;
+      case "mark.out": markOut = logFrame; break;
+      case "mark.add": panel?.add(); break;
     }
   }
 
   const fmt = (v: number | null) => (v === null ? "-inf" : v.toFixed(1));
   const fmtDb = (v: number) => (v <= -60 ? "-inf" : (v > 0 ? "+" : "") + v.toFixed(1));
+
+  /** Rouvre la session sur une autre sortie en gardant position et réglages. */
+  async function reopen() {
+    if (loaded.length === 0) return;
+    const keep = strips.map((s) => ({ ...s }));
+    const gain = master.gain;
+    const at = position;
+    // Même fichiers : l'analyse LTC et les réglages de l'utilisateur sont conservés.
+    await load(loaded, false);
+    if (!session) return;
+    keep.forEach((k, i) => {
+      if (!strips[i]) return;
+      Object.assign(strips[i], { gain: k.gain, pan: k.pan, mute: k.mute, solo: k.solo });
+      send(i);
+    });
+    master.gain = gain;
+    sendMaster();
+    audioSeek(at, slot);
+  }
+
+  $effect(() => {
+    void output.revision;
+    untrack(() => {
+      if (session) reopen();
+    });
+  });
 
   // Ouverture au changement de fichiers uniquement (voir VideoView).
   $effect(() => {
@@ -176,7 +261,12 @@
     <p class="hint">{t("player.shortcuts")}</p>
   </div>
 {:else}
+  <div class="layout" class:withlogs={logs}>
   <div class="audio">
+    <div class="top">
+    {#if ltcNotice}
+      <LtcNotice names={strips.map((st) => st.name)} {ltc} onChoice={setLtc} />
+    {/if}
     <header>
       <div class="clock">
         <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
@@ -188,28 +278,51 @@
         {#if first?.ixml.take}<span>{t("player.take")} <b>{first.ixml.take}</b></span>{/if}
         <span>{strips.length} {t("player.tracks")}, {session.session.sample_rate / 1000} kHz, {first?.bits} bits{first?.format === "Float" ? " float" : ""}</span>
         <span class:warn={session.output.resampling}>
-          {t("player.output")} : {session.output.device}, {session.output.sample_rate / 1000} kHz
+          {t("player.output")} : {session.output.device}{session.output.first_channel > 0
+            ? ` (${session.output.first_channel + 1}-${session.output.first_channel + 2})`
+            : ""}, {session.output.sample_rate / 1000} kHz
           ({session.output.resampling ? t("player.resampling") : t("player.native")})
         </span>
+        <OutputPicker />
+        {#if markIn !== null || markOut !== null}
+          <span class="marks mono">
+            {t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)} · {t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}
+          </span>
+        {/if}
       </div>
       <button class="change" onclick={open}>{t("player.change")}</button>
     </header>
+    </div>
 
-    <input
-      class="scrub"
-      type="range"
-      min="0"
-      max={duration}
-      step="0.01"
-      value={position}
-      oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
-    />
+    <div class="scrubwrap">
+      <input
+        class="scrub"
+        type="range"
+        min="0"
+        max={duration}
+        step="0.01"
+        value={position}
+        oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
+      />
+      {#each markers as m (m.id)}
+        {#if m.in_frame !== null && m.out_frame !== null}
+          <span
+            class="span"
+            style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
+            style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
+            style:background={markerCss(m.color)}
+          ></span>
+        {:else}
+          <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
+        {/if}
+      {/each}
+    </div>
 
     <div class="console">
       <div class="strips">
         {#each strips as s, i (i)}
           <div class="strip" class:muted={s.mute} class:soloed={s.solo}>
-            <span class="name" title={s.name}>{s.name}</span>
+            <span class="name" title={s.name}>{#if ltc[i]}<b class="ltc" title={`LTC ${ltc[i]?.timecode}`}>LTC</b> {/if}{s.name}</span>
             <div class="meter-fader">
               <Meter db={s.level} hold={s.hold} />
               <Fader bind:value={s.gain} label={s.name} onchange={() => send(i)} />
@@ -251,6 +364,20 @@
       </div>
     </div>
   </div>
+  {#if logs}
+    <MarkersPanel
+      bind:this={panel}
+      path={loaded[0] ?? null}
+      frame={logFrame}
+      {tc}
+      {markIn}
+      {markOut}
+      onSeek={(f) => audioSeek(f / AUDIO_LOG_FPS, slot)}
+      onRangeUsed={() => (markIn = markOut = null)}
+      onChange={(m) => (markers = m)}
+    />
+  {/if}
+  </div>
 {/if}
 
 <style>
@@ -286,7 +413,62 @@
     cursor: pointer;
     margin-left: auto;
   }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+  }
+  .layout.withlogs {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: var(--vf-space-2);
+    padding-right: var(--vf-space-3);
+    padding-block: var(--vf-space-3);
+  }
+  .layout.withlogs .audio {
+    padding: 0 0 0 var(--vf-space-3);
+  }
+  .scrubwrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .scrubwrap .scrub {
+    flex: 1;
+  }
+  .tick,
+  .span {
+    position: absolute;
+    top: -6px;
+    height: 5px;
+    pointer-events: none;
+    border-radius: 1px;
+  }
+  .tick {
+    width: 3px;
+    margin-left: -1px;
+  }
+  .span {
+    opacity: 0.8;
+  }
+  .marks {
+    color: var(--vf-mark);
+  }
+  .top {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-2);
+  }
+  .ltc {
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--vf-warning);
+    color: var(--vf-on-accent);
+    font-size: var(--vf-text-xs);
+  }
   .audio {
+    position: relative;
+    min-height: 0;
     display: grid;
     grid-template-rows: auto auto 1fr;
     grid-template-columns: minmax(0, 1fr);

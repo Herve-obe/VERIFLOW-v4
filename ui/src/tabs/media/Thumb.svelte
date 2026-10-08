@@ -45,7 +45,7 @@
 
 <style>
   .thumb {
-    aspect-ratio: 16 / 9;
+    position: relative;
     background: var(--vf-video-bg);
     border-radius: var(--vf-radius-sm);
     overflow: hidden;
@@ -53,7 +53,18 @@
     place-items: center;
     color: var(--vf-text-disabled);
   }
+  /* Case 16/9 : hauteur réservée par un pourcentage de la largeur (fonctionne
+     sur tous les moteurs, contrairement à aspect-ratio, absent de Catalina). */
+  .thumb::before {
+    content: "";
+    display: block;
+    padding-top: 56.25%;
+  }
+  /* En position absolue : l'image ne peut pas étirer la case. */
   img {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;

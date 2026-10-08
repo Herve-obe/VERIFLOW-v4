@@ -11,10 +11,15 @@ function matches(e: KeyboardEvent, s: Shortcut): boolean {
   );
 }
 
+const NOT_TEXT = ["range", "checkbox", "radio", "button"];
+
 /** Vrai si l'utilisateur est en train de saisir du texte. */
 export function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
+  // Barre de défilement, case à cocher... : pas de saisie, les raccourcis
+  // (Espace pour lire) restent actifs après un clic dessus.
+  if (target instanceof HTMLInputElement && NOT_TEXT.includes(target.type)) return false;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
 

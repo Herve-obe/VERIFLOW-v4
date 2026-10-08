@@ -4,10 +4,10 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Cadence exprimée en fraction exacte (ex. 30000/1001 pour 29.97).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameRate {
     pub num: u32,
     pub den: u32,

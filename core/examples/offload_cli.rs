@@ -25,6 +25,7 @@ fn main() {
     let spec = OffloadSpec {
         destinations: destinations.clone(),
         algorithms: algos.clone(),
+        known: None,
     };
     println!("{} fichiers, {} octets", inv.files.len(), inv.total_bytes);
     let summary = run(&inv, &spec, &AtomicBool::new(false), |e| {

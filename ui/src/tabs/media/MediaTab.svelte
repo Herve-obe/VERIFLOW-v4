@@ -9,7 +9,7 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { explorer } from "../../stores/explorer.svelte";
   import { watch, norm } from "../../lib/explorer";
-  import { app } from "../../stores/app.svelte";
+  import { app, openInPlayer } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
   import { isTyping } from "../../shortcuts";
@@ -223,6 +223,14 @@
 <div class="media">
   <div class="toolbar">
     <button onclick={choose}>{t("media.open")}</button>
+    <button
+      class="toplayer"
+      disabled={selection.length !== 1}
+      onclick={() => selection[0] && openInPlayer(selection[0].path, selection[0].kind)}
+      title={t("media.open.player.hint")}
+    >
+      {t("media.open.player")}
+    </button>
     <span class="path mono" title={dir}>{dir || t("media.none")}</span>
     <label class="check"><input type="checkbox" bind:checked={recursive} onchange={() => dir && load(dir)} /> {t("media.recursive")}</label>
     <input class="search" placeholder={t("media.search")} bind:value={search} />
@@ -411,7 +419,7 @@
   }
   tr.sel,
   .card.sel {
-    background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
+    background: var(--vf-selection);
   }
   .pv {
     width: 84px;
@@ -473,5 +481,19 @@
   .statusline {
     padding: 2px var(--vf-space-3);
     border-top: 1px solid var(--vf-border);
+  }
+  .toplayer:not(:disabled) {
+    border-color: var(--vf-accent);
+    color: var(--vf-accent);
+  }
+  .toplayer:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    tr.sel,
+    .card.sel {
+      background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
+    }
   }
 </style>

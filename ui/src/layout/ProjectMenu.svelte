@@ -2,33 +2,11 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { t } from "../i18n/index.svelte";
-  import { projectCreate, projectOpen, projectClose, pickProjectToCreate, pickProjectToOpen } from "../lib/api";
+  import { createProject, openProject, closeProject } from "../lib/project";
 
-  async function run(action: () => Promise<void>) {
-    try {
-      await action();
-    } catch (err) {
-      app.status = `${t("project.error")} : ${err}`;
-    }
-  }
-
-  const create = () =>
-    run(async () => {
-      const path = await pickProjectToCreate();
-      if (path) app.project = await projectCreate(path);
-    });
-
-  const open = () =>
-    run(async () => {
-      const path = await pickProjectToOpen();
-      if (path) app.project = await projectOpen(path);
-    });
-
-  const close = () =>
-    run(async () => {
-      await projectClose();
-      app.project = null;
-    });
+  const create = () => createProject();
+  const open = () => openProject();
+  const close = () => closeProject();
 </script>
 
 <div class="project">

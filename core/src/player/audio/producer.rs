@@ -11,6 +11,7 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler};
 use serde::Serialize;
 
+use super::decoded::DecodedReader;
 use super::mixer::{mix, AtomicF32, MixerControls};
 use crate::media::wav::{WavInfo, WavReader};
 use crate::{Error, Result};
@@ -38,15 +39,97 @@ pub struct SessionInfo {
 }
 
 /// Mesures partagées avec l'interface.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LoudnessMeters {
     pub momentary: AtomicF32,
     pub short_term: AtomicF32,
     pub integrated: AtomicF32,
 }
 
+impl Default for LoudnessMeters {
+    /// Rien de mesuré : -inf (affiché « -inf »), et non 0 LUFS.
+    fn default() -> Self {
+        Self {
+            momentary: AtomicF32::new(f32::NEG_INFINITY),
+            short_term: AtomicF32::new(f32::NEG_INFINITY),
+            integrated: AtomicF32::new(f32::NEG_INFINITY),
+        }
+    }
+}
+
+/// Source d'un fichier : WAV/BWF/RF64 lu directement, autre format décodé par FFmpeg.
+enum Source {
+    Wav(WavReader),
+    Decoded(DecodedReader),
+}
+
+impl Source {
+    /// Sources d'un fichier : une pour un WAV, une par piste son sinon.
+    fn open(path: &std::path::Path) -> Result<Vec<Self>> {
+        match WavReader::open(path) {
+            Ok(r) => Ok(vec![Source::Wav(r)]),
+            Err(wav_err) => match DecodedReader::open_all(path) {
+                Ok(r) => Ok(r.into_iter().map(Source::Decoded).collect()),
+                // FFmpeg absent : l'erreur WAV est plus parlante.
+                Err(Error::ToolMissing(_)) => Err(wav_err),
+                Err(e) => Err(e),
+            },
+        }
+    }
+
+    fn info(&self) -> &WavInfo {
+        match self {
+            Source::Wav(r) => r.info(),
+            Source::Decoded(r) => r.info(),
+        }
+    }
+
+    fn prepare(&mut self, start: u64) -> Result<()> {
+        match self {
+            Source::Wav(_) => Ok(()),
+            Source::Decoded(r) => r.prepare(start),
+        }
+    }
+
+    fn read(&mut self, start: u64, frames: usize, out: &mut Vec<f32>) -> Result<usize> {
+        match self {
+            Source::Wav(r) => r.read(start, frames, out),
+            Source::Decoded(r) => r.read(start, frames, out),
+        }
+    }
+}
+
+/// Cherche un timecode LTC sur chaque piste des fichiers (analyse des
+/// `seconds` premières secondes). Résultat indexé comme les pistes de la
+/// session : `None` pour une piste de son ordinaire.
+pub fn scan_ltc(
+    paths: &[PathBuf],
+    seconds: f64,
+) -> Result<Vec<Option<crate::media::ltc::LtcDetection>>> {
+    let mut out = Vec::new();
+    for path in paths {
+        for mut source in Source::open(path)? {
+            let info = source.info().clone();
+            let frames = ((seconds * info.sample_rate as f64) as usize).min(info.frames as usize);
+            let mut buf = Vec::new();
+            let got = source.read(0, frames, &mut buf)?;
+            let ch = info.channels as usize;
+            for c in 0..ch {
+                let mono: Vec<f32> = buf[..got * ch]
+                    .iter()
+                    .skip(c)
+                    .step_by(ch)
+                    .copied()
+                    .collect();
+                out.push(crate::media::ltc::detect(&mono, info.sample_rate));
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub struct Producer {
-    readers: Vec<WavReader>,
+    readers: Vec<Source>,
     info: SessionInfo,
     controls: Arc<MixerControls>,
     meters: Arc<LoudnessMeters>,
@@ -71,8 +154,11 @@ impl Producer {
         }
         let readers = paths
             .iter()
-            .map(|p| WavReader::open(p))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|p| Source::open(p))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         let sample_rate = readers[0].info().sample_rate;
         if let Some(r) = readers.iter().find(|r| r.info().sample_rate != sample_rate) {
             return Err(Error::Unsupported(format!(
@@ -156,6 +242,14 @@ impl Producer {
         if let Some(r) = self.resampler.as_mut() {
             r.reset();
         }
+    }
+
+    /// Prépare les décodeurs à la position courante (après un saut).
+    pub fn prepare(&mut self) -> Result<()> {
+        for r in &mut self.readers {
+            r.prepare(self.pos)?;
+        }
+        Ok(())
     }
 
     /// Remet la loudness intégrée à zéro.

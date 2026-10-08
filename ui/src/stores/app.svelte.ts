@@ -14,7 +14,22 @@ export const app = $state({
   tab: "offload" as Tab,
   project: null as ProjectInfo | null,
   status: "",
+  /** Média demandé dans l'onglet PLAYER (bouton « Ouvrir dans le PLAYER » de MEDIA). */
+  playerVideo: null as string | null,
+  playerAudio: null as string[] | null,
 });
+
+/** Ouvre un média dans l'onglet PLAYER, dans le mode qui lui correspond. */
+export function openInPlayer(path: string, kind: "video" | "audio" | "image" | string) {
+  if (kind === "audio") {
+    app.playerAudio = [path];
+    setMode("audio");
+  } else {
+    app.playerVideo = path;
+    setMode("video");
+  }
+  app.tab = "player";
+}
 
 export function setMode(mode: Mode) {
   app.mode = mode;

@@ -1,65 +1,46 @@
-<!-- Lecteur rapide (pop-up) : Échap pour fermer. Indépendant de l'onglet PLAYER. -->
+<!-- Lecteur rapide (fenêtre déplaçable) : Échap pour fermer. Indépendant de
+     l'onglet PLAYER, où le média peut être ouvert d'un clic. -->
 <script lang="ts">
+  import Modal from "../../components/Modal.svelte";
   import VideoView from "../player/VideoView.svelte";
   import AudioView from "../player/AudioView.svelte";
+  import { openInPlayer } from "../../stores/app.svelte";
+  import { t } from "../../i18n/index.svelte";
   import type { MediaEntry } from "../../lib/media";
 
   let { media, onClose }: { media: MediaEntry; onClose: () => void } = $props();
+
+  function toPlayer() {
+    openInPlayer(media.path, media.kind);
+    onClose();
+  }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
-
-<div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && onClose()}>
-  <div class="dialog" role="dialog" aria-modal="true" aria-label={media.name}>
-    <header>
-      <span class="mono">{media.name}</span>
-      <button onclick={onClose} aria-label="Fermer">✕</button>
-    </header>
-    <div class="body">
-      {#if media.kind === "audio"}
-        <AudioView slot="preview" paths={[media.path]} active={() => true} />
-      {:else}
-        <VideoView slot="preview" path={media.path} active={() => true} />
-      {/if}
-    </div>
+<Modal title={media.name} {onClose} width="min(1200px, 94vw)" height="min(820px, 90vh)">
+  {#snippet actions()}
+    <button class="toplayer" onclick={toPlayer}>{t("media.open.player")}</button>
+  {/snippet}
+  <div class="content">
+    {#if media.kind === "audio"}
+      <AudioView slot="preview" paths={[media.path]} active={() => true} logs={false} />
+    {:else}
+      <VideoView slot="preview" path={media.path} active={() => true} logs={false} />
+    {/if}
   </div>
-</div>
+</Modal>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgb(0 0 0 / 0.6);
-    display: grid;
-    place-items: center;
-    z-index: 10;
+  .content {
+    height: 100%;
   }
-  .dialog {
-    width: min(1100px, 92vw);
-    height: min(760px, 86vh);
-    display: grid;
-    grid-template-rows: auto 1fr;
-    background: var(--vf-bg);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-lg);
-    overflow: hidden;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--vf-space-2) var(--vf-space-3);
-    background: var(--vf-surface);
-    border-bottom: 1px solid var(--vf-border);
-  }
-  button {
-    background: none;
+  .toplayer {
+    background: var(--vf-accent);
+    color: var(--vf-on-accent);
     border: 0;
-    color: var(--vf-text);
+    border-radius: var(--vf-radius-sm);
+    padding: 3px var(--vf-space-3);
+    font-size: var(--vf-text-sm);
+    font-weight: 600;
     cursor: pointer;
-  }
-  .body {
-    min-height: 0;
-    overflow: auto;
   }
 </style>

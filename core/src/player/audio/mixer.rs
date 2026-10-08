@@ -126,12 +126,16 @@ pub fn mix(input: &[f32], channels: usize, controls: &MixerControls, out: &mut [
             !track.mute.load(Ordering::Relaxed)
         };
         let gain = track.gain.get();
+        // Crête avant le volume (niveau enregistré) : visible même sur une
+        // piste coupée ou baissée à l'écoute, par exemple une piste LTC.
         let mut peak = 0f32;
+        for f in 0..frames {
+            peak = peak.max(input[f * channels + ch].abs());
+        }
         if audible && gain > 0.0 {
             let (gl, gr) = pan_gains(track.pan.get());
             for f in 0..frames {
                 let s = input[f * channels + ch] * gain;
-                peak = peak.max(s.abs());
                 out[f * 2] += s * gl;
                 out[f * 2 + 1] += s * gr;
             }
@@ -188,7 +192,8 @@ mod tests {
         mix(&input, 3, &c, &mut out);
         assert!(approx(out[0], 0.5) && approx(out[1], 0.25));
         assert!(approx(c.tracks[0].peak.take(), 0.5));
-        assert_eq!(c.tracks[2].peak.take(), 0.0, "piste muette : pas de crête");
+        // Crête avant le volume : une piste coupée reste mesurée (niveau enregistré).
+        assert!(approx(c.tracks[2].peak.take(), 1.0), "piste muette mesurée");
         assert!(approx(c.master_peak[0].take(), 0.5));
 
         // SOLO de la piste 1 : seule audible, même si la piste 0 n'est pas muette.

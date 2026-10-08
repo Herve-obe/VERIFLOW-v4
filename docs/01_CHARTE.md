@@ -38,7 +38,7 @@ Promesse : **un seul outil, sur un portable, sans réseau, qui protège juridiqu
 | Élément | Cible |
 |---|---|
 | Windows | 10 et 11, x64 |
-| macOS | 12 Monterey et plus, Apple Silicon et Intel |
+| macOS | Intel : **10.15 Catalina et plus** (décision du 07/10/2026, iMac 2017 d'Hervé non évolutif). Apple Silicon : 12 Monterey et plus (FFmpeg ARM disponible exige macOS 12) |
 | Linux | Bonus (Ubuntu 22.04+ / Debian 12+), sans engagement de support |
 | Processeur | 4 cœurs minimum |
 | RAM | 8 Go minimum |
@@ -118,7 +118,7 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Interface | Svelte 5 + TypeScript | MIT | Onglets, formulaires, tableaux |
 | Cœur | Rust | GPL-3.0-or-later (VERIFLOW) | Logique métier |
 | Copie et checksums | Rust (crates `xxhash-rust`, RustCrypto `md-5`, `sha1`, `sha2`) | BSL-1.0 / MIT / Apache 2.0 | OFFLOAD |
-| Décodage, encodage, analyse | Programmes `ffmpeg` et `ffprobe` 9.0.2 (build GPL statique avec x264, x265) **intégrés à l'installeur** (décision du 05/10/2026 : outil autonome, sans Internet) et pilotés en processus séparé | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
+| Décodage, encodage, analyse | Programmes `ffmpeg` et `ffprobe` 9.0.2 (build GPL statique avec x264, x265) **intégrés à l'installeur** (décision du 05/10/2026 : outil autonome, sans Internet) et pilotés en processus séparé. Sources épinglées par empreinte SHA-256 : gyan.dev (Windows), evermeet.cx (macOS Intel, macOS 10.13+), martin-riedl.de (macOS Apple Silicon et Linux) | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
 | Lecture vidéo | Décodage FFmpeg avec saut exact à l'image, aperçu JPEG 4:4:4 affiché dans l'interface | GPL / navigateur intégré | PLAYER VIDEO, image par image (validé en phase 0 bis) |
 | Audio temps réel | `cpal` (WASAPI, CoreAudio, ALSA/JACK) | Apache 2.0 | PLAYER AUDIO |
 | Rééchantillonnage | `rubato` | MIT | Conversion si la carte son ne suit pas |
