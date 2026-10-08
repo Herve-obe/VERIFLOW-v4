@@ -44,6 +44,8 @@
   "player.resolution": "Résolution",
   "player.rate": "Cadence",
   "player.tc.start": "TC début",
+  "player.timing": "Délais",
+  "player.timing.hint": "Ouverture / première image / son prêt (depuis l'ouverture) / départ de la lecture avec le son",
   "player.display.fps": "Affichage",
   "player.output": "Sortie audio",
   "player.resampling": "conversion",

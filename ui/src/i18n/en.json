@@ -44,6 +44,8 @@
   "player.resolution": "Resolution",
   "player.rate": "Frame rate",
   "player.tc.start": "Start TC",
+  "player.timing": "Timings",
+  "player.timing.hint": "Open / first frame / sound ready (since opening) / playback start with sound",
   "player.display.fps": "Display",
   "player.output": "Audio output",
   "player.resampling": "converted",

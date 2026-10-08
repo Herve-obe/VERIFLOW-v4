@@ -95,6 +95,7 @@
   const last = $derived(Math.max(0, (clip?.frame_count ?? 1) - 1));
   const tc = (i: number) => framesToTc((clip?.start_frame ?? 0) + i, rate, dropFrame);
   const hasSound = $derived((clip?.info.audio.length ?? 0) > 0);
+  const ms = (v: number) => (v > 0 ? `${Math.round(v)} ms` : "-");
   const lutName = $derived(lut?.split(/[\\/]/).pop() ?? "");
 
   function readPref(k: string): string | null {
@@ -117,19 +118,30 @@
     if (picked) await load(picked);
   }
 
+  // Délais mesurés (ms), affichés dans les informations du clip : ouverture
+  // (analyse), première image, son prêt, départ de la lecture avec le son.
+  let timing = $state({ open: 0, image: 0, sound: 0, start: 0 });
+  let loadAt = 0;
+  let startAt = 0;
+
   async function load(p: string) {
     stop();
     loading = true;
+    loadAt = performance.now();
+    timing = { open: 0, image: 0, sound: 0, start: 0 };
     try {
       await closeSound();
       clip = await videoOpen(p, slot);
+      timing.open = performance.now() - loadAt;
       clipPath = p;
       markIn = markOut = null;
       if (lut) await videoLut(lut, slot).catch((e) => ((app.status = String(e)), (lut = null)));
-      // Son ouvert en même temps que la première image (pas l'un après l'autre).
-      openSound(p);
+      // Première image d'abord : le son (FFmpeg et carte son) s'ouvre ensuite,
+      // sans lui disputer le processeur ni le disque.
       await show(0);
+      timing.image = performance.now() - loadAt;
       app.status = p;
+      openSound(p);
     } catch (err) {
       app.status = String(err);
     } finally {
@@ -145,6 +157,7 @@
       const opened = await audioOpen([p], avSlot, currentOutput());
       if (clipPath !== p) return;
       avTracks = opened.session.tracks.map((tr) => tr.name);
+      timing.sound = performance.now() - loadAt;
       avLtc = [];
       avReady = true;
       // Timecode LTC sur une piste ? Elle sera coupée (protection de l'écoute).
@@ -217,6 +230,7 @@
     audioAt = performance.now();
     audioStartSecs = secs;
     audioStartAt = audioAt;
+    startAt = audioAt;
     try {
       await audioSeek(secs, avSlot);
       await audioTransport("play", avSlot);
@@ -254,6 +268,7 @@
           if (st.playing && st.position > audioStartSecs + 0.02 && st.position < audioStartSecs + elapsed + 0.5) {
             if (avError === t("player.sound.stalled")) avError = "";
             audioTrusted = true;
+            timing.start = performance.now() - startAt;
             audioPos = st.position;
             audioAt = stamp;
           } else if (at - audioStartAt > AUDIO_STALL_MS) {
@@ -591,6 +606,10 @@
       <dd class="mono" title="transfert / décodage et dessin">
         {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
       </dd>
+      <dt>{t("player.timing")}</dt>
+      <dd class="mono wide" title={t("player.timing.hint")}>
+        {ms(timing.open)} / {ms(timing.image)} / {ms(timing.sound)} / {ms(timing.start)}
+      </dd>
     </dl>
   </div>
   {#if logs}
@@ -808,5 +827,8 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  dd.wide {
+    grid-column: 2 / -1;
   }
 </style>
