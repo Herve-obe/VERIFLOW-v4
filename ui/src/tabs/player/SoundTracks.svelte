@@ -8,6 +8,7 @@
   import { untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
+  import LtcNotice from "./LtcNotice.svelte";
   import { t } from "../../i18n/index.svelte";
   import { audioTrack, type AudioSlot, type LtcDetection } from "../../lib/player";
 
@@ -103,18 +104,7 @@
 </script>
 
 {#if ltcTracks.length > 0 && notice}
-  <div class="notice" role="status">
-    <p>
-      <b>{t("sound.ltc.found")}</b>
-      {ltcTracks.map((i) => `${names[i]} (${ltc[i]?.timecode}, ${ltc[i]?.fps} i/s)`).join(", ")}.
-      {t("sound.ltc.muted")}
-    </p>
-    <div class="choices">
-      <button onclick={() => setLtc("mute")}>{t("sound.ltc.keep")}</button>
-      <button onclick={() => setLtc("low")}>{t("sound.ltc.low")}</button>
-      <button onclick={() => setLtc("on")}>{t("sound.ltc.on")}</button>
-    </div>
-  </div>
+  <LtcNotice {names} {ltc} onChoice={setLtc} />
 {/if}
 
 {#if names.length > 0}
@@ -166,7 +156,10 @@
     color: var(--vf-text-muted);
   }
   .tag {
-    height: 14px;
+    display: flex;
+    align-items: center;
+    height: 18px;
+    margin-bottom: var(--vf-space-1);
   }
   .ltc {
     padding: 0 4px;
@@ -199,40 +192,5 @@
     background: var(--vf-error);
     border-color: var(--vf-error);
     color: var(--vf-on-accent);
-  }
-  /* Message LTC posé sur le haut de l'image. */
-  .notice {
-    position: absolute;
-    top: var(--vf-space-3);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2;
-    max-width: 90%;
-    padding: var(--vf-space-2) var(--vf-space-3);
-    background: var(--vf-surface-high);
-    border: 1px solid var(--vf-warning);
-    border-radius: var(--vf-radius-md);
-    box-shadow: 0 4px 16px var(--vf-shadow);
-    font-size: var(--vf-text-sm);
-    color: var(--vf-text);
-  }
-  .notice p {
-    margin: 0 0 var(--vf-space-2);
-  }
-  .notice b {
-    color: var(--vf-warning);
-  }
-  .choices {
-    display: flex;
-    gap: var(--vf-space-2);
-  }
-  .choices button {
-    background: var(--vf-surface);
-    color: var(--vf-text);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-sm);
-    padding: 2px var(--vf-space-3);
-    font-size: var(--vf-text-sm);
-    cursor: pointer;
   }
 </style>

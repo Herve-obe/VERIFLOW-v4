@@ -360,16 +360,24 @@
     border-radius: var(--vf-radius-sm);
     padding: var(--vf-space-1) var(--vf-space-2);
   }
+  /* Colonnes minmax(0, 1fr) et champs à 100 % : un champ ne peut jamais
+     élargir sa colonne au-delà du cadre (moteur web de Catalina). */
   .grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--vf-space-2) var(--vf-space-3);
   }
   .grid label {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
     font-size: var(--vf-text-xs);
     color: var(--vf-text-muted);
+  }
+  .grid input {
+    width: 100%;
+    min-width: 0;
   }
   .grid label:first-child,
   .wide {

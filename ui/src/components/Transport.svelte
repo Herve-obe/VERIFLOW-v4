@@ -51,9 +51,14 @@
     align-items: center;
     gap: var(--vf-space-2);
   }
+  /* Centrage compatible avec les WebKit anciens (Catalina), où un bouton en
+     grille place l'icône à gauche : pas de marge intérieure, icône en bloc. */
   button {
-    display: grid;
-    place-items: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex: none;
     width: 34px;
     height: 30px;
     background: var(--vf-surface-high);
@@ -72,8 +77,10 @@
     border-color: var(--vf-accent);
   }
   svg {
+    display: block;
     width: 14px;
     height: 14px;
+    margin: 0 auto;
   }
   .speed {
     color: var(--vf-accent);

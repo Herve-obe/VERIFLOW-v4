@@ -46,7 +46,6 @@
 <style>
   .thumb {
     position: relative;
-    aspect-ratio: 16 / 9;
     background: var(--vf-video-bg);
     border-radius: var(--vf-radius-sm);
     overflow: hidden;
@@ -54,8 +53,14 @@
     place-items: center;
     color: var(--vf-text-disabled);
   }
-  /* En position absolue : l'image ne peut pas étirer la case (défaut de
-     aspect-ratio dans Safari 15, macOS Catalina). */
+  /* Case 16/9 : hauteur réservée par un pourcentage de la largeur (fonctionne
+     sur tous les moteurs, contrairement à aspect-ratio, absent de Catalina). */
+  .thumb::before {
+    content: "";
+    display: block;
+    padding-top: 56.25%;
+  }
+  /* En position absolue : l'image ne peut pas étirer la case. */
   img {
     position: absolute;
     top: 0;

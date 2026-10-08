@@ -6,6 +6,7 @@
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
+  import LtcNotice from "./LtcNotice.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
   import { app } from "../../stores/app.svelte";
@@ -264,16 +265,7 @@
   <div class="audio">
     <div class="top">
     {#if ltcNotice}
-      <div class="ltcnotice" role="status">
-        <span>
-          {t("sound.ltc.found")}
-          {ltcTracks.map((i) => `${strips[i]?.name} (${ltc[i]?.timecode}, ${ltc[i]?.fps} i/s)`).join(", ")}.
-          {t("sound.ltc.muted")}
-        </span>
-        <button onclick={() => setLtc("mute")}>{t("sound.ltc.keep")}</button>
-        <button onclick={() => setLtc("low")}>{t("sound.ltc.low")}</button>
-        <button onclick={() => setLtc("on")}>{t("sound.ltc.on")}</button>
-      </div>
+      <LtcNotice names={strips.map((st) => st.name)} {ltc} onChoice={setLtc} />
     {/if}
     <header>
       <div class="clock">
@@ -467,26 +459,6 @@
     flex-direction: column;
     gap: var(--vf-space-2);
   }
-  .ltcnotice {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--vf-space-2);
-    padding: var(--vf-space-1) var(--vf-space-2);
-    border: 1px solid var(--vf-warning);
-    border-radius: var(--vf-radius-sm);
-    color: var(--vf-warning);
-    font-size: var(--vf-text-sm);
-  }
-  .ltcnotice button {
-    background: var(--vf-surface-high);
-    color: var(--vf-text);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-sm);
-    padding: 1px var(--vf-space-2);
-    font-size: var(--vf-text-sm);
-    cursor: pointer;
-  }
   .ltc {
     padding: 0 3px;
     border-radius: 3px;
@@ -495,6 +467,7 @@
     font-size: var(--vf-text-xs);
   }
   .audio {
+    position: relative;
     min-height: 0;
     display: grid;
     grid-template-rows: auto auto 1fr;

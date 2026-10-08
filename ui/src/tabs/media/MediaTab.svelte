@@ -419,8 +419,7 @@
   }
   tr.sel,
   .card.sel {
-    background: var(--vf-selection); /* Safari < 16.2 : sans color-mix */
-    background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
+    background: var(--vf-selection);
   }
   .pv {
     width: 84px;
@@ -490,5 +489,11 @@
   .toplayer:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    tr.sel,
+    .card.sel {
+      background: color-mix(in srgb, var(--vf-accent) 22%, transparent);
+    }
   }
 </style>

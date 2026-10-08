@@ -96,12 +96,12 @@
     background: var(--vf-surface-hover);
   }
   .row.sel {
-    background: var(--vf-selection); /* Safari < 16.2 : sans color-mix */
-    background: color-mix(in srgb, var(--vf-accent) 25%, transparent);
+    background: var(--vf-selection);
   }
   .twisty {
-    display: grid;
-    place-items: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 14px;
     height: 14px;
     padding: 0;
@@ -138,5 +138,10 @@
     padding-left: var(--vf-space-2);
     font-size: var(--vf-text-xs);
     color: var(--vf-text-muted);
+  }
+  @supports (background: color-mix(in srgb, red 50%, transparent)) {
+    .row.sel {
+      background: color-mix(in srgb, var(--vf-accent) 25%, transparent);
+    }
   }
 </style>

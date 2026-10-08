@@ -4,6 +4,24 @@
    d'un écran vide. Couleurs en dur : les jetons du thème ne sont peut-être
    pas chargés à ce stade. */
 (function () {
+  // Espacement « gap » des conteneurs flex absent (WebKit antérieur à
+  // Safari 14.1, macOS Catalina) : la classe vf-nogap active les marges de
+  // remplacement générées à la compilation (ui/old-webkit.postcss.ts).
+  try {
+    var probe = document.createElement("div");
+    probe.style.display = "flex";
+    probe.style.flexDirection = "column";
+    probe.style.rowGap = "1px";
+    probe.style.position = "absolute";
+    probe.appendChild(document.createElement("div"));
+    probe.appendChild(document.createElement("div"));
+    document.body.appendChild(probe);
+    if (probe.scrollHeight !== 1) document.documentElement.className += " vf-nogap";
+    document.body.removeChild(probe);
+  } catch (e) {
+    /* détection impossible : on garde le CSS standard */
+  }
+
   var errors = [];
 
   function show(title) {
