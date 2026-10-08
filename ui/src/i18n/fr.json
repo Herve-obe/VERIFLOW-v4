@@ -270,5 +270,6 @@
   "logs.need.project.text": "Les marqueurs sont enregistrés dans le fichier projet .veriflow, jamais dans tes rushes. Crée ou ouvre un projet pour poser ce marqueur : il sera ajouté aussitôt.",
   "logs.need.project.open": "Ouvrir un projet",
   "logs.cancel": "Annuler",
-  "sound.ltc.title": "Timecode audio (LTC) détecté"
+  "sound.ltc.title": "Timecode audio (LTC) détecté",
+  "offload.removable.hint": "Supports amovibles détectés (cartes, disques externes) : un clic pour en faire la source."
 }

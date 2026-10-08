@@ -237,22 +237,39 @@
     if (audioPolling || now - lastAudioPoll < 100) return;
     audioPolling = true;
     lastAudioPoll = now;
+    const asked = performance.now();
     audioStatus(avSlot)
       .then((st) => {
         if (!audioPlaying) return;
         const at = performance.now();
+        // La position a été lue pendant l'aller-retour : datée au milieu, pour
+        // ne pas dépendre du temps de réponse (variable pendant la lecture).
+        const stamp = (asked + at) / 2;
         trackPeaks = st.track_peaks;
-        if (st.playing && st.position > audioStartSecs + 0.02) {
-          if (!audioTrusted && avError === t("player.sound.stalled")) avError = "";
-          audioTrusted = true;
-          audioPos = st.position;
-          audioAt = at;
-        } else if (!audioTrusted && at - audioStartAt > AUDIO_STALL_MS) {
-          // Le son n'avance pas : lecture poursuivie sur l'horloge de l'image.
-          stopAudio();
-          avError = t("player.sound.stalled");
-          app.status = avError;
+        if (!audioTrusted) {
+          // Le son est parti si sa position avance depuis le point de départ,
+          // sans dépasser ce qui a pu être joué depuis (position périmée).
+          const elapsed = (at - audioStartAt) / 1000;
+          if (st.playing && st.position > audioStartSecs + 0.02 && st.position < audioStartSecs + elapsed + 0.5) {
+            if (avError === t("player.sound.stalled")) avError = "";
+            audioTrusted = true;
+            audioPos = st.position;
+            audioAt = stamp;
+          } else if (at - audioStartAt > AUDIO_STALL_MS) {
+            // Le son n'avance pas : lecture poursuivie sur l'horloge de l'image.
+            stopAudio();
+            avError = t("player.sound.stalled");
+            app.status = avError;
+          }
+          return;
         }
+        if (!st.playing) return;
+        // Horloge lissée : un petit écart est rattrapé en douceur, un grand
+        // écart (plus d'une demi-seconde) est repris tel quel.
+        const predicted = audioPos + (stamp - audioAt) / 1000;
+        const err = st.position - predicted;
+        audioPos = Math.abs(err) > 0.5 ? st.position : predicted + err * 0.2;
+        audioAt = stamp;
       })
       .catch(() => {})
       .finally(() => (audioPolling = false));
@@ -273,7 +290,10 @@
       return;
     }
     if (audioPlaying && audioTrusted) {
-      position = (audioPos + (ts - audioAt) / 1000) * fps(rate);
+      // Pas de recul pour une correction de quelques millisecondes : l'image
+      // attend simplement que l'horloge la rattrape.
+      const p = (audioPos + (ts - audioAt) / 1000) * fps(rate);
+      if (p > position || position - p > fps(rate) / 2) position = p;
     } else {
       position += dt * fps(rate) * speed;
     }
@@ -377,9 +397,10 @@
       case "shuttle.pause": pause(); break;
       case "step.forward": step(1); break;
       case "step.back": step(-1); break;
-      case "mark.in": markIn = shown; break;
-      case "mark.out": markOut = shown; break;
-      case "mark.add": panel?.add(); break;
+      // Marqueurs, entrée et sortie : seulement dans l'onglet PLAYER (pas dans le lecteur rapide).
+      case "mark.in": if (logs) markIn = shown; break;
+      case "mark.out": if (logs) markOut = shown; break;
+      case "mark.add": if (logs) panel?.add(); break;
     }
   }
 
@@ -462,13 +483,15 @@
 
     <div class="controls">
       <Transport playing={speed !== 0} {speed} onToggle={toggle} onStop={stop} onBack={back} onForward={forward} />
-      <div class="marks mono">
+      {#if logs}
+        <div class="marks mono">
         <span>{t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)}</span>
         <span>{t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}</span>
         {#if markIn !== null && markOut !== null && markOut >= markIn}
           <span>{t("player.duration")} {framesToTc(markOut - markIn + 1, rate, dropFrame)}</span>
         {/if}
       </div>
+      {/if}
       <div class="tools">
         {#if hasSound}
           <button class="opt" class:on={soundOn && avReady} onclick={toggleSound} title={avError || t("player.sound.hint")} disabled={!avReady}>
@@ -713,5 +736,10 @@
   }
   dd {
     margin: 0;
+    min-width: 0;
+    /* Une seule ligne : la hauteur ne change pas pendant la lecture. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

@@ -22,8 +22,14 @@ use crate::{tools, Error, Result};
 const PREFETCH: usize = 8;
 /// Nombre d'images récentes conservées (retour arrière instantané).
 const CACHE: usize = 24;
-/// Au-delà de cet écart vers l'avant, on relance le décodage par un saut.
+/// Au-delà de cet écart vers l'avant, on relance le décodage par un saut
+/// (codecs intra, où le saut est direct).
 const MAX_SKIP: i64 = 12;
+/// En GOP long, un saut redécode au moins `PREROLL_SECONDS` : tant que le
+/// retard est inférieur à cette durée, mieux vaut décoder jusqu'à la cible.
+/// Sinon, un décodage un peu lent relance sans cesse FFmpeg et la lecture
+/// devient saccadée.
+const MAX_SKIP_SECONDS_LONG_GOP: f64 = 2.0;
 /// Marge de recul avant la cible lors d'un saut (couvre le réordonnancement
 /// des images B des codecs à GOP long).
 const PREROLL_SECONDS: f64 = 1.0;
@@ -354,8 +360,14 @@ impl VideoPlayer {
         if let Some((_, f)) = self.cache.iter().rev().find(|(i, _)| *i == index) {
             return Ok(Some(f.clone()));
         }
+        let max_skip = if self.timing.preroll > 0.0 {
+            ((MAX_SKIP_SECONDS_LONG_GOP / self.timing.frame_duration.max(1e-3)) as i64)
+                .max(MAX_SKIP)
+        } else {
+            MAX_SKIP
+        };
         let reuse =
-            matches!(&self.decoder, Some(d) if index >= d.next && index - d.next <= MAX_SKIP);
+            matches!(&self.decoder, Some(d) if index >= d.next && index - d.next <= max_skip);
         if !reuse {
             self.decoder = Some(Decoder::spawn(
                 &self.path,

@@ -270,5 +270,6 @@
   "logs.need.project.text": "Markers are saved in the .veriflow project file, never in your rushes. Create or open a project to add this marker: it will be added right away.",
   "logs.need.project.open": "Open a project",
   "logs.cancel": "Cancel",
-  "sound.ltc.title": "Audio timecode (LTC) detected"
+  "sound.ltc.title": "Audio timecode (LTC) detected",
+  "offload.removable.hint": "Removable media detected (cards, external drives): click one to use it as source."
 }

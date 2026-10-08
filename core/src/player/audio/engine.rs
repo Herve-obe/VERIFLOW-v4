@@ -126,6 +126,9 @@ struct Shared {
     ended: AtomicBool,
     base: AtomicU64,
     played: AtomicU64,
+    /// Sauts demandés et pas encore traités par le fil de lecture : la carte
+    /// son joue du silence (et la position ne bouge pas) en attendant.
+    seeking: AtomicU64,
 }
 
 enum Command {
@@ -330,9 +333,13 @@ impl AudioEngine {
 
     /// Saut à une position, en images source.
     pub fn seek(&self, frame: u64) {
-        let _ = self
-            .commands
-            .send(Command::Seek(frame.min(self.info.frames)));
+        let frame = frame.min(self.info.frames);
+        // Position annoncée tout de suite : sinon l'interface lirait encore
+        // l'ancienne position tant que le fil de lecture n'a pas traité le saut.
+        self.shared.seeking.fetch_add(1, Ordering::AcqRel);
+        self.shared.base.store(frame, Ordering::Relaxed);
+        self.shared.played.store(0, Ordering::Relaxed);
+        let _ = self.commands.send(Command::Seek(frame));
     }
 
     /// Position courante en images source.
@@ -373,8 +380,12 @@ fn reader_loop(
                     while shared.flush.load(Ordering::Acquire) {
                         thread::sleep(Duration::from_millis(1));
                     }
-                    shared.base.store(frame, Ordering::Relaxed);
-                    shared.played.store(0, Ordering::Relaxed);
+                    // Un saut plus récent attend encore : sa position, déjà
+                    // annoncée, ne doit pas être écrasée par celle-ci.
+                    if shared.seeking.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        shared.base.store(frame, Ordering::Relaxed);
+                        shared.played.store(0, Ordering::Relaxed);
+                    }
                     shared.ended.store(false, Ordering::Relaxed);
                 }
             }
@@ -388,6 +399,10 @@ fn reader_loop(
         if sent == block.len() {
             match producer.next(&mut block) {
                 Ok(0) | Err(_) => {
+                    // Bloc vidé par `next` : repartir de zéro (sinon `sent`
+                    // dépasse la taille du bloc et le fil s'arrête).
+                    block.clear();
+                    sent = 0;
                     shared.ended.store(true, Ordering::Relaxed);
                     thread::sleep(Duration::from_millis(5));
                     continue;
@@ -430,7 +445,8 @@ where
                     }
                     shared.flush.store(false, Ordering::Release);
                 }
-                let playing = shared.playing.load(Ordering::Relaxed);
+                let playing = shared.playing.load(Ordering::Relaxed)
+                    && shared.seeking.load(Ordering::Acquire) == 0;
                 let mut played = 0u64;
                 for frame in data.chunks_mut(channels) {
                     let (l, r) = if playing && rx.slots() >= 2 {

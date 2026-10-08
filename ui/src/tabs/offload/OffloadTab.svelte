@@ -173,6 +173,9 @@
         <h3>{t("offload.source")}</h3>
         <button class="ghost small" onclick={refreshVolumes}>{t("offload.refresh")}</button>
       </div>
+      {#if vols.some((v) => v.removable)}
+        <p class="muted small">{t("offload.removable.hint")}</p>
+      {/if}
       <div class="volumes">
         {#each vols.filter((v) => v.removable) as v (v.mount_point)}
           <button class="vol" class:sel={source === v.mount_point} onclick={() => (source = v.mount_point)} title={v.mount_point}>
@@ -291,6 +294,11 @@
     gap: var(--vf-space-3);
     overflow-y: auto;
     min-height: 0;
+  }
+  /* Fenêtre basse : les blocs gardent leur hauteur et la colonne défile, au
+     lieu de se comprimer et de se chevaucher. */
+  section > * {
+    flex-shrink: 0;
   }
   h2 {
     margin: 0;

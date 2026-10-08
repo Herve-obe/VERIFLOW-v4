@@ -5,7 +5,7 @@
      l'écoute ; un message propose de la laisser coupée, la baisser ou la
      réactiver. -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import LtcNotice from "./LtcNotice.svelte";
@@ -82,6 +82,24 @@
       });
     });
   });
+
+  // En pause ou à l'arrêt, plus aucune crête n'arrive : les vumètres
+  // retombent d'eux-mêmes et les maintiens de crête s'effacent.
+  let lastFall = performance.now();
+  const fallTimer = window.setInterval(() => {
+    const now = performance.now();
+    const dt = (now - lastFall) / 1000;
+    lastFall = now;
+    if (now - lastPeaks < 150) return;
+    for (const tr of tracks) {
+      if (tr.level !== null) {
+        const v = tr.level - FALL_DB_PER_S * dt;
+        tr.level = v < -60 ? null : v;
+      }
+      if (tr.hold !== null && now - tr.holdAt > HOLD_MS) tr.hold = null;
+    }
+  }, 50);
+  onDestroy(() => window.clearInterval(fallTimer));
 
   const ltcTracks = $derived(ltc.map((d, i) => (d ? i : -1)).filter((i) => i >= 0));
 
