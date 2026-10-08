@@ -126,9 +126,10 @@
       clipPath = p;
       markIn = markOut = null;
       if (lut) await videoLut(lut, slot).catch((e) => ((app.status = String(e)), (lut = null)));
+      // Son ouvert en même temps que la première image (pas l'un après l'autre).
+      openSound(p);
       await show(0);
       app.status = p;
-      openSound(p);
     } catch (err) {
       app.status = String(err);
     } finally {
@@ -377,8 +378,20 @@
     if (s !== 0) setSpeed(s);
   }
 
-  /** Relâchement de la barre : reprise immédiate si la lecture était en cours. */
+  // Barre de défilement : la lecture reprend au relâchement du bouton de la
+  // souris. On suit le bouton nous-mêmes : l'événement `change` du curseur
+  // n'est pas émis de façon fiable par tous les moteurs web.
+  let scrubbing = false;
+  function scrubStart() {
+    scrubbing = true;
+    window.addEventListener("pointerup", scrubEnd, { once: true });
+    window.addEventListener("pointercancel", scrubEnd, { once: true });
+  }
   function scrubEnd() {
+    if (!scrubbing) return;
+    scrubbing = false;
+    window.removeEventListener("pointerup", scrubEnd);
+    window.removeEventListener("pointercancel", scrubEnd);
     window.clearTimeout(resumeTimer);
     if (resumeSpeed !== 0) resume();
   }
@@ -400,8 +413,8 @@
     }, 150);
   }
 
-  // Une reprise en attente compte comme une lecture en cours.
-  const toggle = () => (speed === 0 && resumeSpeed === 0 ? setSpeed(1) : pause());
+  // Image arrêtée (y compris pendant l'attente d'une reprise) : lecture.
+  const toggle = () => (speed === 0 ? setSpeed(1) : pause());
   const forward = () => setSpeed(speed <= 0 ? 1 : Math.min(speed * 2, 8));
   const back = () => setSpeed(speed >= 0 ? -1 : Math.max(speed * 2, -8));
 
@@ -516,8 +529,8 @@
           min="0"
           max={last}
           value={shown}
-          oninput={(e) => jump(Number(e.currentTarget.value), false)}
-          onchange={scrubEnd}
+          onpointerdown={scrubStart}
+          oninput={(e) => jump(Number(e.currentTarget.value), !scrubbing)}
         />
         {#each markers as m (m.id)}
           {#if m.in_frame !== null && m.out_frame !== null}

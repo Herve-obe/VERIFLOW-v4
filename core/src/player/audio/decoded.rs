@@ -16,8 +16,8 @@ use crate::{tools, Error, Result};
 
 pub struct DecodedReader {
     info: WavInfo,
-    /// Rang de la piste son dans le média (0 = première).
-    stream: usize,
+    /// Nombre de canaux de chaque piste son du média (réunies en un seul flux).
+    streams: Vec<u32>,
     child: Option<Child>,
     stdout: Option<ChildStdout>,
     /// Image source que délivrera le prochain octet du flux.
@@ -28,8 +28,9 @@ pub struct DecodedReader {
 }
 
 impl DecodedReader {
-    /// Ouvre toutes les pistes son d'un média que FFmpeg sait lire. Les
-    /// pistes sont nommées « Piste N » dans l'ordre de leurs canaux.
+    /// Ouvre toutes les pistes son d'un média que FFmpeg sait lire, réunies
+    /// en un seul flux (un seul processus FFmpeg, même pour 8 pistes mono).
+    /// Les canaux sont nommés « Piste N » dans l'ordre des pistes.
     pub fn open_all(path: &Path) -> Result<Vec<Self>> {
         let p = probe(path)?;
         if p.audio.is_empty() {
@@ -38,33 +39,35 @@ impl DecodedReader {
                 path.display()
             )));
         }
-        let mut channel = 0usize;
-        let mut out = Vec::new();
-        for (stream, a) in p.audio.iter().enumerate() {
-            let sample_rate = a.sample_rate.max(1);
-            let channels = a.channels.clamp(1, 64) as u16;
-            let frames = (p.duration.max(0.0) * sample_rate as f64).round() as u64;
-            let mut info = WavInfo::decoded(path, channels, sample_rate, frames);
-            info.ixml.track_names = (0..channels as usize)
-                .map(|c| Some(format!("Piste {}", channel + c + 1)))
-                .collect();
-            channel += channels as usize;
-            let mut reader = Self {
-                info,
-                stream,
-                child: None,
-                stdout: None,
-                next: 0,
-                ended: false,
-                carry: Vec::new(),
-            };
-            // Décodage lancé dès l'ouverture : au premier lancement, FFmpeg
-            // (et l'antivirus sous Windows) peut mettre plusieurs secondes à
-            // démarrer ; mieux vaut que ce soit avant d'appuyer sur lecture.
-            let _ = reader.spawn(0);
-            out.push(reader);
+        // Toutes les pistes sont rééchantillonnées à la fréquence de la première.
+        let sample_rate = p.audio[0].sample_rate.max(1);
+        let channels: u32 = p.audio.iter().map(|a| a.channels.max(1)).sum();
+        if channels > 64 {
+            return Err(Error::Unsupported(format!(
+                "{} : {channels} canaux son (64 au plus)",
+                path.display()
+            )));
         }
-        Ok(out)
+        let channels = channels as u16;
+        let frames = (p.duration.max(0.0) * sample_rate as f64).round() as u64;
+        let mut info = WavInfo::decoded(path, channels, sample_rate, frames);
+        info.ixml.track_names = (0..channels as usize)
+            .map(|c| Some(format!("Piste {}", c + 1)))
+            .collect();
+        let mut reader = Self {
+            info,
+            streams: p.audio.iter().map(|a| a.channels.max(1)).collect(),
+            child: None,
+            stdout: None,
+            next: 0,
+            ended: false,
+            carry: Vec::new(),
+        };
+        // Décodage lancé dès l'ouverture : au premier lancement, FFmpeg
+        // (et l'antivirus sous Windows) peut mettre plusieurs secondes à
+        // démarrer ; mieux vaut que ce soit avant d'appuyer sur lecture.
+        let _ = reader.spawn(0);
+        Ok(vec![reader])
     }
 
     pub fn info(&self) -> &WavInfo {
@@ -88,15 +91,24 @@ impl DecodedReader {
             cmd.args(["-ss", &format!("{:.6}", start as f64 / sr as f64)]);
         }
         cmd.arg("-i").arg(&self.info.path);
-        cmd.args(["-map", &format!("0:a:{}", self.stream)]);
+        if self.streams.len() == 1 {
+            cmd.args(["-map", "0:a:0", "-ac", &self.info.channels.to_string()]);
+        } else {
+            // Pistes réunies côte à côte (amerge, dans l'ordre des pistes),
+            // chacune ramenée à la même fréquence et à une disposition de
+            // canaux explicite (sans quoi amerge refuse les pistes mono).
+            let mut graph = String::new();
+            for (i, ch) in self.streams.iter().enumerate() {
+                graph += &format!("[0:a:{i}]aresample={sr},aformat=channel_layouts={ch}c[a{i}];");
+            }
+            for i in 0..self.streams.len() {
+                graph += &format!("[a{i}]");
+            }
+            graph += &format!("amerge=inputs={}[out]", self.streams.len());
+            cmd.args(["-filter_complex", &graph, "-map", "[out]"]);
+        }
         let mut child = cmd
-            .args([
-                "-vn",
-                "-ac",
-                &self.info.channels.to_string(),
-                "-ar",
-                &sr.to_string(),
-            ])
+            .args(["-vn", "-ar", &sr.to_string()])
             .args(["-f", "f32le", "-acodec", "pcm_f32le", "-"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -233,10 +245,10 @@ mod tests {
         );
 
         let mut all = DecodedReader::open_all(&clip).unwrap();
-        assert_eq!(all.len(), 2, "deux pistes mono");
-        assert_eq!(all[1].info().track_name(0), "Piste 2");
+        assert_eq!(all.len(), 1, "un seul décodeur pour les deux pistes");
         let mut r = all.remove(0);
-        assert_eq!(r.info().channels, 1);
+        assert_eq!(r.info().channels, 2, "deux pistes mono réunies");
+        assert_eq!(r.info().track_name(1), "Piste 2");
         assert_eq!(r.info().sample_rate, 48_000);
         assert!((r.info().duration() - 2.0).abs() < 0.05);
         let mut buf = Vec::new();
@@ -267,6 +279,49 @@ mod tests {
         let mut block = Vec::new();
         assert!(p.next(&mut block).unwrap() > 0);
         assert!(peak(&block) > 0.05, "son mixé audible");
+    }
+
+    #[test]
+    fn merges_mixed_tracks_in_order() {
+        if !ffmpeg_available() {
+            eprintln!("FFmpeg absent : test ignoré");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dir.path().join("mix.mov");
+        // Pistes : mono 48 kHz (sinus), stéréo muette, mono 44,1 kHz (sinus).
+        let out = tools::command("ffmpeg")
+            .unwrap()
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("sine=frequency=440:sample_rate=48000:duration=2")
+            .args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo:d=2"])
+            .args(["-f", "lavfi", "-i"])
+            .arg("sine=frequency=1000:sample_rate=44100:duration=2")
+            .args(["-map", "0", "-map", "1", "-map", "2", "-c:a", "pcm_s24le"])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut all = DecodedReader::open_all(&clip).unwrap();
+        assert_eq!(all.len(), 1);
+        let r = &mut all[0];
+        assert_eq!(r.info().channels, 4);
+        assert_eq!(r.info().sample_rate, 48_000);
+        let mut buf = Vec::new();
+        assert_eq!(r.read(48_000, 4800, &mut buf).unwrap(), 4800);
+        let peak = |c: usize| {
+            buf.iter()
+                .skip(c)
+                .step_by(4)
+                .fold(0f32, |a, s| a.max(s.abs()))
+        };
+        assert!(peak(0) > 0.1, "piste 1 audible");
+        assert!(peak(1) < 1e-3 && peak(2) < 1e-3, "piste stéréo muette");
+        assert!(peak(3) > 0.1, "piste 3 audible");
     }
 
     #[test]
