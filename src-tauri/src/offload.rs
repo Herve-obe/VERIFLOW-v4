@@ -11,6 +11,7 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use veriflow_core::offload::engine::Event;
+use veriflow_core::offload::existing::{self, CheckProgress, DestCheck, Known};
 use veriflow_core::offload::job::{execute, preflight, JobResult, OffloadRequest, Preflight};
 use veriflow_core::offload::storage::{self, Volume};
 use veriflow_core::project::PreviousOffload;
@@ -28,12 +29,18 @@ struct Job {
     request: OffloadRequest,
     eject: bool,
     cancel: Arc<AtomicBool>,
+    /// Empreintes établies par la vérification des rushes présents.
+    known: Option<Known>,
 }
 
 pub struct OffloadState {
     queue: Mutex<Sender<Job>>,
     cancels: Arc<Mutex<HashMap<u64, Arc<AtomicBool>>>>,
     next_id: AtomicU64,
+    /// Vérification des rushes présents en cours (annulable).
+    check_cancel: Mutex<Option<Arc<AtomicBool>>>,
+    /// Résultats des vérifications, repris au lancement de la copie.
+    checks: Mutex<HashMap<u64, Known>>,
 }
 
 /// Événement envoyé à l'interface (canal « offload »).
@@ -75,9 +82,10 @@ impl OffloadState {
             .name("veriflow-offload".into())
             .spawn(move || {
                 for job in rx {
-                    run_job(&app, &job);
+                    let id = job.id;
+                    run_job(&app, job);
                     if let Ok(mut c) = worker_cancels.lock() {
-                        c.remove(&job.id);
+                        c.remove(&id);
                     }
                 }
             })
@@ -86,6 +94,8 @@ impl OffloadState {
             queue: Mutex::new(tx),
             cancels,
             next_id: AtomicU64::new(1),
+            check_cancel: Mutex::new(None),
+            checks: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -96,7 +106,7 @@ fn project_name(app: &AppHandle) -> Option<String> {
     guard.as_ref().and_then(|p| p.info().ok()).map(|i| i.name)
 }
 
-fn run_job(app: &AppHandle, job: &Job) {
+fn run_job(app: &AppHandle, job: Job) {
     let send = |n: Notice| {
         let _ = app.emit("offload", n);
     };
@@ -122,6 +132,7 @@ fn run_job(app: &AppHandle, job: &Job) {
         &job.cancel,
         |event| send(Notice::Engine { job: job.id, event }),
         project.as_deref(),
+        job.known,
     );
     match result {
         Ok(result) => {
@@ -198,14 +209,77 @@ pub async fn offload_preflight(
     })
 }
 
-/// Ajoute une copie à la file d'attente ; renvoie son numéro.
+#[derive(Serialize)]
+pub struct CheckView {
+    /// Numéro à rappeler au lancement de la copie (`offload_start`).
+    id: u64,
+    roots: Vec<PathBuf>,
+    destinations: Vec<DestCheck>,
+}
+
+/// Vérifie les empreintes des rushes déjà présents dans les destinations.
+/// Avancement envoyé sur le canal « offload-check ».
+#[tauri::command]
+pub async fn offload_check_existing(
+    request: OffloadRequest,
+    app: AppHandle,
+    state: State<'_, OffloadState>,
+) -> CmdResult<CheckView> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.check_cancel.lock().map_err(text)? = Some(cancel.clone());
+    let emitter = app.clone();
+    let (view, known) = tauri::async_runtime::spawn_blocking(move || {
+        let pre = preflight(&request).map_err(text)?;
+        let inv = pre.inventory.as_ref().ok_or("inventaire absent")?;
+        let (destinations, known) = existing::verify(
+            inv,
+            &pre.roots,
+            &request.algorithms,
+            &cancel,
+            |p: CheckProgress| {
+                let _ = emitter.emit("offload-check", p);
+            },
+        )
+        .map_err(text)?;
+        Ok::<_, String>((
+            CheckView {
+                id: 0,
+                roots: pre.roots.clone(),
+                destinations,
+            },
+            known,
+        ))
+    })
+    .await
+    .map_err(text)??;
+    *state.check_cancel.lock().map_err(text)? = None;
+    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    state.checks.lock().map_err(text)?.insert(id, known);
+    Ok(CheckView { id, ..view })
+}
+
+#[tauri::command]
+pub fn offload_check_cancel(state: State<'_, OffloadState>) -> CmdResult<()> {
+    if let Some(c) = state.check_cancel.lock().map_err(text)?.as_ref() {
+        c.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Ajoute une copie à la file d'attente ; renvoie son numéro. `check` :
+/// vérification préalable des rushes présents (mode « compléter »).
 #[tauri::command]
 pub fn offload_start(
     request: OffloadRequest,
     eject: bool,
+    check: Option<u64>,
     app: AppHandle,
     state: State<'_, OffloadState>,
 ) -> CmdResult<u64> {
+    let known = match check {
+        Some(c) => state.checks.lock().map_err(text)?.remove(&c),
+        None => None,
+    };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let cancel = Arc::new(AtomicBool::new(false));
     state
@@ -223,6 +297,7 @@ pub fn offload_start(
             request,
             eject,
             cancel,
+            known,
         })
         .map_err(text)?;
     let _ = app.emit("offload", Notice::Queued { job: id, source });

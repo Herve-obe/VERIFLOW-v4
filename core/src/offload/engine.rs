@@ -10,7 +10,9 @@
 //!
 //! Une destination en échec (disque plein, câble arraché) n'arrête pas les
 //! autres. Les fichiers déjà présents et complets ne sont pas recopiés :
-//! ils sont seulement revérifiés (reprise après coupure).
+//! ils sont seulement revérifiés (reprise après coupure). Si leurs empreintes
+//! ont été établies avant la copie (`existing::verify`), les rushes identiques
+//! sont conservés sans relecture et les autres remplacés.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -23,6 +25,7 @@ use std::time::{Instant, SystemTime};
 
 use serde::Serialize;
 
+use super::existing::Known;
 use super::hash::{HashAlgo, MultiHasher};
 use super::io::{drop_cache, open_uncached, read_full, AlignedBuf};
 use super::scan::{SourceFile, SourceInventory};
@@ -70,6 +73,9 @@ pub struct OffloadSpec {
     pub destinations: Vec<PathBuf>,
     /// Algorithmes (au moins un ; le premier est l'algorithme principal).
     pub algorithms: Vec<HashAlgo>,
+    /// Rushes déjà présents vérifiés avant la copie (mode « compléter ») :
+    /// les identiques sont conservés, les autres remplacés.
+    pub known: Option<Known>,
 }
 
 /// Événements envoyés pendant la copie.
@@ -153,7 +159,7 @@ fn absolute(path: &Path) -> PathBuf {
     out
 }
 
-fn temp_path(final_path: &Path) -> PathBuf {
+pub(super) fn temp_path(final_path: &Path) -> PathBuf {
     let name = final_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -194,7 +200,7 @@ fn writer(
 }
 
 /// Relit un fichier depuis le disque et calcule ses empreintes.
-fn hash_from_disk(
+pub(super) fn hash_from_disk(
     path: &Path,
     algos: &[HashAlgo],
     cancel: &AtomicBool,
@@ -285,18 +291,45 @@ fn offload_file(
     let mut status: Vec<Option<DestStatus>> = vec![None; n];
     let mut resumed = vec![false; n];
 
-    // Destinations à écrire (les fichiers complets déjà présents sont seulement revérifiés).
+    // Mode « compléter » : rushes vérifiés identiques avant la copie.
+    if let Some(known) = &spec.known {
+        for (i, path) in finals.iter().enumerate() {
+            if known.is_identical(i, &file.rel, path) {
+                status[i] = Some(DestStatus::ResumedVerified);
+            }
+        }
+        if let Some(hashes) = known.source.get(&file.rel) {
+            if status.iter().all(Option::is_some) {
+                // Rien à écrire ni à relire : empreintes de la vérification.
+                counter.add(file.size * (1 + n as u64), false, emit);
+                return Ok(FileResult {
+                    rel: file.rel.clone(),
+                    size: file.size,
+                    modified: rfc3339(file.modified),
+                    hashes: hashes.clone(),
+                    destinations: status.into_iter().flatten().collect(),
+                });
+            }
+        }
+    }
+
+    // Destinations à écrire (les fichiers complets déjà présents sont seulement
+    // revérifiés ; en mode « compléter », les fichiers non identiques sont remplacés).
     let mut senders: Vec<(usize, SyncSender<Arc<Vec<u8>>>)> = Vec::new();
     let mut handles = Vec::new();
     for (i, path) in finals.iter().enumerate() {
-        match fs::metadata(path) {
-            Ok(m) if m.len() == file.size => resumed[i] = true,
-            Ok(_) => {
+        if status[i].is_some() {
+            continue;
+        }
+        let existing = fs::metadata(path).ok();
+        match existing {
+            Some(m) if spec.known.is_none() && m.len() == file.size => resumed[i] = true,
+            Some(_) if spec.known.is_none() => {
                 status[i] = Some(DestStatus::Failed(
                     "un fichier différent porte déjà ce nom : il n'a pas été écrasé".into(),
                 ))
             }
-            Err(_) => {
+            _ => {
                 let (tx, rx) = sync_channel::<Arc<Vec<u8>>>(4);
                 let path = path.clone();
                 let modified = file.modified;
@@ -572,6 +605,7 @@ mod tests {
         OffloadSpec {
             destinations: dests.to_vec(),
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
+            known: None,
         }
     }
 

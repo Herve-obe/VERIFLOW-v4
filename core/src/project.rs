@@ -568,6 +568,8 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128],
             operator: None,
             notes: None,
+            existing: Default::default(),
+            date: None,
         };
         let p = Project::create(&dir.path().join("p.veriflow"), None).unwrap();
         let pre = preflight(&req).unwrap();
@@ -578,6 +580,7 @@ mod tests {
             pre,
             &std::sync::atomic::AtomicBool::new(false),
             |_| {},
+            None,
             None,
         )
         .unwrap();

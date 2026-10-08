@@ -4,7 +4,7 @@
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
   import { cancel, reveal, type DestStatus } from "../../lib/offload";
-  import type { Job } from "../../stores/offload.svelte";
+  import { offload, interrupted, type Job } from "../../stores/offload.svelte";
 
   let { job }: { job: Job } = $props();
   let showAll = $state(false);
@@ -21,6 +21,13 @@
   const barState = $derived(job.state === "failed" || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
 
+  // Reprise proposée tant que la carte n'a pas été recopiée avec succès depuis.
+  const resumable = $derived(
+    interrupted(job) &&
+      !!offload.requests[job.id] &&
+      !offload.jobs.some((o) => o.id > job.id && o.source === job.source && o.state === "done" && !interrupted(o)),
+  );
+
   const label = (d: DestStatus) =>
     d.state === "verified" ? t("offload.status.verified") : d.state === "resumed_verified" ? t("offload.status.resumed") : t("offload.status.failed");
 </script>
@@ -29,10 +36,12 @@
   <header>
     <div>
       <h3>{job.result?.source_name ?? job.source}</h3>
-      <span class="state">{t(`offload.job.${job.state}`)}</span>
+      <span class="state">{t(`offload.job.${job.result?.summary.cancelled ? "cancelled" : job.state}`)}</span>
     </div>
     {#if job.state === "queued" || job.state === "running"}
       <button class="ghost" onclick={() => cancel(job.id)}>{t("offload.cancel")}</button>
+    {:else if resumable}
+      <button onclick={() => (offload.resume = offload.requests[job.id])}>{t("offload.resume")}</button>
     {/if}
   </header>
 

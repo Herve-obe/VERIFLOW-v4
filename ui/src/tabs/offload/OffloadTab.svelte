@@ -4,13 +4,14 @@
   import { onMount } from "svelte";
   import { open, confirm } from "@tauri-apps/plugin-dialog";
   import JobCard from "./JobCard.svelte";
+  import ExistingDialog from "./ExistingDialog.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, reveal, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -45,6 +46,14 @@
   let pre = $state<PreflightView | null>(null);
   let checking = $state(false);
   let error = $state("");
+  // Reprise d'une copie interrompue : même date, donc même dossier final,
+  // tant que la source reste celle de la copie reprise.
+  let resumeDate = $state<string | null>(null);
+  let resumeSource = "";
+  // Demande en attente du choix « compléter / tout recopier ».
+  let existingFor = $state<OffloadRequest | null>(null);
+  let summaryEl = $state<HTMLElement | null>(null);
+  let revealSummary = false;
 
   $effect(() => {
     const s: Settings = { destinations, template, algorithms, operator, eject };
@@ -63,6 +72,34 @@
     algorithms,
     operator: operator || null,
     notes: notes || null,
+    date: source && source === resumeSource ? resumeDate : null,
+  });
+
+  // « Reprendre la copie » depuis la file d'attente : formulaire rempli avec
+  // la demande d'origine.
+  $effect(() => {
+    const r = offload.resume;
+    if (!r) return;
+    offload.resume = null;
+    source = r.source;
+    resumeSource = r.source;
+    resumeDate = r.date ?? null;
+    destinations = [...r.destinations];
+    template = r.template;
+    algorithms = [...r.algorithms];
+    operator = r.operator ?? "";
+    notes = r.notes ?? "";
+    jour = r.vars.jour ?? "";
+    camera = r.vars.camera ?? "";
+    revealSummary = true;
+  });
+
+  // Après une reprise, le résumé et le bouton de lancement sont amenés à l'écran.
+  $effect(() => {
+    if (pre && summaryEl && revealSummary) {
+      revealSummary = false;
+      summaryEl.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
   });
 
   async function refreshVolumes() {
@@ -129,6 +166,11 @@
 
   async function launch() {
     if (!pre) return;
+    // Rushes déjà présents (copie interrompue) : vérification puis choix.
+    if (pre.present.some((p) => p.files > 0 || p.partial > 0)) {
+      existingFor = { ...request(), date: pre.date };
+      return;
+    }
     const warnings: string[] = [];
     if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
     pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
@@ -136,10 +178,19 @@
       const go = await confirm(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, { title: t("offload.warn.title"), kind: "warning" });
       if (!go) return;
     }
+    await launchWith({ ...request(), date: pre.date }, "verify", null);
+  }
+
+  async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
+    existingFor = null;
+    const req = { ...r, existing };
     try {
-      await start(request(), eject);
+      const id = await start(req, eject, check);
+      offload.requests[id] = req;
       source = "";
       notes = "";
+      resumeDate = null;
+      resumeSource = "";
     } catch (e) {
       error = String(e);
     }
@@ -150,6 +201,14 @@
     refreshVolumes();
   });
 </script>
+
+{#if existingFor}
+  <ExistingDialog
+    request={existingFor}
+    onChoose={(mode, check) => existingFor && launchWith(existingFor, mode, check)}
+    onClose={() => (existingFor = null)}
+  />
+{/if}
 
 <div class="layout">
 <Explorer
@@ -235,7 +294,7 @@
       <label class="check"><input type="checkbox" bind:checked={eject} /> {t("offload.eject.after")}</label>
     </div>
 
-    <div class="block summary">
+    <div class="block summary" bind:this={summaryEl}>
       {#if checking}
         <p class="muted">{t("offload.checking")}</p>
       {:else if error}
@@ -246,7 +305,9 @@
           <p class="mono small">
             {i + 1}. {r}
             {#if pre.missing_space[i] !== null}<span class="error"> {t("offload.space.missing")} {bytes(pre.missing_space[i] ?? 0)}</span>{/if}
-            {#if pre.already_in_destination[i]}<span class="warn"> {t("offload.warn.existing.short")}</span>{/if}
+            {#if pre.present[i].files > 0 || pre.present[i].partial > 0}
+              <span class="warn"> {t("offload.present.short")} {pre.present[i].files} ({bytes(pre.present[i].bytes)})</span>
+            {:else if pre.already_in_destination[i]}<span class="warn"> {t("offload.warn.existing.short")}</span>{/if}
           </p>
         {/each}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}

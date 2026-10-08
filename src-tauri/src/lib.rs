@@ -62,6 +62,8 @@ pub fn run() {
             offload::offload_volumes,
             offload::offload_preflight,
             offload::offload_start,
+            offload::offload_check_existing,
+            offload::offload_check_cancel,
             offload::offload_cancel,
             offload::offload_eject,
             offload::reveal,

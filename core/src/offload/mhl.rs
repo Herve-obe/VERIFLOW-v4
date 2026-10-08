@@ -334,6 +334,7 @@ mod tests {
         let spec = OffloadSpec {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Sha256, HashAlgo::Md5],
+            known: None,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let p1 =

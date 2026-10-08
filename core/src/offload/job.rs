@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicBool;
 use serde::{Deserialize, Serialize};
 
 use super::engine::{check_space, run, Event, OffloadSpec, OffloadSummary};
+use super::existing::{self, ExistingMode, Known, Present};
 use super::hash::HashAlgo;
 use super::mhl::{write_generation, MhlAuthor};
 use super::report::{write_reports, ReportData, ReportFiles, ReportInfo};
@@ -37,6 +38,13 @@ pub struct OffloadRequest {
     pub operator: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// Conduite envers les rushes déjà présents en destination.
+    #[serde(default)]
+    pub existing: ExistingMode,
+    /// Date du modèle `{date}` (AAAA-MM-JJ). Absente : date du jour. Une
+    /// reprise garde la date de la copie interrompue (même dossier).
+    #[serde(default)]
+    pub date: Option<String>,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -108,6 +116,10 @@ pub struct Preflight {
     pub missing_space: Vec<Option<u64>>,
     /// Destinations contenant déjà une copie vérifiée (historique ascmhl).
     pub already_in_destination: Vec<bool>,
+    /// Rushes de la source déjà présents dans chaque destination.
+    pub present: Vec<Present>,
+    /// Date utilisée pour le modèle `{date}`.
+    pub date: String,
     #[serde(skip)]
     pub inventory: Option<SourceInventory>,
 }
@@ -119,7 +131,8 @@ pub fn local_date() -> String {
 /// Inventorie la source et contrôle les destinations, sans rien écrire.
 pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
     let inv = scan(&crate::absolute_path(&req.source))?;
-    let rel = render_template(&req.template, &inv.name, &req.vars, &local_date());
+    let date = req.date.clone().unwrap_or_else(local_date);
+    let rel = render_template(&req.template, &inv.name, &req.vars, &date);
     let roots: Vec<PathBuf> = req
         .destinations
         .iter()
@@ -135,6 +148,8 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
             .iter()
             .map(|r| r.join("ascmhl/ascmhl_chain.xml").exists())
             .collect(),
+        present: roots.iter().map(|r| existing::present(&inv, r)).collect(),
+        date,
         roots,
         inventory: Some(inv),
     })
@@ -158,6 +173,7 @@ pub fn execute(
     cancel: &AtomicBool,
     emit: impl FnMut(Event),
     project: Option<&str>,
+    known: Option<Known>,
 ) -> Result<JobResult> {
     let inv = match pre.inventory {
         Some(inv) => inv,
@@ -170,7 +186,14 @@ pub fn execute(
         } else {
             req.algorithms.clone()
         },
+        known: match req.existing {
+            ExistingMode::Complete => known,
+            _ => None,
+        },
     };
+    if req.existing == ExistingMode::Replace {
+        existing::remove(&inv, &spec.destinations)?;
+    }
     let summary = run(&inv, &spec, cancel, emit)?;
     let author = MhlAuthor {
         name: req.operator.clone(),
@@ -267,6 +290,8 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128],
             operator: Some("DIT".into()),
             notes: None,
+            existing: ExistingMode::Verify,
+            date: None,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);
@@ -278,6 +303,7 @@ mod tests {
             &AtomicBool::new(false),
             |_| {},
             Some("Projet test"),
+            None,
         )
         .unwrap();
         assert_eq!(res.summary.failed_files, 0);
