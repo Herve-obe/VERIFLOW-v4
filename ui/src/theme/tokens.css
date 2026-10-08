@@ -36,6 +36,8 @@
   --vf-meter-high: #ff4d4f;
   --vf-meter-width: 8px;
   --vf-meter-height: 180px;
+  /* Vumètres des pistes son à côté de l'image (PLAYER VIDEO, lecteur rapide). */
+  --vf-meter-height-compact: 150px;
 
   /* Lecteur vidéo */
   --vf-video-bg: #000000;
@@ -51,6 +53,8 @@
   --vf-marker-black: #1b1e24;
   --vf-marker-white: #f2f4f7;
   --vf-tc-overlay-bg: rgb(0 0 0 / 0.55);
+  --vf-shadow: rgb(0 0 0 / 0.45);
+  --vf-backdrop: rgb(0 0 0 / 0.6);
   /* Sélection (repli des navigateurs sans color-mix). */
   --vf-selection: rgb(59 167 255 / 0.24);
 

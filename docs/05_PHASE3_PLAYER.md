@@ -105,6 +105,17 @@ Captures : `docs/captures/phase3_logs_tc_incruste.png`, `phase3_lut_affichage.pn
   - au-delà, la lecture continue sans le son, avec un message.
   - Cause du « son absent » sous Windows : au premier lancement, FFmpeg et l'antivirus mettaient plus que le délai accordé.
 
+## Retours d'Hervé du 08/10/2026 (iMac, Catalina)
+- **Explorateur** :
+  - l'arborescence dépliée est commune aux onglets OFFLOAD et MEDIA, et conservée d'une session à l'autre ;
+  - un double-clic sur un dossier le déplie ou le replie.
+- **Pistes son** : tranches verticales à côté de l'image (nom, badge LTC, vumètre crête avec maintien, fader, coupure), comme la console du mode AUDIO. Le message LTC s'affiche sur le haut de l'image.
+- **Lecteur rapide de MEDIA** : fenêtre déplaçable par sa barre de titre (double-clic sur la barre pour la recentrer), fermeture par Échap, la croix ou un clic à côté.
+- **Ouvrir dans le PLAYER** : bouton dans la barre d'outils de MEDIA (un média sélectionné) et dans le lecteur rapide. Le PLAYER passe dans le mode du média (VIDEO ou AUDIO).
+- **Projet nécessaire** : M ou « + Marqueur » sans projet ouvre une fenêtre qui propose de créer ou d'ouvrir un projet ; le marqueur demandé est posé dès que le projet est ouvert.
+
+Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_necessaire.png`.
+
 ## Reste à faire (hors de cette PR)
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).

@@ -420,9 +420,14 @@
 {:else}
   <div class="layout" class:withlogs={logs}>
   <div class="video">
-    <div class="screen">
-      <canvas bind:this={canvas} width={clip.display_width} height={clip.display_height}></canvas>
-      {#if tcOverlay}<div class="tcover mono">{tc(shown)}</div>{/if}
+    <div class="viewer">
+      <div class="screen">
+        <canvas bind:this={canvas} width={clip.display_width} height={clip.display_height}></canvas>
+        {#if tcOverlay}<div class="tcover mono">{tc(shown)}</div>{/if}
+      </div>
+      {#if avReady}
+        <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
+      {/if}
     </div>
 
     <div class="bar">
@@ -485,9 +490,6 @@
         <OutputPicker />
         {#if avError}<span class="err">{avError}</span>{/if}
       </div>
-      {#if avReady}
-        <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
-      {/if}
     {/if}
 
     <dl class="info">
@@ -573,8 +575,17 @@
     gap: var(--vf-space-2);
     padding: var(--vf-space-3);
   }
+  /* Image et pistes son côte à côte ; le message LTC se pose sur l'image. */
+  .viewer {
+    position: relative;
+    display: flex;
+    gap: var(--vf-space-2);
+    min-height: 0;
+  }
   .screen {
     position: relative;
+    flex: 1;
+    min-width: 0;
     min-height: 0;
     background: var(--vf-video-bg);
     border-radius: var(--vf-radius-md);

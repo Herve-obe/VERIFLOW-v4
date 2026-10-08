@@ -262,5 +262,12 @@
   "sound.ltc.low": "Baisser à -30 dB",
   "sound.ltc.on": "Réactiver",
   "sound.gain": "Volume",
-  "sound.mute": "Couper la piste"
+  "sound.mute": "Couper la piste",
+  "sound.tracks": "Pistes son",
+  "media.open.player": "Ouvrir dans le PLAYER",
+  "media.open.player.hint": "Ouvre le média sélectionné dans l'onglet PLAYER (lecture, marqueurs, exports)",
+  "logs.need.project.title": "Projet nécessaire",
+  "logs.need.project.text": "Les marqueurs sont enregistrés dans le fichier projet .veriflow, jamais dans tes rushes. Crée ou ouvre un projet pour poser ce marqueur : il sera ajouté aussitôt.",
+  "logs.need.project.open": "Ouvrir un projet",
+  "logs.cancel": "Annuler"
 }

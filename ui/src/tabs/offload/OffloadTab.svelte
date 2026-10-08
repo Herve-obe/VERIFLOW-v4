@@ -156,7 +156,6 @@
   owner="offload"
   selected={picked}
   onSelect={(p) => (picked = p)}
-  onActivate={(p) => (source = p)}
   actions={explorerActions}
 />
 <div class="offload">

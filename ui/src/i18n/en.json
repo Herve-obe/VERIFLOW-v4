@@ -262,5 +262,12 @@
   "sound.ltc.low": "Lower to -30 dB",
   "sound.ltc.on": "Unmute",
   "sound.gain": "Volume",
-  "sound.mute": "Mute track"
+  "sound.mute": "Mute track",
+  "sound.tracks": "Sound tracks",
+  "media.open.player": "Open in PLAYER",
+  "media.open.player.hint": "Opens the selected media in the PLAYER tab (playback, markers, exports)",
+  "logs.need.project.title": "Project required",
+  "logs.need.project.text": "Markers are saved in the .veriflow project file, never in your rushes. Create or open a project to add this marker: it will be added right away.",
+  "logs.need.project.open": "Open a project",
+  "logs.cancel": "Cancel"
 }

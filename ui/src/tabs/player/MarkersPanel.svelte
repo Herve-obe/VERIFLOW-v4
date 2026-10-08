@@ -4,6 +4,8 @@
   import { tick } from "svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import { app } from "../../stores/app.svelte";
+  import Modal from "../../components/Modal.svelte";
+  import { createProject, openProject } from "../../lib/project";
   import { t } from "../../i18n/index.svelte";
   import {
     MARKER_COLORS,
@@ -87,9 +89,25 @@
     }
   }
 
+  // Sans projet, les marqueurs ne peuvent pas être enregistrés : une fenêtre
+  // le dit clairement et propose de créer ou d'ouvrir un projet, puis le
+  // marqueur demandé est posé.
+  let needProject = $state(false);
+
+  async function withProject(action: () => Promise<boolean>) {
+    if (await action()) {
+      needProject = false;
+      await add();
+    }
+  }
+
   /** Ajoute un marqueur à l'image courante, ou une plage si entrée et sortie sont posées. */
   export async function add() {
     if (!path) return;
+    if (!app.project) {
+      needProject = true;
+      return;
+    }
     const range = markIn !== null && markOut !== null;
     const m: Marker = {
       id: 0,
@@ -171,7 +189,7 @@
     </div>
   </header>
 
-  <button class="add" onclick={add} disabled={!path || !app.project}>
+  <button class="add" onclick={add} disabled={!path}>
     + {markIn !== null && markOut !== null ? t("logs.add.range") : t("logs.add")} (M)
   </button>
   {#if !app.project}
@@ -228,6 +246,19 @@
     <button onclick={runExport} disabled={!app.project || (!allClips && markers.length === 0)}>{t("logs.export")}</button>
   </footer>
 </aside>
+
+{#if needProject}
+  <Modal title={t("logs.need.project.title")} onClose={() => (needProject = false)} width="min(460px, 92vw)">
+    <div class="need">
+      <p>{t("logs.need.project.text")}</p>
+      <div class="buttons">
+        <button class="primary" onclick={() => withProject(createProject)}>{t("project.new")}</button>
+        <button onclick={() => withProject(openProject)}>{t("logs.need.project.open")}</button>
+        <button class="ghost" onclick={() => (needProject = false)}>{t("logs.cancel")}</button>
+      </div>
+    </div>
+  </Modal>
+{/if}
 
 <style>
   .markers {
@@ -375,5 +406,35 @@
     align-items: center;
     gap: 4px;
     color: var(--vf-text-muted);
+  }
+  .need {
+    padding: var(--vf-space-4);
+    font-size: var(--vf-text-md);
+  }
+  .need p {
+    margin: 0 0 var(--vf-space-4);
+    line-height: 1.5;
+  }
+  .need .buttons {
+    display: flex;
+    gap: var(--vf-space-2);
+    justify-content: flex-end;
+  }
+  .need button {
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-3);
+    cursor: pointer;
+  }
+  .need button.primary {
+    background: var(--vf-accent);
+    border-color: var(--vf-accent);
+    color: var(--vf-on-accent);
+    font-weight: 600;
+  }
+  .need button.ghost {
+    background: none;
   }
 </style>

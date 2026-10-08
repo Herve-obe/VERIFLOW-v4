@@ -3,7 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import TreeNode from "./TreeNode.svelte";
-  import { explorer, startExplorer, toggleFavorite } from "../../stores/explorer.svelte";
+  import { explorer, startExplorer, toggleFavorite, toggleExpanded, originOf } from "../../stores/explorer.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
@@ -18,13 +18,11 @@
     owner,
     selected = null,
     onSelect,
-    onActivate = onSelect,
     actions = [],
   }: {
     owner: string;
     selected?: string | null;
     onSelect: (path: string) => void;
-    onActivate?: (path: string) => void;
     actions?: ExplorerAction[];
   } = $props();
 
@@ -39,7 +37,8 @@
   };
   let width = $state(Number(read(WIDTH_KEY, "250")));
   let collapsed = $state(read(COLLAPSED_KEY, "false") === "true");
-  let expanded = $state(new Set<string>());
+  // État déplié partagé entre les onglets (voir stores/explorer.svelte.ts).
+  const expanded = $derived(explorer.expanded);
   let roots = $state<string[]>([]);
   let menu = $state<{ x: number; y: number; path: string } | null>(null);
 
@@ -52,17 +51,11 @@
     }
   });
 
-  function toggle(path: string) {
-    const k = norm(path);
-    const next = new Set(expanded);
-    if (next.has(k)) next.delete(k);
-    else next.add(k);
-    expanded = next;
-  }
+  const toggle = (path: string) => toggleExpanded(path);
 
   // Seuls les dossiers dépliés sont surveillés (léger, même sur un gros RAID).
   $effect(() => {
-    const paths = [...expanded];
+    const paths = [...expanded].map(originOf);
     watch(owner, paths).catch(() => {});
   });
 
@@ -125,7 +118,7 @@
           {selected}
           {toggle}
           {onSelect}
-          {onActivate}
+          onActivate={toggle}
           onContext={openMenu}
         />
       {:else}
@@ -134,7 +127,7 @@
 
       <h4>{t("explorer.favorites")}</h4>
       {#each explorer.favorites as f (f)}
-        <TreeNode entry={entry(f)} {expanded} {selected} {toggle} {onSelect} {onActivate} onContext={openMenu} />
+        <TreeNode entry={entry(f)} {expanded} {selected} {toggle} {onSelect} onActivate={toggle} onContext={openMenu} />
       {:else}
         <p class="muted">{t("explorer.no.favorite")}</p>
       {/each}
@@ -142,7 +135,7 @@
       {#if roots.length > 0}
         <h4>{t("explorer.project")}</h4>
         {#each roots as r (r)}
-          <TreeNode entry={entry(r)} {expanded} {selected} {toggle} {onSelect} {onActivate} onContext={openMenu} />
+          <TreeNode entry={entry(r)} {expanded} {selected} {toggle} {onSelect} onActivate={toggle} onContext={openMenu} />
         {/each}
       {/if}
     </div>
