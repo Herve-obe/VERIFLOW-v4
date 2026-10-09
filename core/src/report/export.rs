@@ -12,7 +12,27 @@ fn all_columns(report: &Report, lang: Lang) -> Vec<Column> {
         ReportKind::Image => Vec::new(),
         ReportKind::Sound => (1..=report.tracks.max(1) as usize).collect(),
     };
-    columns(report.kind, report.template, &tracks, lang)
+    let mut cols = columns(report.kind, report.template, &tracks, lang);
+    // Tableurs : une colonne « Cerclée » après la prise, pour filtrer les
+    // bonnes prises (sur le PDF, le numéro de prise est entouré).
+    let at = cols
+        .iter()
+        .position(|c| c.key == "take")
+        .map_or(cols.len(), |i| i + 1);
+    let label = if lang == Lang::Fr {
+        "Cerclée"
+    } else {
+        "Circled"
+    };
+    cols.insert(
+        at,
+        Column {
+            key: "circled".into(),
+            label: label.into(),
+            width: 0.8,
+        },
+    );
+    cols
 }
 
 /// Titre du rapport (« Rapport Image N° 3 »).
@@ -217,7 +237,8 @@ mod tests {
         assert!(csv.contains("Titre du film;\"Film; \"\"test\"\"\"\n"));
         assert!(csv.contains("Numérisation;48 kHz\n"));
         assert!(csv.contains(";Piste 10;Observations\n"));
-        assert!(csv.trim_end().ends_with("T001;;;;;;;;;;;;HF2;"));
+        assert!(csv.contains("Prise;Cerclée;Piste 1"));
+        assert!(csv.trim_end().ends_with("T001;;;;;;;;;;;;;HF2;"));
     }
 
     #[test]

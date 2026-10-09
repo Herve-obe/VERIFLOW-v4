@@ -149,7 +149,8 @@ fn col(key: &str, fr: &str, en: &str, width: f32, lang: Lang) -> Column {
     }
 }
 
-/// Colonnes du tableau. `tracks` : numéros des pistes à afficher (rapport
+/// Colonnes du tableau (la prise cerclée n'est pas une colonne : son numéro
+/// de prise est entouré sur le PDF). `tracks` : numéros des pistes à afficher (rapport
 /// son), par exemple 1 à 8 pour le premier feuillet ; vide pour l'image.
 pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lang) -> Vec<Column> {
     let l = lang;
@@ -166,7 +167,6 @@ pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lan
             col("file", "Fichier", "File", 1.8, l),
             col("scene", "SEQ/Plan", "Scene/Shot", 0.9, l),
             col("take", "Prise", "Take", 0.75, l),
-            col("circled", "Cerclée", "Circled", 0.95, l),
             col("tc_in", "TC IN", "TC IN", 1.55, l),
             col("tc_out", "TC OUT", "TC OUT", 1.55, l),
             col("duration", "Durée", "Duration", 1.55, l),
@@ -190,7 +190,6 @@ pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lan
             v.push(col("scene", "Plan", "Scene/Shot", 0.9, l));
             v.push(col("take", "Prise", "Take", 0.6, l));
             if t == Template::Pro {
-                v.push(col("circled", "Cerclée", "Circled", 0.95, l));
                 v.push(col("tc_in", "TC IN", "TC IN", 1.35, l));
                 v.push(col("duration", "Durée", "Duration", 1.35, l));
                 v.push(col("flags", "FD/Seul", "FS/Wild", 0.7, l));
