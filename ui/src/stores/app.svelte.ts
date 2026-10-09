@@ -17,7 +17,16 @@ export const app = $state({
   /** Média demandé dans l'onglet PLAYER (bouton « Ouvrir dans le PLAYER » de MEDIA). */
   playerVideo: null as string | null,
   playerAudio: null as string[] | null,
+  /** Médias à ajouter au rapport du mode courant (bouton « Ajouter au rapport » de MEDIA). */
+  reportMedia: null as string[] | null,
 });
+
+/** Envoie des médias vers l'onglet REPORT (rapport image en VIDEO, son en AUDIO). */
+export function addToReport(paths: string[]) {
+  if (paths.length === 0) return;
+  app.reportMedia = paths;
+  app.tab = "report";
+}
 
 /** Ouvre un média dans l'onglet PLAYER, dans le mode qui lui correspond. */
 export function openInPlayer(path: string, kind: "video" | "audio" | "image" | string) {

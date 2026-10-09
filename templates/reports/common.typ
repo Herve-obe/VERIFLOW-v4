@@ -117,7 +117,9 @@
 // le texte passe sur plusieurs lignes.
 #let sheet-table(s, row-height) = {
   let mono = ("tc_in", "tc_out", "duration", "sound_tc")
-  let strut = box(width: 0pt, height: row-height - 6pt)
+  // Gabarit invisible qui donne sa hauteur minimale à la ligne, centré sur
+  // le texte pour ne pas le décaler.
+  let strut = box(width: 0pt, height: row-height - 6pt, baseline: (row-height - 6pt) / 2 - 0.35em)
   table(
     columns: s.columns.map(c => c.width * 1fr),
     stroke: 0.5pt + rule,

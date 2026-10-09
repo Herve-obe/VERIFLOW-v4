@@ -71,8 +71,8 @@ export interface AudioStatus {
   lufs_integrated: number | null;
 }
 
-const VIDEO_EXT = ["mov", "mp4", "mxf", "mkv", "avi", "mts", "m2ts", "mpg", "mpeg", "m4v", "webm", "braw", "r3d"];
-const AUDIO_EXT = ["wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
+export const VIDEO_EXT = ["mov", "mp4", "mxf", "mkv", "avi", "mts", "m2ts", "mpg", "mpeg", "m4v", "webm", "braw", "r3d"];
+export const AUDIO_EXT = ["wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
 const LUT_EXT = ["cube", "3dl", "dat", "m3d", "csp"];
 
 export async function pickLut(label: string): Promise<string | null> {
