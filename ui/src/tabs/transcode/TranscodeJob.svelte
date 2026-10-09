@@ -26,6 +26,7 @@
   });
   const target = $derived(job.request.settings?.loudness ?? null);
   const measured = $derived(job.results.some((r) => r.loudness));
+  const analysis = $derived(job.request.settings?.preset === "analyze");
   const firstOutput = $derived(job.results.find((r) => r.output)?.output ?? null);
 
   const name = (p: string | null) => (p ? (p.split(/[\\/]/).pop() ?? p) : "");
@@ -84,7 +85,7 @@
       {#if job.speed > 0}<span>× {job.speed.toFixed(1).replace(".", ",")}</span>{/if}
       <span>{t("offload.eta")} {duration(eta)}</span>
     {:else if job.state === "done"}
-      <span>{done} / {job.files} {t("transcode.files.done")}</span>
+      <span>{done} / {job.files} {t(analysis ? "transcode.files.measured" : "transcode.files.done")}</span>
       {#if failed}<span class="bad">{failed} {t("transcode.files.failed")}</span>{/if}
       <span>{duration(job.seconds)}</span>
     {/if}
@@ -105,7 +106,7 @@
             <th class="num">LUFS</th>
             <th class="num">LRA</th>
             <th class="num">dBTP</th>
-            {#if target}<th class="num">{t("transcode.col.gain")}</th>{/if}
+            {#if target}<th class="num">{t(analysis ? "transcode.col.gap" : "transcode.col.gain")}</th>{/if}
           {/if}
         </tr>
       </thead>

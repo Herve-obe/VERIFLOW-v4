@@ -464,11 +464,13 @@
   "transcode.col.status": "Status",
   "transcode.col.gain": "Gain",
   "transcode.gain.legend": "Gain: correction applied (dB) to reach the target.",
-  "transcode.gap.legend": "Gain: deviation from the target (dB), positive if the file is too loud. dBTP in red: above the reference maximum.",
+  "transcode.gap.legend": "Deviation: difference from the target (dB), positive if the file is too loud. dBTP in red: above the reference maximum.",
   "transcode.peak.limited": "Gain reduced to respect the maximum True Peak: target not reached.",
   "transcode.remove.title": "Remove from queue",
   "transcode.remove.active": "This conversion is running. Removing it stops it; the file being written is deleted, files already produced are kept.",
   "transcode.remove.done": "Remove this card from the queue? Produced files are not touched.",
   "transcode.remove.do.active": "Stop and remove",
-  "transcode.remove.do": "Remove"
+  "transcode.remove.do": "Remove",
+  "transcode.files.measured": "files measured",
+  "transcode.col.gap": "Deviation"
 }

@@ -464,11 +464,13 @@
   "transcode.col.status": "État",
   "transcode.col.gain": "Gain",
   "transcode.gain.legend": "Gain : correction appliquée (dB) pour atteindre la cible.",
-  "transcode.gap.legend": "Gain : écart à la cible (dB), positif si le fichier est trop fort. dBTP en rouge : au-dessus du maximum de la référence.",
+  "transcode.gap.legend": "Écart : différence avec la cible (dB), positive si le fichier est trop fort. dBTP en rouge : au-dessus du maximum de la référence.",
   "transcode.peak.limited": "Gain réduit pour respecter le True Peak maximal : niveau cible non atteint.",
   "transcode.remove.title": "Retirer de la file",
   "transcode.remove.active": "Cette conversion est en cours. La retirer l'arrête ; le fichier en cours d'écriture est supprimé, les fichiers déjà produits sont gardés.",
   "transcode.remove.done": "Retirer cette fiche de la file ? Les fichiers produits ne sont pas touchés.",
   "transcode.remove.do.active": "Arrêter et retirer",
-  "transcode.remove.do": "Retirer"
+  "transcode.remove.do": "Retirer",
+  "transcode.files.measured": "fichiers mesurés",
+  "transcode.col.gap": "Écart"
 }

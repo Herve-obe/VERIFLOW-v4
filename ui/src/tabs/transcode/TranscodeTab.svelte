@@ -253,7 +253,7 @@
             {#each sources as f (f)}
               <li title={f}>
                 <span class="name">{name(f)}</span>
-                <span class="dir mono">{folder(f)}</span>
+                <span class="dir mono">{"\u200e" + folder(f) + "\u200e"}</span>
                 <button class="x" onclick={() => (sources = sources.filter((x) => x !== f))} aria-label={t("transcode.remove")} title={t("transcode.remove")}>
                   <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
                 </button>
