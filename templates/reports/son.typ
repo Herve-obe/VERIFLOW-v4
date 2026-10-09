@@ -1,11 +1,9 @@
-// Rapport SON. Modèle École : champs du rapport papier « Son 8 pistes » de
-// l'école (A4 paysage, 8 pistes par feuillet ; au-delà, feuillets
-// supplémentaires pour les pistes 9 à 16, etc.). Modèle Pro : colonnes
-// étendues.
+// Rapport SON : champs du rapport papier « Son 8 pistes » de l'école (A4
+// paysage, 8 pistes par feuillet ; au-delà, feuillets supplémentaires pour
+// les pistes 9 à 16, etc.).
 #import "common.typ": *
 #show: setup
 
-#let pro = d.template == "pro"
 #set page(
   paper: "a4",
   flipped: true,
@@ -51,9 +49,5 @@
 #for (i, s) in d.sheets.enumerate() {
   if i > 0 { pagebreak() }
   head(i + 1, d.sheets.len())
-  if pro {
-    block(width: 100%, stroke: 0.6pt + faint, radius: 4pt, clip: true, sheet-table(s, fill-page: false))
-  } else {
-    framed(sheet-table(s))
-  }
+  framed(sheet-table(s))
 }

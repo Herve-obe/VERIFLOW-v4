@@ -569,15 +569,9 @@ mod tests {
     fn reports_are_numbered_per_kind_and_saved() {
         let dir = tempfile::tempdir().unwrap();
         let p = Project::create(&dir.path().join("r"), None).unwrap();
-        let a = p
-            .save_report(&Report::new(ReportKind::Image, Default::default()))
-            .unwrap();
-        let b = p
-            .save_report(&Report::new(ReportKind::Image, Default::default()))
-            .unwrap();
-        let s = p
-            .save_report(&Report::new(ReportKind::Sound, Default::default()))
-            .unwrap();
+        let a = p.save_report(&Report::new(ReportKind::Image)).unwrap();
+        let b = p.save_report(&Report::new(ReportKind::Image)).unwrap();
+        let s = p.save_report(&Report::new(ReportKind::Sound)).unwrap();
         assert_eq!((a.number, b.number, s.number), (1, 2, 1));
         let mut b2 = p.report(b.id).unwrap();
         b2.header.insert("title".into(), "Film".into());

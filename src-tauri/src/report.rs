@@ -10,8 +10,8 @@ use veriflow_core::player::timecode::FrameRate;
 use veriflow_core::project::{Project, ReportSummary};
 use veriflow_core::report::pdf::Branding;
 use veriflow_core::report::{
-    columns, export, header_fields, pdf, rows_from_media, Column, HeaderField, Lang, Report,
-    ReportKind, Template,
+    base_columns, catalog, columns, export, header_fields, normalize_columns, pdf, rows_from_media,
+    Column, ColumnDef, HeaderField, Lang, Report, ReportKind,
 };
 
 use crate::AppState;
@@ -53,16 +53,36 @@ pub fn report_get(id: i64, app: AppHandle) -> CmdResult<Report> {
 
 /// Crée un rapport vide, numéroté à la suite des rapports du même type.
 #[tauri::command]
-pub fn report_create(kind: ReportKind, template: Template, app: AppHandle) -> CmdResult<Report> {
-    let mut r = Report::new(kind, template);
+pub fn report_create(kind: ReportKind, app: AppHandle) -> CmdResult<Report> {
+    let mut r = Report::new(kind);
     r.header
         .insert("date".into(), veriflow_core::offload::job::local_date());
-    with_project(&app, |p| p.save_report(&r))
+    with_project(&app, |p| {
+        // Colonnes du dernier rapport du même type : pas à recocher chaque jour.
+        if let Some(cols) = p.meta(&columns_key(kind))?.filter(|c| !c.is_empty()) {
+            r.columns = normalize_columns(
+                kind,
+                &cols.split(',').map(str::to_owned).collect::<Vec<_>>(),
+            );
+        }
+        p.save_report(&r)
+    })
+}
+
+fn columns_key(kind: ReportKind) -> String {
+    match kind {
+        ReportKind::Image => "report.columns.image".into(),
+        ReportKind::Sound => "report.columns.sound".into(),
+    }
 }
 
 #[tauri::command]
 pub fn report_save(report: Report, app: AppHandle) -> CmdResult<Report> {
-    with_project(&app, |p| p.save_report(&report))
+    with_project(&app, |p| {
+        let saved = p.save_report(&report)?;
+        p.set_meta(&columns_key(saved.kind), &saved.column_keys().join(","))?;
+        Ok(saved)
+    })
 }
 
 #[tauri::command]
@@ -74,18 +94,30 @@ pub fn report_delete(id: i64, app: AppHandle) -> CmdResult<()> {
 #[derive(Serialize)]
 pub struct ReportSchema {
     header: &'static [HeaderField],
+    /// Colonnes affichées (pistes développées), dans l'ordre choisi.
     columns: Vec<Column>,
+    /// Ordre nettoyé des colonnes affichées (clés, « tracks » pour les pistes).
+    keys: Vec<String>,
+    /// Toutes les colonnes disponibles pour ce type de rapport.
+    catalog: &'static [ColumnDef],
 }
 
 #[tauri::command]
-pub fn report_schema(kind: ReportKind, template: Template, tracks: u8, lang: Lang) -> ReportSchema {
+pub fn report_schema(kind: ReportKind, keys: Vec<String>, tracks: u8, lang: Lang) -> ReportSchema {
     let tracks: Vec<usize> = match kind {
         ReportKind::Image => Vec::new(),
         ReportKind::Sound => (1..=tracks.max(1) as usize).collect(),
     };
+    let keys = if keys.is_empty() {
+        base_columns(kind)
+    } else {
+        normalize_columns(kind, &keys)
+    };
     ReportSchema {
         header: header_fields(kind),
-        columns: columns(kind, template, &tracks, lang),
+        columns: columns(kind, &keys, &tracks, lang),
+        keys,
+        catalog: catalog(kind),
     }
 }
 

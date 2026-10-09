@@ -3,6 +3,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import ChoiceField from "./ChoiceField.svelte";
+  import ColumnsDialog from "./ColumnsDialog.svelte";
   import { app } from "../../stores/app.svelte";
   import { ask } from "../../stores/confirm.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
@@ -48,9 +49,9 @@
 
   $effect(() => {
     const k = report.kind;
-    const tpl = report.template;
+    const keys = [...(report.columns ?? [])];
     const n = report.tracks;
-    reportSchema(k, tpl, n, lang)
+    reportSchema(k, keys, n, lang)
       .then((s) => (schema = s))
       .catch((e) => (error = String(e)));
   });
@@ -179,11 +180,54 @@
     }
   }
 
+  // ---------- Colonnes et tri ----------
+
+  let columnsOpen = $state(false);
+
+  function applyColumns(keys: string[]) {
+    columnsOpen = false;
+    report.columns = keys;
+    touch();
+  }
+
+  // Tri des prises par une colonne (clic sur son titre) : croissant, puis
+  // décroissant. Comparaison « naturelle » : 2 avant 10, 12/2 avant 12/10.
+  let sortKey = $state<string | null>(null);
+  let sortDesc = $state(false);
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+  function sortBy(key: string) {
+    sortDesc = sortKey === key ? !sortDesc : false;
+    sortKey = key;
+    const dir = sortDesc ? -1 : 1;
+    const value = (r: ReportRow) => r.fields[key] ?? "";
+    report.rows = [...report.rows].sort((a, b) => {
+      const va = value(a);
+      const vb = value(b);
+      // Cellules vides toujours en fin de liste.
+      if (!va || !vb) return va ? -1 : vb ? 1 : 0;
+      return collator.compare(va, vb) * dir;
+    });
+    touch();
+  }
+
   // Prise cerclée : case à cocher en tête de ligne (entourée sur le PDF).
   const tableCols = $derived((schema?.columns ?? []).filter((c) => c.key !== "circled"));
 
   const monoKeys = new Set(["tc_in", "tc_out", "duration", "sound_tc"]);
 </script>
+
+{#snippet arrow(key: string)}
+  {#if sortKey === key}
+    <svg class="arrow" viewBox="0 0 10 10" aria-hidden="true">
+      <path d={sortDesc ? "M2 3.5 L5 6.5 L8 3.5" : "M2 6.5 L5 3.5 L8 6.5"} fill="none" stroke="currentColor" stroke-width="1.4" />
+    </svg>
+  {/if}
+{/snippet}
+
+{#if columnsOpen && schema}
+  <ColumnsDialog catalog={schema.catalog} keys={schema.keys} {lang} onApply={applyColumns} onClose={() => (columnsOpen = false)} />
+{/if}
 
 <div class="editor">
   <div class="toolbar">
@@ -199,13 +243,7 @@
         aria-label={t("report.number")}
       />
     </h3>
-    <label class="inline">
-      {t("report.template")}
-      <select value={report.template} onchange={(e) => ((report.template = e.currentTarget.value as Report["template"]), touch())}>
-        <option value="school">{t("report.template.school")}</option>
-        <option value="pro">{t("report.template.pro")}</option>
-      </select>
-    </label>
+    <button onclick={() => (columnsOpen = true)} disabled={!schema} title={t("report.columns.hint")}>{t("report.columns")}</button>
     {#if report.kind === "sound"}
       <label class="inline">
         {t("report.tracks")}
@@ -291,8 +329,12 @@
           </colgroup>
           <thead>
             <tr>
-              <th title={t("report.circled.hint")}>{t("report.circled")}</th>
-              {#each tableCols as c (c.key)}<th>{c.label}</th>{/each}
+              <th title={t("report.circled.hint")}>
+                <button class="sort" onclick={() => sortBy("circled")}>{t("report.circled")}{@render arrow("circled")}</button>
+              </th>
+              {#each tableCols as c (c.key)}
+                <th><button class="sort" onclick={() => sortBy(c.key)} title={t("report.sort")}>{c.label}{@render arrow(c.key)}</button></th>
+              {/each}
               <th></th>
             </tr>
           </thead>
@@ -383,7 +425,6 @@
     flex: 1;
   }
   button,
-  select,
   input,
   textarea {
     background: var(--vf-surface-high);
@@ -561,6 +602,31 @@
   td input:focus {
     border-color: var(--vf-accent);
     background: var(--vf-bg);
+  }
+  th .sort {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  th .sort:hover {
+    color: var(--vf-accent);
+  }
+  .arrow {
+    width: 10px;
+    height: 10px;
+    margin-left: 3px;
+    flex: none;
+    color: var(--vf-accent);
   }
   td.circ {
     text-align: center;

@@ -2,13 +2,19 @@
 //! `cargo run -p veriflow-core --example report_demo -- <dossier>`.
 use std::collections::BTreeMap;
 use veriflow_core::report::pdf::{render, Branding};
-use veriflow_core::report::{Lang, Report, ReportKind, Row, Template};
+use veriflow_core::report::{Lang, Report, ReportKind, Row};
 
 fn main() {
     let out = std::path::PathBuf::from(std::env::args().nth(1).expect("dossier de sortie"));
     for kind in [ReportKind::Image, ReportKind::Sound] {
-        for t in [Template::School, Template::Pro] {
-            let mut r = Report::new(kind, t);
+        for full in [false, true] {
+            let mut r = Report::new(kind);
+            if full {
+                r.columns = veriflow_core::report::catalog(kind)
+                    .iter()
+                    .map(|c| c.key.to_string())
+                    .collect();
+            }
             r.number = 3;
             r.tracks = if kind == ReportKind::Sound { 10 } else { 8 };
             for (k, v) in [
@@ -77,7 +83,14 @@ fn main() {
                 },
             )
             .unwrap();
-            std::fs::write(out.join(format!("{kind:?}-{t:?}.pdf")), pdf).unwrap();
+            std::fs::write(
+                out.join(format!(
+                    "{kind:?}-{}.pdf",
+                    if full { "Toutes" } else { "Base" }
+                )),
+                pdf,
+            )
+            .unwrap();
         }
     }
 }

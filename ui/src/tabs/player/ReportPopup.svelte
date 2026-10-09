@@ -47,7 +47,7 @@
     error = "";
     busy = true;
     try {
-      let r = id === null ? await reportCreate(kind, "school") : await reportGet(id);
+      let r = id === null ? await reportCreate(kind) : await reportGet(id);
       let i = r.rows.findIndex((row) => row.clip === path);
       if (i < 0) {
         r = await reportAddMedia(r, [path]);
@@ -56,7 +56,7 @@
       report = r;
       rowIndex = i;
       fields = { ...r.rows[i].fields };
-      const s = await reportSchema(r.kind, r.template, r.tracks, lang);
+      const s = await reportSchema(r.kind, r.columns ?? [], r.tracks, lang);
       columns = s.columns;
       reports = await reportList();
       await tick();

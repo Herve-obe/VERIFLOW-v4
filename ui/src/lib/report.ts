@@ -16,11 +16,14 @@ export interface ReportRow {
 export interface Report {
   id: number;
   kind: ReportKind;
-  template: ReportTemplate;
+  /** Ancien choix École / Pro (rapports créés avant le choix des colonnes). */
+  template?: ReportTemplate;
   number: number;
   header: Record<string, string>;
   rows: ReportRow[];
   tracks: number;
+  /** Colonnes affichées dans l'ordre choisi (« tracks » : les pistes). */
+  columns: string[];
 }
 
 export interface ReportSummary {
@@ -50,9 +53,23 @@ export interface Column {
   width: number;
 }
 
+export interface ColumnDef {
+  key: string;
+  label_fr: string;
+  label_en: string;
+  width: number;
+  /** Colonne des rapports papier de l'école : toujours affichée. */
+  base: boolean;
+}
+
 export interface ReportSchema {
   header: HeaderField[];
+  /** Colonnes affichées (pistes développées), dans l'ordre choisi. */
   columns: Column[];
+  /** Ordre nettoyé des colonnes affichées. */
+  keys: string[];
+  /** Toutes les colonnes disponibles. */
+  catalog: ColumnDef[];
 }
 
 export interface ReportBranding {
@@ -71,11 +88,11 @@ export const EXPORT_FORMATS: { id: ExportFormat; label: string }[] = [
 
 export const reportList = () => invoke<ReportSummary[]>("report_list");
 export const reportGet = (id: number) => invoke<Report>("report_get", { id });
-export const reportCreate = (kind: ReportKind, template: ReportTemplate) => invoke<Report>("report_create", { kind, template });
+export const reportCreate = (kind: ReportKind) => invoke<Report>("report_create", { kind });
 export const reportSave = (report: Report) => invoke<Report>("report_save", { report });
 export const reportDelete = (id: number) => invoke<void>("report_delete", { id });
-export const reportSchema = (kind: ReportKind, template: ReportTemplate, tracks: number, lang: ReportLang) =>
-  invoke<ReportSchema>("report_schema", { kind, template, tracks, lang });
+export const reportSchema = (kind: ReportKind, keys: string[], tracks: number, lang: ReportLang) =>
+  invoke<ReportSchema>("report_schema", { kind, keys, tracks, lang });
 export const reportAddMedia = (report: Report, paths: string[]) => invoke<Report>("report_add_media", { report, paths });
 export const brandingGet = () => invoke<ReportBranding>("report_branding_get");
 export const brandingSet = (branding: ReportBranding) => invoke<void>("report_branding_set", { branding });

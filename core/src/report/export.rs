@@ -12,7 +12,7 @@ fn all_columns(report: &Report, lang: Lang) -> Vec<Column> {
         ReportKind::Image => Vec::new(),
         ReportKind::Sound => (1..=report.tracks.max(1) as usize).collect(),
     };
-    let mut cols = columns(report.kind, report.template, &tracks, lang);
+    let mut cols = columns(report.kind, &report.column_keys(), &tracks, lang);
     // Tableurs : une colonne « Cerclée » après la prise, pour filtrer les
     // bonnes prises (sur le PDF, le numéro de prise est entouré).
     let at = cols
@@ -215,10 +215,10 @@ pub fn to_xlsx(report: &Report, lang: Lang) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::{Row, Template};
+    use crate::report::Row;
 
     fn report() -> Report {
-        let mut r = Report::new(ReportKind::Sound, Template::School);
+        let mut r = Report::new(ReportKind::Sound);
         r.number = 2;
         r.tracks = 10;
         r.header.insert("title".into(), "Film; \"test\"".into());

@@ -69,6 +69,8 @@ pub struct Report {
     #[serde(default)]
     pub id: i64,
     pub kind: ReportKind,
+    /// Ancien choix École / Pro, lu dans les rapports créés avant le choix
+    /// des colonnes (Pro : toutes les colonnes).
     #[serde(default)]
     pub template: Template,
     /// Numéro du rapport (attribué automatiquement, modifiable).
@@ -82,6 +84,9 @@ pub struct Report {
     /// Nombre de pistes affichées (rapport son, 1 à 32).
     #[serde(default = "default_tracks")]
     pub tracks: u8,
+    /// Colonnes affichées, dans l'ordre choisi (vide : colonnes de base).
+    #[serde(default)]
+    pub columns: Vec<String>,
 }
 
 fn default_tracks() -> u8 {
@@ -94,15 +99,28 @@ pub const MAX_TRACKS: u8 = 32;
 pub const TRACKS_PER_SHEET: usize = 8;
 
 impl Report {
-    pub fn new(kind: ReportKind, template: Template) -> Self {
+    pub fn new(kind: ReportKind) -> Self {
         Self {
             id: 0,
             kind,
-            template,
+            template: Template::School,
             number: 0,
             header: BTreeMap::new(),
             rows: Vec::new(),
             tracks: default_tracks(),
+            columns: base_columns(kind),
+        }
+    }
+
+    /// Colonnes affichées, dans l'ordre choisi.
+    pub fn column_keys(&self) -> Vec<String> {
+        if self.columns.is_empty() {
+            match self.template {
+                Template::Pro => all_columns_keys(self.kind),
+                Template::School => base_columns(self.kind),
+            }
+        } else {
+            normalize_columns(self.kind, &self.columns)
         }
     }
 
@@ -141,72 +159,151 @@ pub struct Column {
     pub width: f32,
 }
 
-fn col(key: &str, fr: &str, en: &str, width: f32, lang: Lang) -> Column {
-    Column {
-        key: key.into(),
-        label: (if lang == Lang::Fr { fr } else { en }).into(),
+/// Colonne disponible pour un type de rapport. Les colonnes de base (celles
+/// des rapports papier de l'école) sont toujours affichées ; les autres se
+/// cochent dans l'éditeur. La clé « tracks » représente les colonnes de
+/// pistes du rapport son.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ColumnDef {
+    pub key: &'static str,
+    pub label_fr: &'static str,
+    pub label_en: &'static str,
+    pub width: f32,
+    pub base: bool,
+}
+
+const fn def(
+    key: &'static str,
+    fr: &'static str,
+    en: &'static str,
+    width: f32,
+    base: bool,
+) -> ColumnDef {
+    ColumnDef {
+        key,
+        label_fr: fr,
+        label_en: en,
         width,
+        base,
     }
 }
 
-/// Colonnes du tableau (la prise cerclée n'est pas une colonne : son numéro
-/// de prise est entouré sur le PDF). `tracks` : numéros des pistes à afficher (rapport
-/// son), par exemple 1 à 8 pour le premier feuillet ; vide pour l'image.
-pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lang) -> Vec<Column> {
-    let l = lang;
-    match (kind, template) {
-        (ReportKind::Image, Template::School) => vec![
-            col("scene", "SEQ/Plan", "Scene/Shot", 1.0, l),
-            col("take", "Prise", "Take", 0.7, l),
-            col("tc_in", "TC IN", "TC IN", 1.3, l),
-            col("tc_out", "TC OUT", "TC OUT", 1.3, l),
-            col("audio", "Audio/Muet", "Sound/MOS", 1.0, l),
-            col("notes", "Effets/Observations", "Effects/Notes", 3.5, l),
-        ],
-        (ReportKind::Image, Template::Pro) => vec![
-            col("file", "Fichier", "File", 1.8, l),
-            col("scene", "SEQ/Plan", "Scene/Shot", 0.9, l),
-            col("take", "Prise", "Take", 0.75, l),
-            col("tc_in", "TC IN", "TC IN", 1.55, l),
-            col("tc_out", "TC OUT", "TC OUT", 1.55, l),
-            col("duration", "Durée", "Duration", 1.55, l),
-            col("audio", "Audio/Muet", "Sound/MOS", 0.8, l),
-            col("sound_tc", "TC son", "Sound TC", 1.55, l),
-            col("lens", "Objectif", "Lens", 1.15, l),
-            col("focal", "Focale", "Focal", 0.85, l),
-            col("tstop", "T-stop", "T-stop", 0.8, l),
-            col("iso", "ISO", "ISO", 0.6, l),
-            col("shutter", "Obtur.", "Shutter", 0.85, l),
-            col("nd", "ND", "ND", 0.55, l),
-            col("wb", "Bal. blancs", "WB", 0.9, l),
-            col("flags", "FD/Seul/MOS", "FS/Wild/MOS", 0.95, l),
-            col("notes", "Observations", "Notes", 2.4, l),
-        ],
-        (ReportKind::Sound, t) => {
-            let mut v = vec![col("id", "ID", "ID", 0.9, l)];
-            if t == Template::Pro {
-                v.push(col("file", "Fichier", "File", 1.5, l));
-            }
-            v.push(col("scene", "Plan", "Scene/Shot", 0.9, l));
-            v.push(col("take", "Prise", "Take", 0.6, l));
-            if t == Template::Pro {
-                v.push(col("tc_in", "TC IN", "TC IN", 1.35, l));
-                v.push(col("duration", "Durée", "Duration", 1.35, l));
-                v.push(col("flags", "FD/Seul", "FS/Wild", 0.7, l));
-            }
-            for &n in tracks {
-                v.push(col(
-                    &format!("track_{n}"),
-                    &format!("Piste {n}"),
-                    &format!("Track {n}"),
-                    1.0,
-                    l,
-                ));
-            }
-            v.push(col("notes", "Observations", "Notes", 2.2, l));
-            v
+/// Colonnes du rapport image, dans l'ordre proposé par défaut.
+const IMAGE_COLUMNS: &[ColumnDef] = &[
+    def("file", "Fichier", "File", 1.8, false),
+    def("scene", "SEQ/Plan", "Scene/Shot", 0.95, true),
+    def("take", "Prise", "Take", 0.75, true),
+    def("tc_in", "TC IN", "TC IN", 1.55, true),
+    def("tc_out", "TC OUT", "TC OUT", 1.55, true),
+    def("duration", "Durée", "Duration", 1.55, false),
+    def("audio", "Audio/Muet", "Sound/MOS", 0.95, true),
+    def("sound_tc", "TC son", "Sound TC", 1.55, false),
+    def("lens", "Objectif", "Lens", 1.15, false),
+    def("focal", "Focale", "Focal", 0.85, false),
+    def("tstop", "T-stop", "T-stop", 0.8, false),
+    def("iso", "ISO", "ISO", 0.6, false),
+    def("shutter", "Obtur.", "Shutter", 0.85, false),
+    def("nd", "ND", "ND", 0.55, false),
+    def("wb", "Bal. blancs", "WB", 0.9, false),
+    def("flags", "FD/Seul/MOS", "FS/Wild/MOS", 0.95, false),
+    def("notes", "Effets/Observations", "Effects/Notes", 3.0, true),
+];
+
+/// Colonnes du rapport son, dans l'ordre proposé par défaut.
+const SOUND_COLUMNS: &[ColumnDef] = &[
+    def("id", "ID", "ID", 0.9, true),
+    def("file", "Fichier", "File", 1.5, false),
+    def("scene", "Plan", "Scene/Shot", 0.9, true),
+    def("take", "Prise", "Take", 0.6, true),
+    def("tc_in", "TC IN", "TC IN", 1.35, false),
+    def("duration", "Durée", "Duration", 1.35, false),
+    def("flags", "FD/Seul", "FS/Wild", 0.7, false),
+    def("tracks", "Pistes", "Tracks", 1.0, true),
+    def("notes", "Observations", "Notes", 2.2, true),
+];
+
+/// Colonnes disponibles pour un type de rapport.
+pub fn catalog(kind: ReportKind) -> &'static [ColumnDef] {
+    match kind {
+        ReportKind::Image => IMAGE_COLUMNS,
+        ReportKind::Sound => SOUND_COLUMNS,
+    }
+}
+
+/// Colonnes de base, dans l'ordre du rapport papier.
+pub fn base_columns(kind: ReportKind) -> Vec<String> {
+    catalog(kind)
+        .iter()
+        .filter(|c| c.base)
+        .map(|c| c.key.to_string())
+        .collect()
+}
+
+/// Colonnes de l'ancien modèle « Pro » (rapports créés avant le choix des colonnes).
+fn all_columns_keys(kind: ReportKind) -> Vec<String> {
+    catalog(kind).iter().map(|c| c.key.to_string()).collect()
+}
+
+/// Ordre des colonnes nettoyé : clés inconnues et doublons retirés, colonnes
+/// de base manquantes ajoutées à leur place par défaut.
+pub fn normalize_columns(kind: ReportKind, keys: &[String]) -> Vec<String> {
+    let cat = catalog(kind);
+    let mut out: Vec<String> = Vec::new();
+    for k in keys {
+        if cat.iter().any(|c| c.key == k) && !out.contains(k) {
+            out.push(k.clone());
         }
     }
+    for (i, c) in cat.iter().enumerate() {
+        if c.base && !out.iter().any(|k| k == c.key) {
+            // Après la colonne affichée qui la précède dans le catalogue.
+            let at = cat[..i]
+                .iter()
+                .rev()
+                .find_map(|p| out.iter().position(|k| k == p.key))
+                .map_or(0, |p| p + 1);
+            out.insert(at, c.key.to_string());
+        }
+    }
+    out
+}
+
+/// Colonnes à imprimer, dans l'ordre choisi. `tracks` : numéros des pistes
+/// de ce feuillet (rapport son), qui remplacent la clé « tracks ». La prise
+/// cerclée n'est pas une colonne : son numéro de prise est entouré sur le PDF.
+pub fn columns(kind: ReportKind, keys: &[String], tracks: &[usize], lang: Lang) -> Vec<Column> {
+    let cat = catalog(kind);
+    let mut out = Vec::new();
+    for k in normalize_columns(kind, keys) {
+        let Some(c) = cat.iter().find(|c| c.key == k) else {
+            continue;
+        };
+        if c.key == "tracks" {
+            for &n in tracks {
+                out.push(Column {
+                    key: format!("track_{n}"),
+                    label: if lang == Lang::Fr {
+                        format!("Piste {n}")
+                    } else {
+                        format!("Track {n}")
+                    },
+                    width: c.width,
+                });
+            }
+        } else {
+            out.push(Column {
+                key: c.key.into(),
+                label: (if lang == Lang::Fr {
+                    c.label_fr
+                } else {
+                    c.label_en
+                })
+                .into(),
+                width: c.width,
+            });
+        }
+    }
+    out
 }
 
 // ---------- En-tête ----------
@@ -636,10 +733,15 @@ mod tests {
 
     #[test]
     fn school_columns_follow_the_paper_reports() {
-        let img: Vec<_> = columns(ReportKind::Image, Template::School, &[], Lang::Fr)
-            .into_iter()
-            .map(|c| c.label)
-            .collect();
+        let img: Vec<_> = columns(
+            ReportKind::Image,
+            &base_columns(ReportKind::Image),
+            &[],
+            Lang::Fr,
+        )
+        .into_iter()
+        .map(|c| c.label)
+        .collect();
         assert_eq!(
             img,
             [
@@ -653,7 +755,7 @@ mod tests {
         );
         let son: Vec<_> = columns(
             ReportKind::Sound,
-            Template::School,
+            &base_columns(ReportKind::Sound),
             &[1, 2, 3, 4, 5, 6, 7, 8],
             Lang::Fr,
         )
@@ -686,7 +788,7 @@ mod tests {
 
     #[test]
     fn adding_rows_keeps_user_header_and_counts_tracks() {
-        let mut r = Report::new(ReportKind::Sound, Template::School);
+        let mut r = Report::new(ReportKind::Sound);
         r.header.insert("title".into(), "Mon film".into());
         let row = Row {
             clip: None,
@@ -702,6 +804,37 @@ mod tests {
         assert_eq!(r.header("title"), "Mon film");
         assert_eq!(r.header("sample_rate"), "48");
         assert_eq!(r.tracks, 12);
+    }
+
+    #[test]
+    fn column_order_is_kept_and_base_columns_restored() {
+        let keys: Vec<String> = ["notes", "iso", "take", "bogus", "iso"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let n = normalize_columns(ReportKind::Image, &keys);
+        // Ordre choisi conservé, clé inconnue et doublon retirés, colonnes de
+        // base manquantes remises à leur place.
+        assert_eq!(
+            n,
+            ["scene", "notes", "iso", "take", "tc_in", "tc_out", "audio"]
+        );
+        let cols = columns(
+            ReportKind::Sound,
+            &base_columns(ReportKind::Sound),
+            &[9, 10],
+            Lang::En,
+        );
+        let labels: Vec<_> = cols.iter().map(|c| c.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["ID", "Scene/Shot", "Take", "Track 9", "Track 10", "Notes"]
+        );
+        // Ancien rapport « Pro » : toutes les colonnes.
+        let mut old = Report::new(ReportKind::Image);
+        old.columns.clear();
+        old.template = Template::Pro;
+        assert_eq!(old.column_keys().len(), IMAGE_COLUMNS.len());
     }
 
     #[test]

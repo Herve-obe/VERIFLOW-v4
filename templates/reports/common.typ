@@ -129,9 +129,8 @@
 
 // ---------- Tableau ----------
 
-// Tableau d'un feuillet. Modèle École : lignes de hauteur égale qui occupent
-// toute la page (place pour écrire à la main). Modèle Pro : hauteur selon le
-// texte. Prise cerclée : numéro de prise entouré, comme sur un rapport papier.
+// Tableau d'un feuillet : lignes de hauteur égale qui occupent toute la page
+// (place pour écrire à la main). Prise cerclée : numéro de prise entouré, comme sur un rapport papier.
 #let sheet-table(s, fill-page: true) = {
   let mono = ("tc_in", "tc_out", "duration", "sound_tc")
   let n = s.rows.len()

@@ -18,13 +18,11 @@
     pickLogo,
     type Report,
     type ReportSummary,
-    type ReportTemplate,
     type ReportBranding,
   } from "../../lib/report";
 
   let list = $state<ReportSummary[]>([]);
   let current = $state<Report | null>(null);
-  let template = $state<ReportTemplate>("school");
   let branding = $state<ReportBranding>({ logo: null, organization: "" });
   let error = $state("");
 
@@ -80,7 +78,7 @@
   async function create() {
     error = "";
     try {
-      current = await reportCreate(kind, template);
+      current = await reportCreate(kind);
       await refresh();
     } catch (e) {
       error = String(e);
@@ -94,7 +92,7 @@
     app.reportMedia = null;
     (async () => {
       try {
-        if (!current || current.kind !== kind) current = await reportCreate(kind, template);
+        if (!current || current.kind !== kind) current = await reportCreate(kind);
         current = await reportSave(await reportAddMedia(current, paths));
         await refresh();
       } catch (e) {
@@ -136,10 +134,6 @@
     <aside>
       <h2>{t("tab.report")} <span class="mode">{t("mode." + app.mode)}</span></h2>
       <div class="new">
-        <select bind:value={template} aria-label={t("report.template")}>
-          <option value="school">{t("report.template.school")}</option>
-          <option value="pro">{t("report.template.pro")}</option>
-        </select>
         <button class="primary" onclick={create}>+ {t(kind === "image" ? "report.new.image" : "report.new.sound")}</button>
       </div>
       <ul class="list">
@@ -236,15 +230,10 @@
   .new {
     display: flex;
   }
-  .new select {
-    margin-right: var(--vf-space-2);
-    min-width: 0;
-  }
   .new button {
     flex: 1;
   }
   button,
-  select,
   input {
     background: var(--vf-surface-high);
     color: var(--vf-text);

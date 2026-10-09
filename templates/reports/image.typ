@@ -1,12 +1,12 @@
-// Rapport IMAGE. Modèle École : champs du rapport papier de l'école (A4
-// portrait). Modèle Pro : même en-tête, tableau étendu (A4 paysage).
+// Rapport IMAGE : champs du rapport papier de l'école. A4 portrait avec les
+// colonnes de base, paysage dès qu'une colonne est ajoutée.
 #import "common.typ": *
 #show: setup
 
-#let pro = d.template == "pro"
+#let wide = d.landscape
 #set page(
   paper: "a4",
-  flipped: pro,
+  flipped: wide,
   margin: (x: 1.2cm, top: 1.1cm, bottom: 1.2cm),
   footer: footer,
 )
@@ -15,8 +15,8 @@
   banner(tr("RAPPORT IMAGE", "CAMERA REPORT"), sheet, count)
   v(7pt)
   grid(
-    columns: if pro { (1.1fr, 1fr, 1.15fr, 1fr) } else { (1fr, 1fr) },
-    rows: if pro { (3.3cm,) } else { (3.3cm, 2.5cm) },
+    columns: if wide { (1.1fr, 1fr, 1.15fr, 1fr) } else { (1fr, 1fr) },
+    rows: if wide { (3.3cm,) } else { (3.3cm, 2.5cm) },
     column-gutter: 7pt,
     row-gutter: 7pt,
     card(height: 100%, tr("Production", "Production"), stack(
@@ -47,9 +47,5 @@
 #for (i, s) in d.sheets.enumerate() {
   if i > 0 { pagebreak() }
   head(i + 1, d.sheets.len())
-  if pro {
-    block(width: 100%, stroke: 0.6pt + faint, radius: 4pt, clip: true, sheet-table(s, fill-page: false))
-  } else {
-    framed(sheet-table(s))
-  }
+  framed(sheet-table(s))
 }
