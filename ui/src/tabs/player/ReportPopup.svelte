@@ -41,7 +41,7 @@
   const name = $derived(path.split(/[\\/]/).pop() ?? path);
   const lang = $derived(i18n.lang === "fr" ? "fr" : "en");
   // Colonnes saisies à la main (le reste vient du média).
-  const auto = new Set(["file", "id", "tc_in", "tc_out", "duration"]);
+  const auto = new Set(["file", "id", "tc_in", "tc_out", "duration", "circled"]);
 
   async function load(id: number | null) {
     error = "";
@@ -140,6 +140,14 @@
           save();
         }}
       >
+        <label class="circled wide">
+          <input
+            type="checkbox"
+            checked={!!fields.circled}
+            onchange={(e) => (fields.circled = e.currentTarget.checked ? "●" : "")}
+          />
+          <span>{t("report.circled.take")}</span>
+        </label>
         {#each columns.filter((c) => !auto.has(c.key)) as c (c.key)}
           <label class:wide={c.key === "notes"}>
             <span>{c.label}</span>
@@ -204,6 +212,17 @@
   .grid input {
     margin-top: 2px;
     width: 100%;
+  }
+  .grid label.circled {
+    flex-direction: row;
+    align-items: center;
+    font-size: var(--vf-text-sm);
+    color: var(--vf-text);
+  }
+  .grid label.circled input {
+    width: auto;
+    margin: 0 var(--vf-space-2) 0 0;
+    accent-color: var(--vf-accent);
   }
   button,
   select,

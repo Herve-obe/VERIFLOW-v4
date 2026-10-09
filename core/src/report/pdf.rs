@@ -30,9 +30,9 @@ const FONTS: &[&[u8]] = &[
 /// Lignes par feuillet (format des rapports papier).
 fn rows_per_sheet(kind: ReportKind, template: Template) -> usize {
     match (kind, template) {
-        (ReportKind::Image, Template::School) => 22,
-        (ReportKind::Image, Template::Pro) => 18,
-        (ReportKind::Sound, _) => 15,
+        (ReportKind::Image, Template::School) => 24,
+        (ReportKind::Image, Template::Pro) => 15,
+        (ReportKind::Sound, _) => 16,
     }
 }
 
@@ -41,6 +41,8 @@ fn rows_per_sheet(kind: ReportKind, template: Template) -> usize {
 pub struct Sheet {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<String>>,
+    /// Prises cerclées (même ordre que `rows`) : la prise est entourée.
+    pub circled: Vec<bool>,
 }
 
 /// Autorise la coupure des longs noms sans espace (fichiers, chemins) après
@@ -85,25 +87,33 @@ pub fn sheets(report: &Report, lang: Lang) -> Vec<Sheet> {
     let mut out = Vec::new();
     for g in groups {
         let cols = columns(report.kind, report.template, &g, lang);
-        let cells: Vec<Vec<String>> = report
+        let cells: Vec<(Vec<String>, bool)> = report
             .rows
             .iter()
-            .map(|r| cols.iter().map(|c| breakable(r.get(&c.key))).collect())
+            .map(|r| {
+                (
+                    cols.iter().map(|c| breakable(r.get(&c.key))).collect(),
+                    !r.get("circled").trim().is_empty(),
+                )
+            })
             .collect();
-        let mut chunks: Vec<Vec<Vec<String>>> = cells.chunks(per).map(|c| c.to_vec()).collect();
+        let mut chunks: Vec<Vec<(Vec<String>, bool)>> =
+            cells.chunks(per).map(|c| c.to_vec()).collect();
         if chunks.is_empty() {
             chunks.push(Vec::new());
         }
         if report.template == Template::School {
             let last = chunks.last_mut().expect("au moins un feuillet");
             while last.len() < per {
-                last.push(vec![String::new(); cols.len()]);
+                last.push((vec![String::new(); cols.len()], false));
             }
         }
         for rows in chunks {
+            let (rows, circled) = rows.into_iter().unzip();
             out.push(Sheet {
                 columns: cols.clone(),
                 rows,
+                circled,
             });
         }
     }
@@ -191,6 +201,8 @@ struct Data {
     /// Ligne d'en-tête personnalisée (nom de l'école, de la production).
     organization: String,
     footer: String,
+    /// Date d'édition du PDF.
+    edited: String,
 }
 
 /// Options de mise en page communes à tous les rapports.
@@ -289,6 +301,15 @@ pub fn render(report: &Report, lang: Lang, branding: &Branding) -> Result<Vec<u8
         has_logo,
         organization: branding.organization.clone(),
         footer: format!("VERIFLOW {}", crate::VERSION),
+        edited: format!(
+            "{} {}",
+            if lang == Lang::Fr {
+                "Édité le"
+            } else {
+                "Printed"
+            },
+            chrono::Local::now().format("%d/%m/%Y %H:%M")
+        ),
     };
     let json = serde_json::to_string(&data).map_err(|e| Error::Report(e.to_string()))?;
     let template = match report.kind {
@@ -364,10 +385,10 @@ mod tests {
     fn school_sheets_are_filled_with_blank_lines() {
         let s = sheets(&sample(ReportKind::Image, Template::School, 30), Lang::Fr);
         assert_eq!(s.len(), 2);
-        assert_eq!(s[1].rows.len(), 22, "dernier feuillet complété");
+        assert_eq!(s[1].rows.len(), 24, "dernier feuillet complété");
         assert_eq!(s[1].rows[8][0], "", "lignes vides à la suite");
         let pro = sheets(&sample(ReportKind::Image, Template::Pro, 30), Lang::Fr);
-        assert_eq!(pro[1].rows.len(), 12, "pas de lignes vides en Pro");
+        assert_eq!(pro[1].rows.len(), 15, "pas de lignes vides en Pro");
     }
 
     #[test]

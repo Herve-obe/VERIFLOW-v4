@@ -72,7 +72,7 @@ fn main() {
                 &r,
                 Lang::Fr,
                 &Branding {
-                    organization: "École Saint-Genès, BTS Métiers de l'audiovisuel".into(),
+                    organization: "Nom de la production".into(),
                     ..Default::default()
                 },
             )

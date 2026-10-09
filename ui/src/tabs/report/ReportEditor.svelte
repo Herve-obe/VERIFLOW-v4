@@ -2,6 +2,7 @@
      ligne par prise, exports. Enregistrement automatique dans le projet. -->
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import ChoiceField from "./ChoiceField.svelte";
   import { app } from "../../stores/app.svelte";
   import { ask } from "../../stores/confirm.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
@@ -178,6 +179,9 @@
     }
   }
 
+  // Prise cerclée : case à cocher en tête de ligne (entourée sur le PDF).
+  const tableCols = $derived((schema?.columns ?? []).filter((c) => c.key !== "circled"));
+
   const monoKeys = new Set(["tc_in", "tc_out", "duration", "sound_tc"]);
 </script>
 
@@ -240,20 +244,18 @@
                   <span>{label(key)}</span>
                   {#if key === "date"}
                     <input type="date" value={report.header[key] ?? ""} oninput={(e) => setHeader(key, e.currentTarget.value)} />
+                  {:else if f.options.length + f.extra.length > 0}
+                    <ChoiceField
+                      value={report.header[key] ?? ""}
+                      options={[...f.options, ...f.extra]}
+                      unit={f.unit}
+                      onChange={(v) => setHeader(key, v)}
+                    />
                   {:else}
                     <span class="value">
-                      <input
-                        value={report.header[key] ?? ""}
-                        list={f.options.length + f.extra.length > 0 ? `vf-opt-${key}` : undefined}
-                        oninput={(e) => setHeader(key, e.currentTarget.value)}
-                      />
+                      <input value={report.header[key] ?? ""} oninput={(e) => setHeader(key, e.currentTarget.value)} />
                       {#if f.unit}<span class="unit">{f.unit}</span>{/if}
                     </span>
-                    {#if f.options.length + f.extra.length > 0}
-                      <datalist id={`vf-opt-${key}`}>
-                        {#each [...f.options, ...f.extra] as o (o)}<option value={o}></option>{/each}
-                      </datalist>
-                    {/if}
                   {/if}
                 </label>
               {/if}
@@ -283,19 +285,29 @@
       <div class="table-wrap">
         <table>
           <colgroup>
-            {#each schema.columns as c (c.key)}<col style:width={`${Math.max(72, Math.round(c.width * 80))}px`} />{/each}
+            <col style:width="64px" />
+            {#each tableCols as c (c.key)}<col style:width={`${Math.max(72, Math.round(c.width * 80))}px`} />{/each}
             <col style:width="78px" />
           </colgroup>
           <thead>
             <tr>
-              {#each schema.columns as c (c.key)}<th>{c.label}</th>{/each}
+              <th title={t("report.circled.hint")}>{t("report.circled")}</th>
+              {#each tableCols as c (c.key)}<th>{c.label}</th>{/each}
               <th></th>
             </tr>
           </thead>
           <tbody>
             {#each report.rows as row, i (i)}
               <tr>
-                {#each schema.columns as c (c.key)}
+                <td class="circ">
+                  <input
+                    type="checkbox"
+                    checked={!!row.fields.circled}
+                    onchange={(e) => setCell(row, "circled", e.currentTarget.checked ? "●" : "")}
+                    aria-label={t("report.circled")}
+                  />
+                </td>
+                {#each tableCols as c (c.key)}
                   <td>
                     <input
                       class:mono={monoKeys.has(c.key)}
@@ -318,7 +330,7 @@
                 </td>
               </tr>
             {:else}
-              <tr><td class="empty" colspan={schema.columns.length + 1}>{t("report.rows.empty")}</td></tr>
+              <tr><td class="empty" colspan={tableCols.length + 2}>{t("report.rows.empty")}</td></tr>
             {/each}
           </tbody>
         </table>
@@ -477,6 +489,9 @@
     width: 100%;
     color: var(--vf-text);
   }
+  fieldset label input {
+    height: 26px;
+  }
   fieldset.side label {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -546,6 +561,13 @@
   td input:focus {
     border-color: var(--vf-accent);
     background: var(--vf-bg);
+  }
+  td.circ {
+    text-align: center;
+  }
+  td.circ input {
+    width: auto;
+    accent-color: var(--vf-accent);
   }
   td.empty {
     padding: var(--vf-space-4);

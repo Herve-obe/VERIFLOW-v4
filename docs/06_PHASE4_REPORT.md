@@ -17,6 +17,9 @@ Objectif (charte §7.4) : produire les rapports image et son du tournage, au for
 | Touche **R** (PLAYER) | Fenêtre de saisie de la ligne du clip en cours dans le rapport le plus récent (ou un autre, ou un nouveau) ; ligne créée et pré-remplie si besoin ; Entrée enregistre, Échap ferme. Aussi par le bouton « Rapport (R) » à côté de « + Marqueur (M) » |
 | Exports | **PDF**, **XLSX**, **CSV** (point-virgule, s'ouvre dans Excel en français), **HTML** imprimable, **EDL** CMX3600 des prises d'un rapport image (marqueurs et plages du PLAYER compris) |
 | Présentation | Nom de l'école ou de la production et **logo** (PNG, JPEG, SVG) imprimés en haut des rapports, enregistrés dans le projet |
+| Mise en page PDF (révisée le 09/10/2026) | Bandeau de titre avec pastilles Rapport, Feuillet et Support ; informations en encadrés ; cases d'option nettes ; tableau à titres foncés et lignes alternées, qui occupe toute la page en modèle École ; **numéro de prise entouré** pour une prise cerclée ; date d'édition en pied de page |
+| Prise cerclée | Case « Cerclée » en tête de chaque ligne de l'éditeur et dans la fenêtre de la touche R (vidéo et son) |
+| Champs à choix | Liste déroulante (cases du papier et valeurs étendues) avec **« Autre... »** pour saisir une valeur à la main ; « Format image » propose les formats d'enregistrement courants (ProRes, DNxHD/DNxHR, XAVC, XF-AVC, AVC-Intra, H.264, H.265, Blackmagic RAW, REDCODE RAW, ARRIRAW...) |
 
 ## Choix techniques
 

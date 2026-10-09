@@ -1,5 +1,5 @@
-// Rapport IMAGE. Modèle École : reproduction du rapport papier de l'école
-// (A4 portrait). Modèle Pro : même en-tête, tableau étendu (A4 paysage).
+// Rapport IMAGE. Modèle École : champs du rapport papier de l'école (A4
+// portrait). Modèle Pro : même en-tête, tableau étendu (A4 paysage).
 #import "common.typ": *
 #show: setup
 
@@ -7,48 +7,49 @@
 #set page(
   paper: "a4",
   flipped: pro,
-  margin: (x: 1.1cm, top: 1cm, bottom: 1.1cm),
+  margin: (x: 1.2cm, top: 1.1cm, bottom: 1.2cm),
   footer: footer,
 )
 
 #let head(sheet, count) = {
-  banner(tr("RAPPORT Image", "CAMERA REPORT"), sheet, count)
-  v(8pt)
+  banner(tr("RAPPORT IMAGE", "CAMERA REPORT"), sheet, count)
+  v(7pt)
   grid(
-    columns: (1.25fr, 1fr, 1fr),
-    column-gutter: 14pt,
-    // Production
-    stack(
-      spacing: 5.5pt,
-      line-field("date"),
-      line-field("title"),
-      line-field("director"),
-      line-field("dop"),
-      line-field("operator"),
-      block(height: 2pt),
-      line-field("camera"),
-      line-field("image_format"),
-      line-field("sound_ref", unit: "dB FS"),
-    ),
-    // Image et média
-    stack(
+    columns: if pro { (1.1fr, 1fr, 1.15fr, 1fr) } else { (1fr, 1fr) },
+    rows: if pro { (3.3cm,) } else { (3.3cm, 2.5cm) },
+    column-gutter: 7pt,
+    row-gutter: 7pt,
+    card(height: 100%, tr("Production", "Production"), stack(
       spacing: 6pt,
-      group("IMAGE"),
-      choices("definition"),
-      choices("fps"),
-      other("definition", "fps"),
-      block(height: 4pt),
-      group("MEDIA"),
-      choices("media"),
-      other("media"),
-    ),
-    remarks(3.6cm),
+      row("date"),
+      row("title"),
+      row("director"),
+      row("dop"),
+      row("operator"),
+    )),
+    card(height: 100%, tr("Caméra", "Camera"), stack(
+      spacing: 6pt,
+      row("camera"),
+      row("image_format"),
+      row("sound_ref", unit: "dB FS"),
+    )),
+    card(height: 100%, tr("Image et support", "Image and media"), stack(
+      spacing: 6pt,
+      choices("definition", label: tr("Définition", "Resolution")),
+      choices("fps", label: tr("Cadence", "Frame rate")),
+      choices("media", label: tr("Support", "Media")),
+    )),
+    remarks(100%),
   )
-  v(8pt)
+  v(7pt)
 }
 
 #for (i, s) in d.sheets.enumerate() {
   if i > 0 { pagebreak() }
   head(i + 1, d.sheets.len())
-  sheet-table(s, if pro { 0.62cm } else { 0.78cm })
+  if pro {
+    block(width: 100%, stroke: 0.6pt + faint, radius: 4pt, clip: true, sheet-table(s, fill-page: false))
+  } else {
+    framed(sheet-table(s))
+  }
 }

@@ -165,21 +165,21 @@ pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lan
         (ReportKind::Image, Template::Pro) => vec![
             col("file", "Fichier", "File", 1.8, l),
             col("scene", "SEQ/Plan", "Scene/Shot", 0.9, l),
-            col("take", "Prise", "Take", 0.6, l),
-            col("circled", "Cerclée", "Circled", 0.75, l),
-            col("tc_in", "TC IN", "TC IN", 1.35, l),
-            col("tc_out", "TC OUT", "TC OUT", 1.35, l),
-            col("duration", "Durée", "Duration", 1.35, l),
+            col("take", "Prise", "Take", 0.75, l),
+            col("circled", "Cerclée", "Circled", 0.95, l),
+            col("tc_in", "TC IN", "TC IN", 1.55, l),
+            col("tc_out", "TC OUT", "TC OUT", 1.55, l),
+            col("duration", "Durée", "Duration", 1.55, l),
             col("audio", "Audio/Muet", "Sound/MOS", 0.8, l),
-            col("sound_tc", "TC son", "Sound TC", 1.35, l),
-            col("lens", "Objectif", "Lens", 1.0, l),
-            col("focal", "Focale", "Focal", 0.7, l),
-            col("tstop", "T-stop", "T-stop", 0.6, l),
+            col("sound_tc", "TC son", "Sound TC", 1.55, l),
+            col("lens", "Objectif", "Lens", 1.15, l),
+            col("focal", "Focale", "Focal", 0.85, l),
+            col("tstop", "T-stop", "T-stop", 0.8, l),
             col("iso", "ISO", "ISO", 0.6, l),
-            col("shutter", "Obtur.", "Shutter", 0.7, l),
-            col("nd", "ND", "ND", 0.5, l),
-            col("wb", "Bal. blancs", "WB", 0.7, l),
-            col("flags", "FD/Seul/MOS", "FS/Wild/MOS", 0.8, l),
+            col("shutter", "Obtur.", "Shutter", 0.85, l),
+            col("nd", "ND", "ND", 0.55, l),
+            col("wb", "Bal. blancs", "WB", 0.9, l),
+            col("flags", "FD/Seul/MOS", "FS/Wild/MOS", 0.95, l),
             col("notes", "Observations", "Notes", 2.4, l),
         ],
         (ReportKind::Sound, t) => {
@@ -190,7 +190,7 @@ pub fn columns(kind: ReportKind, template: Template, tracks: &[usize], lang: Lan
             v.push(col("scene", "Plan", "Scene/Shot", 0.9, l));
             v.push(col("take", "Prise", "Take", 0.6, l));
             if t == Template::Pro {
-                v.push(col("circled", "Cerclée", "Circled", 0.75, l));
+                v.push(col("circled", "Cerclée", "Circled", 0.95, l));
                 v.push(col("tc_in", "TC IN", "TC IN", 1.35, l));
                 v.push(col("duration", "Durée", "Duration", 1.35, l));
                 v.push(col("flags", "FD/Seul", "FS/Wild", 0.7, l));
@@ -257,6 +257,53 @@ const fn choice(
 
 const FPS_EXTRA: &[&str] = &["23.976", "29.97", "30", "50", "59.94", "60"];
 
+/// Formats d'enregistrement proposés pour « Format image » (« Autre » permet
+/// d'en saisir un autre).
+const IMAGE_FORMATS: &[&str] = &[
+    "ProRes 422 Proxy",
+    "ProRes 422 LT",
+    "ProRes 422",
+    "ProRes 422 HQ",
+    "ProRes 4444",
+    "ProRes 4444 XQ",
+    "ProRes RAW",
+    "DNxHD",
+    "DNxHR LB",
+    "DNxHR SQ",
+    "DNxHR HQ",
+    "DNxHR HQX",
+    "DNxHR 444",
+    "XAVC S",
+    "XAVC S-I",
+    "XAVC HS",
+    "XAVC Intra",
+    "XAVC Long GOP",
+    "XF-AVC",
+    "AVC-Intra",
+    "MPEG-2 (XDCAM)",
+    "H.264",
+    "H.265 (HEVC)",
+    "Blackmagic RAW",
+    "REDCODE RAW",
+    "ARRIRAW",
+    "Cinema DNG",
+];
+
+/// Nom courant d'un codec vidéo lu par FFprobe (« h264 » → « H.264 »).
+fn codec_label(codec: &str) -> String {
+    match codec {
+        "h264" => "H.264".into(),
+        "hevc" => "H.265 (HEVC)".into(),
+        "prores" => "ProRes".into(),
+        "dnxhd" => "DNxHD".into(),
+        "mpeg2video" => "MPEG-2 (XDCAM)".into(),
+        "mjpeg" => "MJPEG".into(),
+        "av1" => "AV1".into(),
+        "vp9" => "VP9".into(),
+        other => other.to_uppercase(),
+    }
+}
+
 const IMAGE_HEADER: &[HeaderField] = &[
     text("date", "Date", "Date"),
     text("backup", "Support de sauvegarde N°", "Backup media #"),
@@ -265,7 +312,14 @@ const IMAGE_HEADER: &[HeaderField] = &[
     text("dop", "Dir. Phot.", "DoP"),
     text("operator", "OPV", "Camera operator"),
     text("camera", "Caméra", "Camera"),
-    text("image_format", "Format image", "Image format"),
+    choice(
+        "image_format",
+        "Format image",
+        "Image format",
+        &[],
+        IMAGE_FORMATS,
+        "",
+    ),
     choice(
         "sound_ref",
         "Référence Son",
@@ -468,7 +522,7 @@ fn video_row(path: &Path, header: &mut BTreeMap<String, String>) -> Result<Row> 
         header.entry("definition".into()).or_insert(definition);
         header
             .entry("image_format".into())
-            .or_insert_with(|| format!("{}x{} {}", v.width, v.height, v.codec));
+            .or_insert_with(|| codec_label(&v.codec));
     }
     row.fields.insert(
         "audio".into(),
