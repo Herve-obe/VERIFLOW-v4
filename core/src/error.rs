@@ -36,6 +36,9 @@ pub enum Error {
     #[error("média non pris en charge : {0}")]
     Unsupported(String),
 
+    #[error("rapport : {0}")]
+    Report(String),
+
     #[error("projet créé par une version plus récente de VERIFLOW (schéma {found}, maximum supporté {supported})")]
     SchemaTooNew { found: i64, supported: i64 },
 }

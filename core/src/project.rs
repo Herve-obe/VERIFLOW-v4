@@ -11,6 +11,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 
 use crate::player::logs::{Color, Marker};
+use crate::report::{Report, ReportKind};
 use crate::{Error, Result, VERSION};
 
 /// Extension des fichiers projet.
@@ -81,7 +82,35 @@ const MIGRATIONS: &[&str] = &[
          updated_at TEXT NOT NULL
      );
      CREATE INDEX player_markers_path ON player_markers (path, frame);",
+    // v5 : rapports image et son (REPORT). Contenu en JSON (en-tête, lignes).
+    "CREATE TABLE reports (
+         id         INTEGER PRIMARY KEY,
+         kind       TEXT NOT NULL,
+         number     INTEGER NOT NULL,
+         data       TEXT NOT NULL,
+         created_at TEXT NOT NULL,
+         updated_at TEXT NOT NULL
+     );",
 ];
+
+fn kind_id(kind: ReportKind) -> &'static str {
+    match kind {
+        ReportKind::Image => "image",
+        ReportKind::Sound => "sound",
+    }
+}
+
+/// Résumé d'un rapport pour la liste de l'onglet REPORT.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReportSummary {
+    pub id: i64,
+    pub kind: ReportKind,
+    pub number: u32,
+    pub date: String,
+    pub title: String,
+    pub rows: usize,
+    pub updated_at: String,
+}
 
 /// Version de schéma la plus récente connue de cette version de VERIFLOW.
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
@@ -441,6 +470,87 @@ impl Project {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// Enregistre un rapport : création si `id` vaut 0 (numéro suivant du même
+    /// type si `number` vaut 0), sinon mise à jour.
+    pub fn save_report(&self, report: &Report) -> Result<Report> {
+        let at = now();
+        let mut r = report.clone();
+        let kind = kind_id(r.kind);
+        if r.number == 0 {
+            let max: Option<i64> = self.conn.query_row(
+                "SELECT MAX(number) FROM reports WHERE kind = ?1",
+                [kind],
+                |row| row.get(0),
+            )?;
+            r.number = max.unwrap_or(0) as u32 + 1;
+        }
+        let data = serde_json::to_string(&r).map_err(|e| Error::Report(e.to_string()))?;
+        if r.id == 0 {
+            self.conn.execute(
+                "INSERT INTO reports (kind, number, data, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![kind, r.number, data, at],
+            )?;
+            r.id = self.conn.last_insert_rowid();
+        } else {
+            let n = self.conn.execute(
+                "UPDATE reports SET kind = ?2, number = ?3, data = ?4, updated_at = ?5 WHERE id = ?1",
+                params![r.id, kind, r.number, data, at],
+            )?;
+            if n == 0 {
+                return Err(Error::NotFound(format!("rapport {}", r.id)));
+            }
+        }
+        Ok(r)
+    }
+
+    pub fn report(&self, id: i64) -> Result<Report> {
+        let data: Option<String> = self
+            .conn
+            .query_row("SELECT data FROM reports WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        let data = data.ok_or_else(|| Error::NotFound(format!("rapport {id}")))?;
+        let mut r: Report =
+            serde_json::from_str(&data).map_err(|e| Error::Report(e.to_string()))?;
+        r.id = id;
+        Ok(r)
+    }
+
+    pub fn delete_report(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM reports WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Liste des rapports, les plus récents d'abord.
+    pub fn reports(&self) -> Result<Vec<ReportSummary>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, data, updated_at FROM reports ORDER BY kind, number DESC")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, data, updated_at) = row?;
+            if let Ok(rep) = serde_json::from_str::<Report>(&data) {
+                out.push(ReportSummary {
+                    id,
+                    kind: rep.kind,
+                    number: rep.number,
+                    date: rep.header("date").to_string(),
+                    title: rep.header("title").to_string(),
+                    rows: rep.rows.len(),
+                    updated_at,
+                });
+            }
+        }
+        Ok(out)
+    }
+
     pub fn info(&self) -> Result<ProjectInfo> {
         Ok(ProjectInfo {
             path: self.path.display().to_string(),
@@ -454,6 +564,32 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_are_numbered_per_kind_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Project::create(&dir.path().join("r"), None).unwrap();
+        let a = p
+            .save_report(&Report::new(ReportKind::Image, Default::default()))
+            .unwrap();
+        let b = p
+            .save_report(&Report::new(ReportKind::Image, Default::default()))
+            .unwrap();
+        let s = p
+            .save_report(&Report::new(ReportKind::Sound, Default::default()))
+            .unwrap();
+        assert_eq!((a.number, b.number, s.number), (1, 2, 1));
+        let mut b2 = p.report(b.id).unwrap();
+        b2.header.insert("title".into(), "Film".into());
+        p.save_report(&b2).unwrap();
+        assert_eq!(p.report(b.id).unwrap().header("title"), "Film");
+        let list = p.reports().unwrap();
+        assert_eq!(list.len(), 3);
+        assert!(list.iter().any(|r| r.title == "Film" && r.number == 2));
+        p.delete_report(a.id).unwrap();
+        assert_eq!(p.reports().unwrap().len(), 2);
+        assert!(p.report(a.id).is_err());
+    }
 
     #[test]
     fn markers_are_saved_updated_and_deleted() {

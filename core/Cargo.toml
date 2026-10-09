@@ -27,6 +27,12 @@ sha1 = "0.10"
 sha2 = "0.10"
 xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3"] }
 thiserror = "2"
+# REPORT : mise en page PDF par Typst embarqué (Apache 2.0), classeurs Excel.
+typst = "0.15.1"
+typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
+typst-assets = { version = "0.15.1", features = ["fonts"] }
+rust_xlsxwriter = "0.99"
 
 [dev-dependencies]
 tempfile = "3"
