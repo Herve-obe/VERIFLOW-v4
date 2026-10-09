@@ -442,7 +442,7 @@
   "transcode.existing.overwrite": "Remplacer",
   "transcode.never.overwrite": "Les fichiers d'origine ne sont jamais remplacés. Un fichier en cours d'écriture porte l'extension .part jusqu'à la fin.",
   "transcode.start": "Ajouter à la file",
-  "transcode.start.analyze": "Mesurer",
+  "transcode.start.analyze": "Analyser",
   "transcode.file": "fichier",
   "transcode.files": "fichiers",
   "transcode.queue": "File d'attente",
@@ -639,5 +639,6 @@
   "transcode.hint.kind.offline_detect": "Images rouges « média hors ligne » laissées par un logiciel de montage dans un export, avec leurs timecodes (CSV).",
   "transcode.hint.kind.framemd5": "Une empreinte MD5 par image et par bloc de son : prouve qu'un fichier réencodé sans perte (FFV1, rewrap) est identique image par image.",
   "transcode.hint.kind.extract_tracks": "Un WAV mono par canal, nommé d'après la piste (iXML), avec la référence BWF : prêt pour le montage son.",
-  "transcode.hint.kind.cut": "Découpe sans réencodage : indique les points d'entrée et de sortie avec les ciseaux dans la liste. Avec H.264 ou HEVC, le début tombe sur l'image clé précédente."
+  "transcode.hint.kind.cut": "Découpe sans réencodage : indique les points d'entrée et de sortie avec les ciseaux dans la liste. Avec H.264 ou HEVC, le début tombe sur l'image clé précédente.",
+  "transcode.found.one": "passage trouvé"
 }

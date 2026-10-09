@@ -122,7 +122,7 @@
         {#each job.results as r (r.source)}
           <tr>
             <td class="file" title={r.output ?? r.source}>
-              {name(r.source)}{#if r.output && name(r.output) !== name(r.source)}<span class="muted"> → {name(r.output)}</span>{/if}
+              {name(r.source)}{#if r.output && name(r.output) !== name(r.source)}<span class="muted">&nbsp;→ {name(r.output)}</span>{/if}
               {#if r.outputs.length > 1}<span class="muted"> ({r.outputs.length} {t("transcode.files")})</span>{/if}
               {#if r.message}<div class="msg" class:info={r.status === "done"}>{r.message}</div>{/if}
               {#if r.checksum}<div class="sum mono" title="XXH128">XXH128 {r.checksum}</div>{/if}
@@ -154,7 +154,7 @@
     {#each detections as r (r.source)}
       <details class="found">
         <summary>
-          {name(r.source)} : {r.analysis?.segments.length ?? 0} {t("transcode.found")}
+          {name(r.source)} : {r.analysis?.segments.length ?? 0} {t((r.analysis?.segments.length ?? 0) > 1 ? "transcode.found" : "transcode.found.one")}
           {#if r.output}<button class="link" onclick={() => r.output && reveal(r.output).catch((e) => (openError = String(e)))}>{t("transcode.open.file")}</button>{/if}
         </summary>
         <table>

@@ -442,7 +442,7 @@
   "transcode.existing.overwrite": "Replace",
   "transcode.never.overwrite": "Original files are never replaced. A file being written has the .part extension until it is complete.",
   "transcode.start": "Add to queue",
-  "transcode.start.analyze": "Measure",
+  "transcode.start.analyze": "Analyse",
   "transcode.file": "file",
   "transcode.files": "files",
   "transcode.queue": "Queue",
@@ -639,5 +639,6 @@
   "transcode.hint.kind.offline_detect": "Red \"media offline\" frames left by editing software in an export, with timecodes (CSV).",
   "transcode.hint.kind.framemd5": "One MD5 per frame and sound packet: proves that a losslessly processed file (FFV1, rewrap) is identical frame by frame.",
   "transcode.hint.kind.extract_tracks": "One mono WAV per channel, named after the track (iXML), with BWF reference: ready for sound editing.",
-  "transcode.hint.kind.cut": "Cut without re-encoding: set in and out points with the scissors in the list. With H.264 or HEVC, the start falls on the previous keyframe."
+  "transcode.hint.kind.cut": "Cut without re-encoding: set in and out points with the scissors in the list. With H.264 or HEVC, the start falls on the previous keyframe.",
+  "transcode.found.one": "segment found"
 }

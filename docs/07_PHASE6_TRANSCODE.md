@@ -1,66 +1,93 @@
-# Phase 6 : onglet TRANSCODE (lot 1)
+# Phase 6 : onglet TRANSCODE
 
 Date : 09/10/2026
-Objectif (charte §7.6) : convertir les rushes vers les codecs de montage, de diffusion et les formats son, par préréglages et file d'attente, avec normalisation du niveau et mesure du True Peak.
-
-TRANSCODE est livré en trois lots, chacun dans sa propre PR :
-
-| Lot | Contenu |
-|---|---|
-| **1 (cette PR)** | Moteur, file d'attente, ProRes, DNxHR, CineForm, Animation, non compressé, FFV1, H.264, HEVC, proxies, changement de conteneur, extraction du son, formats son, normalisation EBU R 128 / ATSC A/85, mesure loudness et True Peak |
-| 2 | DNxHD et MXF OP-Atom (Avid), XAVC Intra, AVC-Intra 100, XAVC Long GOP, MPEG-2 / XDCAM HD422 et HD35, AV1, VP9, autres codecs (MJPEG, HAP, VP8, DV, MPEG-1, Theora, WMV, Xvid), images (JPEG, PNG, TIFF, DPX, OpenEXR), LUT, TC incrusté, watermark, préréglages personnels |
-| 3 | Fonctions sans réencodage : remplacement du son, découpe, fusion, conformation de cadence |
+Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de conversion de Shutter Encoder (Paul Pacifico), avec un code et une interface propres à VERIFLOW, et y ajouter les fonctions propres à VERIFLOW (métadonnées de tournage, timecode, traçabilité).
 
 ## Ce qui est livré
 
-| Fonction | Réalisation |
+### Préréglages (environ 80)
+
+| Famille | Préréglages |
 |---|---|
-| Fichiers | Boutons « Fichiers » et « Dossier » (sous-dossiers compris), glisser-déposer depuis l'explorateur de VERIFLOW ou du système, clic droit dans l'explorateur, bouton **« Envoyer vers TRANSCODE »** dans MEDIA |
-| Préréglages VIDEO | **Montage** : ProRes 422 Proxy, LT, 422, HQ, 4444, 4444 XQ ; DNxHR LB, SQ, HQ, HQX, 444 ; GoPro CineForm ; QuickTime Animation ; non compressé 10 bits (v210) ; FFV1 (archivage, MKV). **Diffusion** : H.264 et HEVC en MP4. **Proxies** : ProRes Proxy, DNxHR LB, H.264, à mi-taille et suffixe `_proxy`. **Sans réencodage** : changement de conteneur (MOV, MP4, MXF OP1a, MKV), extraction du son en WAV |
-| Préréglages AUDIO | WAV / BWF, AIFF, FLAC, ALAC, MP3, AAC, Opus, Ogg Vorbis, AC-3 ; mesure loudness et True Peak sans fichier produit |
-| Ce qui est conservé | Toutes les pistes son (PCM 24 bits en montage, AAC en diffusion), **timecode** de la source, métadonnées du conteneur. En WAV : blocs **bext** (référence temporelle recalculée si la fréquence change) et **iXML** (scène, prise, noms de pistes) recopiés de l'original ; son extrait d'une vidéo : référence BWF calculée depuis le timecode de l'image, pour la synchro |
-| Options | Taille d'image (source, moitié, quart, 2160p, 1080p, 720p, 540p) ; débit H.264/HEVC (automatique selon la taille, ou en Mbit/s) ; fréquence (44,1 à 192 kHz) avec rééchantillonnage de qualité ; résolution 16, 24 bits ou 32 bits flottant, avec dither en réduction ; débit des formats avec perte |
-| Normalisation | EBU R 128 (−23 LUFS, −1 dBTP), ATSC A/85 (−24 LKFS, −2 dBTP), streaming (−14 LUFS, −1 dBTP), podcast (−16 LUFS, −1 dBTP), ou cible personnalisée. **Gain simple**, sans compression ni limiteur : si le True Peak maximal serait dépassé, le gain est réduit et le fichier est signalé « cible non atteinte » |
-| Mesure | Niveau intégré, plage de loudness (LRA), True Peak, crête échantillon ; écart à une référence au choix |
-| Encodeurs | H.264, HEVC et AAC : encodeur du système ou de la carte graphique par défaut (Apple VideoToolbox, NVIDIA NVENC, Intel Quick Sync, AMD AMF, Windows Media Foundation), essayé une fois sur le poste ; x264/x265 sinon ou sur demande. ProRes : VideoToolbox sur Mac s'il fonctionne, sinon `prores_ks` affiché **« ProRes compatible, non certifié Apple »** (charte §6.2) |
-| Destination | Dossier choisi ou à côté de chaque original ; suffixe ; fichier déjà présent : nouveau nom (`_1`, `_2`), ne pas convertir, ou remplacer. **L'original n'est jamais remplacé** |
-| File d'attente | Lots convertis l'un après l'autre ; avancement, fichier en cours, vitesse par rapport au temps réel, temps restant ; annulation ; fiche retirée par la croix avec confirmation ; « Ouvrir le dossier » |
-| Sécurité | Fichier écrit sous le nom `….part` puis renommé une fois terminé : une conversion interrompue ne laisse jamais de fichier incomplet sous son nom final |
-| Mémorisation | Réglages retenus séparément pour les modes VIDEO et AUDIO, sur le poste |
+| Montage et étalonnage | ProRes 422 Proxy, LT, 422, HQ, 4444, 4444 XQ ; DNxHR LB, SQ, HQ, HQX, 444 ; DNxHD 1080 LB, SQ, HQ, HQX (MXF, débit selon la cadence) ; GoPro CineForm ; QuickTime Animation ; non compressé 10 bits (v210) ; FFV1 (archivage) |
+| Broadcast | XDCAM HD422 (MPEG-2 50 Mbit/s), XDCAM HD 35, AVC-Intra 100, XAVC Intra (classe 100 en HD, 300 en UHD), XAVC Long GOP 4:2:2 10 bits, tous en MXF avec une piste mono 24 bits par canal ; HAP, HAP Alpha, HAP Q |
+| Diffusion | H.264, HEVC, AV1, H.266/VVC (MP4), VP9, VP8 (WebM) |
+| Plateformes web | YouTube 1080p et 4K (débits recommandés par YouTube), Vimeo 1080p, web léger 720p, vertical 9:16 (Reels, TikTok, Shorts), carré 1:1, portrait 4:5 : taille, recadrage centré, son stéréo AAC |
+| Proxies | ProRes Proxy, DNxHR LB, H.264, à mi-taille, suffixe `_proxy`, timecode et pistes conservés |
+| Anciens codecs | MPEG-2, MPEG-1, Motion JPEG, DV (PAL ou NTSC selon la cadence), Xvid, WMV, Theora |
+| Images | JPEG, PNG, TIFF, DPX 10 bits, OpenEXR, WebP, JPEG XL : une image (position au choix, milieu du plan par défaut), une image toutes les N secondes, ou toute la séquence numérotée d'après le timecode |
+| Sans réencodage | Changement de conteneur (MOV, MP4, MXF, MKV), découpe, remplacement du son, conformation de cadence, fusion, insert, sous-titres en piste, extraction de l'image, du son (WAV polyphonique) ou de chaque piste (WAV mono) |
+| Son | WAV/BWF, AIFF, FLAC, ALAC, MP3, AAC, Opus, Ogg Vorbis, AC-3 |
+| Analyses | Loudness et True Peak, détection de plans (EDL CMX 3600), de noir, de médias hors ligne, de silences (CSV), qualité VMAF, empreintes par image (FrameMD5) |
+
+### Réglages
+
+| Section | Contenu |
+|---|---|
+| Image | Débit et encodeur ; taille (source, moitié, quart, 2160p à 540p, taille libre avec bandes ou recadrage) ; rapport d'image (16:9 à 9:16, 2.39:1...) ; rotation et miroirs ; recadrage au pixel ; désentrelacement (rapide, qualité, une image par trame) ; cadence (images dupliquées, fondu, interpolation de mouvement) ; suppression des images dupliquées ; LUT 3D ; luminosité, contraste, saturation, gamma ; étiquettes Rec. 709, 2020, 601 |
+| Incrustations | Timecode (de la source, ou imposé, avec décalage), nom du fichier, texte libre, logo (position, taille, opacité), sous-titres SRT, VTT, ASS incrustés ou en piste. Police Inter intégrée : rendu identique sur les trois systèmes |
+| Son | Pistes des vidéos : toutes, pistes 1 et 2, mix stéréo (impaires à gauche, paires à droite), sans son ; fréquence, résolution, débit ; normalisation EBU R 128, ATSC A/85, streaming, podcast ou cible libre, par gain simple plafonné au True Peak |
+| Traitement | Selon le préréglage : images, cadence de conformation, fichiers son de remplacement (associés par le nom) et calage par timecode, plan à insérer, original pour VMAF, seuils de détection |
+| Destination et nommage | Dossier ou à côté des originaux ; préfixe, suffixe, remplacement de texte, numérotation ; fichier déjà présent : nouveau nom, ignorer ou remplacer (jamais l'original) ; aperçu du nom produit |
+| Vérification | Empreinte XXH128 de chaque fichier produit, qualité VMAF du fichier produit, rapport CSV du lot |
+
+### Fichiers et préréglages personnels
+
+- Liste de fichiers : boutons, glisser-déposer (dossiers parcourus), bouton « Envoyer vers TRANSCODE » de MEDIA ; par fichier : points d'entrée et de sortie (ciseaux, timecode ou secondes), fiche d'informations, ordre (fusion).
+- Préréglages personnels : réglages complets enregistrés sous un nom, exportés et importés en fichier `.vfpreset` pour les partager (sans chemins propres au poste).
+
+### Ce que VERIFLOW ajoute
+
+- **Métadonnées de tournage** : bext et iXML (scène, prise, noms de pistes) recopiés dans les WAV produits, référence temporelle recalculée si la fréquence change ou si le début est coupé ; son extrait d'une vidéo calé sur le timecode de l'image ; pistes séparées nommées d'après l'iXML (`_A01_Perche.wav`).
+- **Timecode** conservé et décalé avec la découpe ; séquences d'images numérotées d'après le timecode ; EDL et rapports de détection en timecode de la source.
+- **Son de remplacement calé par timecode** (référence BWF du son, timecode de l'image).
+- **Traçabilité** : empreinte XXH128 (celle de l'OFFLOAD et des ASC MHL), rapport CSV du lot, VMAF du fichier produit.
+- **Normalisation sans compression ni limiteur** : la dynamique n'est jamais modifiée sans le dire.
+- **Sécurité** : écriture sous un nom `.part`, renommé à la fin ; l'original n'est jamais remplacé.
 
 ## Choix techniques
 
-- **FFmpeg** intégré (charte §5.2), piloté en processus séparé ; progression lue sur `-progress`.
-- **Mesure loudness** : filtre `ebur128` de FFmpeg (ITU-R BS.1770, True Peak par suréchantillonnage).
-- **Normalisation** par gain fixe plutôt que par le filtre `loudnorm`, qui comprime la dynamique quand la cible n'est pas atteignable : la dynamique d'un mix n'est jamais modifiée sans le dire.
-- **Pistes son** : réunies en un seul fichier polyphonique pour les formats son. Formats avec perte limités à 2 canaux (sauf 5.1) : seules les pistes 1 et 2 sont gardées, soit le mix gauche/droite des enregistreurs de tournage.
-- **Rééchantillonnage** : `aresample` (filtre de 64 points, dither triangulaire en réduction de résolution).
+- Cœur `core/src/transcode/` : `catalog` (préréglages), `settings`, `video` (encodeurs), `filters` (chaîne d'image, incrustations, graphes son), `build` (commande FFmpeg), `special` (fusion, insert, pistes), `analysis`, `loudness`, `bwf`, `report`, `run` (exécution, avancement, annulation).
+- Les fichiers utilisés par les filtres (LUT, police, textes, sous-titres) sont copiés dans un dossier de travail temporaire sous des noms simples : aucun chemin Windows n'a à être échappé dans un filtre FFmpeg.
+- **Disponibilité selon le FFmpeg du poste** : liste des encodeurs et filtres lue au démarrage ; un préréglage impossible est grisé avec la raison. Encodeurs du système et de la carte graphique (VideoToolbox, NVENC, Quick Sync, AMF, Media Foundation) essayés une fois, encodeur logiciel sinon.
+- FFmpeg intégrés (version 9.0.2), constaté le 09/10/2026 :
+  - Windows (gyan.dev, « essentials ») : ni HAP, ni H.266, ni SVT-AV1 (AV1 par libaom), ni JPEG XL ;
+  - Linux (martin-riedl.de) : ni Xvid, ni JPEG XL ;
+  - macOS : à vérifier sur le poste.
+  - **Point à traiter** : le FFmpeg Linux de martin-riedl.de est compilé avec `--enable-nonfree`, ce qui le rend en principe non redistribuable. À remplacer avant toute diffusion.
+- Hors périmètre (charte) : outils IA, gravure DVD/Blu-ray, téléchargement web, FTP, e-mail. Dolby Digital Plus et TrueHD : licences Dolby à vérifier avant d'être proposés.
 
 ## Vérifications réalisées
 
 ### Tests automatiques (cœur)
-19 tests TRANSCODE passent (114 au total pour le cœur), dont des conversions réelles :
-- ProRes, DNxHR, H.264 et changement de conteneur : codec, deux pistes son et timecode 10:00:00:00 retrouvés dans le fichier produit ; proxy à mi-taille ; ProRes logiciel signalé non certifié ;
-- son extrait d'une vidéo : WAV polyphonique 2 pistes 24 bits, référence BWF 1 728 000 000 échantillons (10:00:00:00 à 48 kHz) ;
-- WAV 48 kHz 24 bits converti en 96 kHz 16 bits : scène, prise et noms de pistes iXML conservés, référence bext doublée ;
-- normalisation EBU R 128 d'un fichier vers −23 LUFS, vérifiée par une seconde mesure (écart inférieur à 0,3 LU) ;
-- WAV 4 pistes vers MP3, AAC, Opus (2 pistes), AIFF et ALAC (4 pistes) ;
-- annulation : arrêt immédiat, aucun fichier laissé ;
-- noms de sortie : jamais l'original, deux sources du même nom ne s'écrasent pas.
+128 tests du cœur passent, dont plus de 50 pour TRANSCODE, avec le FFmpeg 9.0.2 livré et avec le FFmpeg 6.1 du système :
+- chaque codec vidéo produit un fichier lisible, avec son et timecode 10:00:00:00 (Xvid ignoré : absent du FFmpeg Linux) ; XDCAM : pistes mono et 1920×1080 ; DV : 720×576 ;
+- préréglage vertical : 1080×1920, son stéréo ;
+- images : JPEG unique, PNG toutes les 0,5 s, DPX numérotés à partir de l'image 900 000 (10:00:00:00 à 25 i/s) ;
+- incrustations (timecode, nom, texte avec « % » et guillemets, logo), LUT, sous-titres incrustés et en piste ;
+- découpe (durée et timecode 10:00:00:12), fusion, insert, conformation 25 vers 24 i/s (durée × 25/24), extraction, pistes séparées, son remplacé et calé par timecode ;
+- détections de plans, de noir, de rouge « hors ligne », de silence ; FrameMD5 ; VMAF d'un proxy ;
+- nommage (préfixe, remplacement, numérotation), empreinte XXH128, rapport CSV ;
+- BWF : iXML et bext recopiés, référence décalée par la découpe ; normalisation à ±0,3 LU ; annulation sans fichier laissé.
 
 ### Essai dans l'application (Linux, Xvfb)
-- Dossier de 2 rushes H.264 1080p ajouté, conversion ProRes 422 : progression, vitesse et temps restant affichés, fichiers ProRes produits avec timecode 14:20:00:00 et 2 pistes PCM.
-- Mode AUDIO : mesure des 2 rushes avec la référence EBU R 128 : −18,5 LUFS, True Peak −18,1 dBTP, écart +4,5 dB.
+- 2 rushes H.264 1080p avec timecode 14:20:00:00 vers XDCAM HD422 avec timecode incrusté et VMAF : MXF 1920×1080, deux pistes mono 24 bits, timecode 14:20:00:00, timecode incrusté exact, VMAF 98,95.
+- Détection de noir sur un montage : passage 09:00:02:00 à 09:00:03:00 trouvé, fichier CSV écrit.
 
 ## Limites connues
-- Encodeurs matériels (VideoToolbox, NVENC, Quick Sync, AMF, Media Foundation) : **non essayés** ici (machine de test sans carte graphique ni Mac) ; leur détection est automatique et l'encodeur logiciel prend le relais si l'essai échoue.
-- Report bext/iXML : WAV de moins de 4 Go seulement (au-delà, format RF64 : les métadonnées de FFmpeg restent, sans iXML).
-- ProRes avec couche alpha (4444) : la couche alpha n'est pas encore transmise.
+- MXF OP-Atom (Avid) : non fait (DNxHD est livré en MXF OP1a, lu par Avid via AMA et par Resolve).
+- Éditeur de sous-titres : non fait (import SRT, VTT, ASS seulement).
+- Découpe : points saisis en timecode ou secondes, sans lecteur dans l'onglet (le PLAYER donne les timecodes).
+- Encodeurs matériels non essayés ici (pas de carte graphique ni de Mac sur la machine de test).
+- ProRes 4444 : couche alpha non transmise.
 
 ## À tester sur poste réel
-1. Windows et Mac : préréglage H.264, vérifier la ligne « Encodeur » (carte graphique ou système) et la vitesse.
-2. Mac : ProRes 422 HQ, vérifier si l'encodeur Apple VideoToolbox est proposé (selon la version de macOS) ou `prores_ks` non certifié.
-3. Rushes caméra réels (Sony XAVC, Panasonic, Canon) vers ProRes et DNxHR (le Blackmagic RAW n'est pas lisible par FFmpeg) : import dans DaVinci Resolve et Premiere, timecode et pistes son.
-4. WAV d'enregistreur (Sound Devices) vers WAV 44,1 kHz 16 bits et vers MP3 : scène, prise, noms de pistes et timecode dans le WAV produit (onglet MEDIA).
-5. Normalisation EBU R 128 d'un mix, puis mesure du fichier produit.
-6. Annuler une conversion en cours, retirer une fiche de la file.
+1. Windows et Mac : H.264, HEVC et AV1, ligne « Encodeur » (carte graphique ou système) et vitesse.
+2. Mac : ProRes 422 HQ, encodeur Apple VideoToolbox proposé ou non selon la version de macOS.
+3. Rushes caméra réels vers ProRes, DNxHR, DNxHD MXF, XDCAM HD422 : import dans DaVinci Resolve, Premiere et Avid ; timecode et pistes son.
+4. Préréglages web : YouTube 1080p et vertical 9:16 à partir d'un rush 16:9.
+5. Incrustations : timecode, nom, logo PNG, sous-titres SRT ; LUT .cube de la caméra.
+6. Son : WAV Sound Devices vers WAV 44,1 kHz 16 bits, MP3, pistes séparées (noms des fichiers d'après les pistes) ; métadonnées vues dans MEDIA.
+7. Remplacement du son calé par timecode (vidéo et WAV BWF du même plan).
+8. Analyses : détection de plans sur un montage (import de l'EDL dans Resolve), loudness d'un mix, VMAF d'un proxy.
+9. Préréglage personnel : enregistrer, exporter, importer sur l'autre poste.
