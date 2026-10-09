@@ -1,6 +1,7 @@
 <!-- Onglet REPORT : rapports image (mode VIDEO) et son (mode AUDIO) du projet.
      Liste des rapports à gauche, éditeur à droite (charte §7.4). -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import ReportEditor from "./ReportEditor.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -44,6 +45,22 @@
     void app.project?.path;
     current = null;
     refresh();
+  });
+
+  // Retour sur l'onglet : liste et rapport ouvert relus, car la saisie depuis
+  // le PLAYER (touche R) a pu les modifier entre-temps.
+  $effect(() => {
+    if (app.tab !== "report" || !app.project) return;
+    untrack(async () => {
+      await refresh();
+      if (current) {
+        try {
+          current = await reportGet(current.id);
+        } catch {
+          current = null;
+        }
+      }
+    });
   });
 
   // Changement de mode : on n'affiche que les rapports du type correspondant.

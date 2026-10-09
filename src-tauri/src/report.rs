@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+use veriflow_core::player::logs::{LogClip, LogFormat};
 use veriflow_core::player::timecode::FrameRate;
 use veriflow_core::project::{Project, ReportSummary};
 use veriflow_core::report::pdf::Branding;
@@ -144,6 +145,8 @@ pub enum ExportFormat {
     Csv,
     Xlsx,
     Html,
+    /// EDL CMX3600 des prises du rapport image (marqueurs du PLAYER compris).
+    Edl,
 }
 
 /// Présentation des rapports (logo, nom de l'école ou de la production),
@@ -191,6 +194,10 @@ pub async fn report_export(
     app: AppHandle,
 ) -> CmdResult<PathBuf> {
     let branding = report_branding_get(app.clone())?;
+    let markers = match format {
+        ExportFormat::Edl => with_project(&app, |p| p.markers(None))?,
+        _ => Vec::new(),
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let bytes = match format {
             ExportFormat::Pdf => {
@@ -220,6 +227,19 @@ pub async fn report_export(
             ExportFormat::Csv => export::to_csv(&report, lang).into_bytes(),
             ExportFormat::Html => export::to_html(&report, lang).into_bytes(),
             ExportFormat::Xlsx => export::to_xlsx(&report, lang).map_err(text)?,
+            ExportFormat::Edl => {
+                let mut clips = Vec::new();
+                for path in report.rows.iter().filter_map(|r| r.clip.as_deref()) {
+                    let own = markers.iter().filter(|m| m.path == path).cloned().collect();
+                    clips.push(LogClip::from_media(Path::new(path), own).map_err(text)?);
+                }
+                if clips.is_empty() {
+                    return Err("aucune prise liée à un clip dans ce rapport".to_owned());
+                }
+                LogFormat::Edl
+                    .render(&export::title(&report, lang), &clips)
+                    .into_bytes()
+            }
         };
         std::fs::write(&dest, bytes).map_err(|e| format!("{} : {e}", dest.display()))?;
         Ok(dest)

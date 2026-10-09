@@ -6,7 +6,7 @@ import { VIDEO_EXT, AUDIO_EXT } from "./player";
 export type ReportKind = "image" | "sound";
 export type ReportTemplate = "school" | "pro";
 export type ReportLang = "fr" | "en";
-export type ExportFormat = "pdf" | "csv" | "xlsx" | "html";
+export type ExportFormat = "pdf" | "csv" | "xlsx" | "html" | "edl";
 
 export interface ReportRow {
   clip: string | null;
@@ -66,6 +66,7 @@ export const EXPORT_FORMATS: { id: ExportFormat; label: string }[] = [
   { id: "xlsx", label: "XLSX" },
   { id: "csv", label: "CSV" },
   { id: "html", label: "HTML" },
+  { id: "edl", label: "EDL" },
 ];
 
 export const reportList = () => invoke<ReportSummary[]>("report_list");

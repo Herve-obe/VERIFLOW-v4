@@ -6,6 +6,7 @@
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
+  import ReportPopup from "./ReportPopup.svelte";
   import LtcNotice from "./LtcNotice.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
@@ -62,6 +63,8 @@
   let markIn = $state<number | null>(null);
   let markOut = $state<number | null>(null);
   let panel = $state<{ add: () => Promise<void> } | null>(null);
+  // Saisie du rapport (touche R).
+  let reportOpen = $state(false);
 
 
   const duration = $derived(session?.session.duration ?? 0);
@@ -211,6 +214,7 @@
       case "mark.in": markIn = logFrame; break;
       case "mark.out": markOut = logFrame; break;
       case "mark.add": panel?.add(); break;
+      case "report.edit": if (logs && loaded[0]) reportOpen = true; break;
     }
   }
 
@@ -253,6 +257,10 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} />
+
+{#if reportOpen && loaded[0]}
+  <ReportPopup kind="sound" path={loaded[0]} onClose={() => (reportOpen = false)} />
+{/if}
 
 {#if !session}
   <div class="empty">
@@ -367,6 +375,7 @@
   {#if logs}
     <MarkersPanel
       bind:this={panel}
+      onReport={() => (reportOpen = true)}
       path={loaded[0] ?? null}
       frame={logFrame}
       {tc}

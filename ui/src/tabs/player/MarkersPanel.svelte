@@ -29,6 +29,7 @@
     onSeek,
     onRangeUsed = () => {},
     onChange = () => {},
+    onReport,
   }: {
     path: string | null;
     frame: number;
@@ -38,6 +39,8 @@
     onSeek: (frame: number) => void;
     onRangeUsed?: () => void;
     onChange?: (markers: Marker[]) => void;
+    /** Ouvre la saisie du rapport pour ce clip (touche R). */
+    onReport?: () => void;
   } = $props();
 
   const COLOR_KEY = "veriflow.marker.color";
@@ -189,9 +192,14 @@
     </div>
   </header>
 
-  <button class="add" onclick={add} disabled={!path}>
-    + {markIn !== null && markOut !== null ? t("logs.add.range") : t("logs.add")} (M)
-  </button>
+  <div class="adds">
+    <button class="add" onclick={add} disabled={!path}>
+      + {markIn !== null && markOut !== null ? t("logs.add.range") : t("logs.add")} (M)
+    </button>
+    {#if onReport}
+      <button class="report" onclick={onReport} disabled={!path} title={t("report.popup.title")}>{t("report.popup.button")} (R)</button>
+    {/if}
+  </div>
   {#if !app.project}
     <p class="note">{t("logs.need.project")}</p>
   {/if}
@@ -312,6 +320,22 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .adds {
+    display: flex;
+  }
+  .adds .add {
+    flex: 1;
+  }
+  .report {
+    margin-left: var(--vf-space-2);
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-2);
+    cursor: pointer;
+  }
+  .report:disabled,
   .add:disabled,
   footer button:disabled {
     opacity: 0.4;

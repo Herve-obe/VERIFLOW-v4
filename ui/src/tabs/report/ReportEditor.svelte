@@ -213,8 +213,8 @@
     </span>
     <span class="spacer"></span>
     <span class="small muted">{t("report.export")}</span>
-    {#each EXPORT_FORMATS as f (f.id)}
-      <button disabled={busy} onclick={() => exportAs(f.id)}>{f.label}</button>
+    {#each EXPORT_FORMATS.filter((f) => f.id !== "edl" || report.kind === "image") as f (f.id)}
+      <button disabled={busy} onclick={() => exportAs(f.id)} title={f.id === "edl" ? t("report.edl.hint") : ""}>{f.label}</button>
     {/each}
     <button class="ghost danger" onclick={remove} title={t("report.delete")}>{t("report.delete")}</button>
   </div>
