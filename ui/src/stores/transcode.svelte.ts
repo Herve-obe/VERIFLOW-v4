@@ -1,4 +1,5 @@
 // État des conversions (file d'attente et progression), alimenté par les événements du cœur.
+import { defaultSettings } from "../lib/transcode";
 import {
   onNotice,
   type FileResult,
@@ -23,12 +24,29 @@ export interface Job {
   error: string | null;
   startedAt: number;
   seconds: number;
+  report: string | null;
 }
 
 export const transcode = $state({
   jobs: [] as Job[],
   /** Libellé et demande de chaque lot, connus avant le premier événement. */
   pending: {} as Record<number, { request: TranscodeRequest; label: string }>,
+});
+
+const emptyRequest = (): TranscodeRequest => ({
+  sources: [],
+  settings: defaultSettings(""),
+  dest: null,
+  prefix: "",
+  suffix: "",
+  replace_from: "",
+  replace_to: "",
+  numbering: false,
+  number_start: 1,
+  number_digits: 3,
+  existing: "rename",
+  checksum: false,
+  report: false,
 });
 
 export function removeJob(id: number) {
@@ -52,13 +70,7 @@ function apply(n: Notice) {
     const p = transcode.pending[n.job];
     transcode.jobs.unshift({
       id: n.job,
-      request: p?.request ?? {
-        sources: [],
-        settings: {} as TranscodeRequest["settings"],
-        dest: null,
-        suffix: "",
-        existing: "rename",
-      },
+      request: p?.request ?? emptyRequest(),
       label: p?.label ?? "",
       state: "queued",
       files: n.files,
@@ -71,6 +83,7 @@ function apply(n: Notice) {
       error: null,
       startedAt: 0,
       seconds: 0,
+      report: null,
     });
     return;
   }
@@ -102,6 +115,7 @@ function apply(n: Notice) {
         results: n.summary.files,
         cancelled: n.summary.cancelled,
         seconds: n.summary.seconds,
+        report: n.summary.report,
       });
       break;
     case "failed":

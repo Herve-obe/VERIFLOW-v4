@@ -1,81 +1,37 @@
-<!-- Onglet TRANSCODE : conversion de lots de fichiers par préréglages, file
-     d'attente, normalisation et mesure du loudness (charte §7.6). -->
+<!-- Onglet TRANSCODE : conversion de lots de fichiers par préréglages, traitements
+     sans réencodage, analyses, file d'attente (charte §7.6). -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import TranscodeJob from "./TranscodeJob.svelte";
+  import ImageOptions from "./ImageOptions.svelte";
+  import OverlayOptions from "./OverlayOptions.svelte";
+  import SoundOptions from "./SoundOptions.svelte";
+  import SpecialOptions from "./SpecialOptions.svelte";
+  import OutputOptions from "./OutputOptions.svelte";
+  import UserPresets from "./UserPresets.svelte";
+  import FileInfo from "./FileInfo.svelte";
+  import "./form.css";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
   import { transcode, listenTranscode } from "../../stores/transcode.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
   import { reveal } from "../../lib/offload";
-  import {
-    presets as fetchPresets,
-    encoderFor,
-    expand,
-    start,
-    LOUDNESS_TARGETS,
-    SAMPLE_RATES,
-    SCALES,
-    type BitDepth,
-    type Category,
-    type EncoderChoice,
-    type Existing,
-    type PresetView,
-    type Settings,
-    type TranscodeRequest,
-  } from "../../lib/transcode";
+  import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type EncoderChoice, type PresetView, type Trim } from "../../lib/transcode";
+  import { loadForm, saveForm, toRequest, type Form } from "../../lib/transcodeForm.svelte";
 
   // Extensions acceptées (voir core/src/media/catalog.rs).
   const MEDIA_EXT = ["mov", "mp4", "mxf", "mts", "m2ts", "mkv", "avi", "m4v", "mpg", "mpeg", "webm", "3gp", "wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
-  const CATEGORIES: Category[] = ["intermediate", "delivery", "proxy", "no_reencode", "audio", "analysis"];
-
-  interface Saved {
-    preset: string;
-    scale: string | null;
-    videoMbps: number | null;
-    software: boolean;
-    sampleRate: number | null;
-    bitDepth: BitDepth | null;
-    audioKbps: number | null;
-    loudness: string;
-    customI: number;
-    customTp: number;
-    dest: string;
-    nextToSource: boolean;
-    suffix: string;
-    existing: Existing;
-  }
-
-  const key = (mode: string) => `veriflow.transcode.${mode}`;
-  function load(mode: string): Saved {
-    const defaults: Saved = {
-      preset: mode === "audio" ? "wav" : "prores_422",
-      scale: null,
-      videoMbps: null,
-      software: false,
-      sampleRate: null,
-      bitDepth: null,
-      audioKbps: null,
-      loudness: "none",
-      customI: -23,
-      customTp: -1,
-      dest: "",
-      nextToSource: false,
-      suffix: "",
-      existing: "rename",
-    };
-    try {
-      return { ...defaults, ...JSON.parse(localStorage.getItem(key(mode)) ?? "{}") };
-    } catch {
-      return defaults;
-    }
-  }
+  // Traitements où les points d'entrée et de sortie n'ont pas de sens.
+  const NO_TRIM = ["merge", "vmaf", "insert", "replace_audio", "conform", "subtitles", "loudness"];
 
   let list = $state<PresetView[]>([]);
   let sources = $state<string[]>([]);
-  let s = $state<Saved>(load(app.mode));
+  let trims = $state<Record<string, Trim>>({});
+  let trimOpen = $state<string | null>(null);
+  let infoFor = $state<string | null>(null);
+  let form = $state<Form>(loadForm(app.mode));
   let loadedMode = app.mode;
   let encoder = $state<EncoderChoice | null>(null);
   let encoderBusy = $state(false);
@@ -87,22 +43,19 @@
     const mode = app.mode;
     if (mode !== loadedMode) {
       loadedMode = mode;
-      s = load(mode);
+      form = loadForm(mode);
     }
   });
   $effect(() => {
-    const snapshot = JSON.stringify(s);
-    try {
-      localStorage.setItem(key(untrack(() => loadedMode)), snapshot);
-    } catch {
-      /* stockage indisponible */
-    }
+    const snapshot = $state.snapshot(form) as Form;
+    untrack(() => saveForm(loadedMode, snapshot));
   });
 
   const domain = $derived(app.mode === "audio" ? "audio" : "video");
-  const shown = $derived(list.filter((p) => p.domain === domain));
-  const preset = $derived(shown.find((p) => p.id === s.preset) ?? shown[0] ?? null);
+  const shown = $derived(list.filter((p) => p.domain === domain || p.domain === "both"));
+  const preset = $derived(shown.find((p) => p.id === form.settings.preset) ?? shown.find((p) => !p.unavailable) ?? null);
   const lang = $derived(i18n.lang === "en" ? "en" : "fr");
+  const trimmable = $derived(!!preset && !NO_TRIM.includes(preset.kind));
 
   $effect(() => {
     fetchPresets(lang)
@@ -114,9 +67,9 @@
   let encoderReq = 0;
   $effect(() => {
     const p = preset;
-    const soft = s.software;
+    const soft = form.settings.software;
     encoder = null;
-    if (!p || !p.video || (!p.encoder_choice && !p.video_bitrate && !p.id.includes("prores"))) return;
+    if (!p || p.unavailable || !p.video) return;
     const req = ++encoderReq;
     encoderBusy = true;
     encoderFor(p.id, soft)
@@ -133,6 +86,8 @@
     ["_mf", "Windows Media Foundation"],
     ["libx264", "x264"],
     ["libx265", "x265"],
+    ["libsvtav1", "SVT-AV1"],
+    ["libaom", "libaom AV1"],
     ["prores_ks", "FFmpeg prores_ks"],
   ];
   const encoderLabel = (e: EncoderChoice) => ENCODER_LABELS.find(([k]) => e.name.includes(k))?.[1] ?? e.name;
@@ -142,8 +97,7 @@
     try {
       const files = await expand(paths);
       const known = new Set(sources);
-      const fresh = files.filter((f) => !known.has(f));
-      sources = [...sources, ...fresh];
+      sources = [...sources, ...files.filter((f) => !known.has(f))];
       if (files.length === 0) error = t("transcode.no.media");
     } catch (e) {
       error = String(e);
@@ -161,13 +115,24 @@
     if (typeof r === "string") add([r]);
   }
 
-  async function pickDest() {
-    const r = await open({ directory: true, multiple: false, title: t("transcode.dest.pick") });
-    if (typeof r === "string") {
-      s.dest = r;
-      s.nextToSource = false;
-    }
+  function removeSource(f: string) {
+    sources = sources.filter((x) => x !== f);
+    delete trims[f];
   }
+
+  function move(i: number, d: number) {
+    const j = i + d;
+    if (j < 0 || j >= sources.length) return;
+    const next = [...sources];
+    [next[i], next[j]] = [next[j], next[i]];
+    sources = next;
+  }
+
+  function setTrim(f: string, k: "start" | "end", v: string) {
+    const cur = trims[f] ?? { start: null, end: null };
+    trims[f] = { ...cur, [k]: v.trim() || null };
+  }
+  const hasTrim = (f: string) => !!(trims[f]?.start || trims[f]?.end);
 
   // Médias envoyés depuis MEDIA (« Envoyer vers TRANSCODE »).
   $effect(() => {
@@ -181,44 +146,24 @@
   const sourcesZone = { name: "transcode", accept: (paths: string[]) => add(paths) };
   const explorerActions = [
     { label: t("transcode.explorer.add"), run: (p: string) => add([p]) },
-    { label: t("transcode.explorer.dest"), run: (p: string) => ((s.dest = p), (s.nextToSource = false)) },
+    { label: t("transcode.explorer.dest"), run: (p: string) => ((form.dest = p), (form.nextToSource = false)) },
     { label: t("explorer.reveal"), run: (p: string) => reveal(p).catch(() => {}) },
   ];
 
   const name = (p: string) => p.split(/[\\/]/).pop() ?? p;
   const folder = (p: string) => p.slice(0, Math.max(0, p.length - name(p).length - 1));
 
-  function loudnessTarget() {
-    if (s.loudness === "none") return null;
-    if (s.loudness === "custom") return { integrated: Number(s.customI), true_peak: Number(s.customTp) };
-    return LOUDNESS_TARGETS.find((l) => l.id === s.loudness)?.target ?? null;
-  }
-
-  const settings = (): Settings => ({
-    preset: preset?.id ?? s.preset,
-    scale: preset?.video ? s.scale : null,
-    video_mbps: preset?.video_bitrate && s.videoMbps ? Number(s.videoMbps) : null,
-    software: !!preset?.encoder_choice && s.software,
-    sample_rate: preset?.audio ? s.sampleRate : null,
-    bit_depth: preset?.audio && preset.bit_depths.includes(s.bitDepth as BitDepth) ? s.bitDepth : null,
-    audio_kbps: preset?.audio && preset.audio_bitrates.length ? s.audioKbps : null,
-    loudness: preset?.audio || preset?.analysis ? loudnessTarget() : null,
-  });
-
-  const suffix = $derived(s.suffix || preset?.suffix || "");
-  const needsDest = $derived(!!preset && !preset.analysis && !s.nextToSource && !s.dest);
-  const canStart = $derived(!!preset && sources.length > 0 && !needsDest);
+  const writes = $derived(!!preset && (!preset.analysis || ["cut_detect", "black_detect", "offline_detect", "silence_detect", "framemd5"].includes(preset.kind)));
+  const needsDest = $derived(writes && !form.nextToSource && !form.dest);
+  const enoughFiles = $derived(preset?.kind === "merge" ? sources.length >= 2 : sources.length > 0);
+  const canStart = $derived(!!preset && !preset.unavailable && enoughFiles && !needsDest);
 
   async function launch() {
     if (!preset) return;
     error = "";
-    const req: TranscodeRequest = {
-      sources: [...sources],
-      settings: settings(),
-      dest: preset.analysis || s.nextToSource ? null : s.dest,
-      suffix,
-      existing: s.existing,
-    };
+    const used: Record<string, Trim> = {};
+    if (trimmable) for (const f of sources) if (hasTrim(f)) used[f] = { ...trims[f] };
+    const req = toRequest(form, preset, [...sources], used);
     const label = `${preset.label} · ${req.sources.length} ${t(req.sources.length > 1 ? "transcode.files" : "transcode.file")}`;
     try {
       const id = await start(req);
@@ -226,16 +171,18 @@
       if (j) Object.assign(j, { request: req, label });
       else transcode.pending[id] = { request: req, label };
       sources = [];
+      trims = {};
     } catch (e) {
       error = String(e);
     }
   }
 
-  const scaleLabel = (v: string) => (v === "source" ? t("transcode.scale.source") : v === "1/2" ? t("transcode.scale.half") : v === "1/4" ? t("transcode.scale.quarter") : `${v}p`);
-  const depthLabel = (d: BitDepth) => (d === "32f" ? t("transcode.depth.float") : `${d} bits`);
+  const startLabel = $derived(preset?.analysis ? "transcode.start.analyze" : "transcode.start");
 
   onMount(() => listenTranscode());
 </script>
+
+{#if infoFor}<FileInfo path={infoFor} onClose={() => (infoFor = null)} />{/if}
 
 <div class="layout">
   <Explorer owner="transcode" {selected} onSelect={(p) => (selected = p)} actions={explorerActions} />
@@ -246,17 +193,42 @@
       <div class="block drop" class:over={drag.over === "transcode"} role="region" aria-label={t("transcode.sources")} use:dropZone={sourcesZone}>
         <div class="row">
           <h3>{t("transcode.sources")} {#if sources.length}<span class="count">({sources.length})</span>{/if}</h3>
-          {#if sources.length}<button class="ghost small" onclick={() => (sources = [])}>{t("transcode.clear")}</button>{/if}
+          {#if sources.length}<button class="ghost small" onclick={() => ((sources = []), (trims = {}))}>{t("transcode.clear")}</button>{/if}
         </div>
         {#if sources.length}
           <ul class="files">
-            {#each sources as f (f)}
+            {#each sources as f, i (f)}
               <li title={f}>
-                <span class="name">{name(f)}</span>
-                <span class="dir mono">{"\u200e" + folder(f) + "\u200e"}</span>
-                <button class="x" onclick={() => (sources = sources.filter((x) => x !== f))} aria-label={t("transcode.remove")} title={t("transcode.remove")}>
-                  <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
-                </button>
+                <div class="line">
+                  <span class="name">{name(f)}</span>
+                  <span class="dir mono">{"‎" + folder(f) + "‎"}</span>
+                  {#if preset?.kind === "merge"}
+                    <button class="x" onclick={() => move(i, -1)} disabled={i === 0} aria-label={t("report.row.up")}>
+                      <svg viewBox="0 0 12 12"><path d="M3 7.5 L6 4.5 L9 7.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+                    </button>
+                    <button class="x" onclick={() => move(i, 1)} disabled={i === sources.length - 1} aria-label={t("report.row.down")}>
+                      <svg viewBox="0 0 12 12"><path d="M3 4.5 L6 7.5 L9 4.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+                    </button>
+                  {/if}
+                  {#if trimmable}
+                    <button class="x" class:on={hasTrim(f)} onclick={() => (trimOpen = trimOpen === f ? null : f)} title={t("transcode.trim")} aria-label={t("transcode.trim")}>
+                      <svg viewBox="0 0 12 12"><circle cx="3" cy="9" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" /><circle cx="9" cy="9" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" /><path d="M4.2 7.8 L9 2 M7.8 7.8 L3 2" stroke="currentColor" stroke-width="1.2" /></svg>
+                    </button>
+                  {/if}
+                  <button class="x" onclick={() => (infoFor = f)} title={t("transcode.info")} aria-label={t("transcode.info")}>
+                    <svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.8" fill="none" stroke="currentColor" stroke-width="1.2" /><path d="M6 5.4 V8.6 M6 3.4 V3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+                  </button>
+                  <button class="x del" onclick={() => removeSource(f)} aria-label={t("transcode.remove")} title={t("transcode.remove")}>
+                    <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                  </button>
+                </div>
+                {#if trimOpen === f && trimmable}
+                  <div class="trim tc-grid">
+                    <label class="tc-field">{t("transcode.trim.in")}<input class="mono" placeholder="10:00:12:00" value={trims[f]?.start ?? ""} oninput={(e) => setTrim(f, "start", e.currentTarget.value)} /></label>
+                    <label class="tc-field">{t("transcode.trim.out")}<input class="mono" placeholder="10:01:30:00" value={trims[f]?.end ?? ""} oninput={(e) => setTrim(f, "end", e.currentTarget.value)} /></label>
+                    <p class="tc-hint tc-wide">{t("transcode.trim.hint")}</p>
+                  </div>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -270,12 +242,12 @@
 
       <div class="block">
         <h3>{t("transcode.preset")}</h3>
-        <select value={preset?.id ?? ""} onchange={(e) => (s.preset = e.currentTarget.value)}>
+        <select class="tc-input" value={preset?.id ?? ""} onchange={(e) => (form.settings.preset = e.currentTarget.value)}>
           {#each CATEGORIES as c (c)}
             {#if shown.some((p) => p.category === c)}
               <optgroup label={t(`transcode.cat.${c}`)}>
                 {#each shown.filter((p) => p.category === c) as p (p.id)}
-                  <option value={p.id}>{p.label}</option>
+                  <option value={p.id} disabled={!!p.unavailable} title={p.unavailable ?? ""}>{p.label}{p.unavailable ? ` (${t("transcode.unavailable")})` : ""}</option>
                 {/each}
               </optgroup>
             {/if}
@@ -283,6 +255,7 @@
         </select>
         {#if preset}
           <p class="muted small">{t(`transcode.hint.${preset.category}`)}</p>
+          {#if preset.unavailable}<p class="warn small">{t("transcode.unavailable")} : {preset.unavailable}</p>{/if}
         {/if}
         {#if encoderBusy}
           <p class="muted small">{t("transcode.encoder.testing")}</p>
@@ -293,110 +266,27 @@
           </p>
           {#if encoder.uncertified_prores}<p class="warn small">{t("transcode.prores.uncertified")}</p>{/if}
         {/if}
+        <UserPresets {form} onApply={(f) => (form = f)} />
       </div>
 
-      {#if preset && (preset.video || preset.audio || preset.analysis)}
-        <div class="block grid">
-          <h3 class="wide">{t("transcode.options")}</h3>
-          {#if preset.video}
-            <label>
-              {t("transcode.scale")}
-              <select value={s.scale ?? preset.scale} onchange={(e) => (s.scale = e.currentTarget.value === preset.scale ? null : e.currentTarget.value)}>
-                {#each SCALES as v (v)}<option value={v}>{scaleLabel(v)}</option>{/each}
-              </select>
-            </label>
-          {/if}
-          {#if preset.video_bitrate}
-            <label>
-              {t("transcode.video.bitrate")}
-              <input type="number" min="1" step="1" placeholder={t("transcode.auto")} value={s.videoMbps ?? ""} oninput={(e) => (s.videoMbps = e.currentTarget.value ? Number(e.currentTarget.value) : null)} />
-            </label>
-          {/if}
-          {#if preset.encoder_choice}
-            <label class="check wide"><input type="checkbox" bind:checked={s.software} /> {t("transcode.software")}</label>
-          {/if}
-          {#if preset.audio}
-            <label>
-              {t("transcode.rate")}
-              <select value={s.sampleRate ?? 0} onchange={(e) => (s.sampleRate = Number(e.currentTarget.value) || null)}>
-                <option value={0}>{t("transcode.same")}</option>
-                {#each SAMPLE_RATES as r (r)}<option value={r}>{(r / 1000).toLocaleString(lang)} kHz</option>{/each}
-              </select>
-            </label>
-            {#if preset.bit_depths.length}
-              <label>
-                {t("transcode.depth")}
-                <select value={s.bitDepth ?? ""} onchange={(e) => (s.bitDepth = (e.currentTarget.value || null) as BitDepth | null)}>
-                  <option value="">{t("transcode.same")}</option>
-                  {#each preset.bit_depths as d (d)}<option value={d}>{depthLabel(d)}</option>{/each}
-                </select>
-              </label>
-            {/if}
-            {#if preset.audio_bitrates.length}
-              <label>
-                {t("transcode.audio.bitrate")}
-                <select value={s.audioKbps ?? preset.default_audio_bitrate} onchange={(e) => (s.audioKbps = Number(e.currentTarget.value))}>
-                  {#each preset.audio_bitrates as r (r)}<option value={r}>{r} kbit/s</option>{/each}
-                </select>
-              </label>
-            {/if}
-          {/if}
-          {#if preset.audio || preset.analysis}
-            <label class="wide">
-              {t(preset.analysis ? "transcode.loudness.reference" : "transcode.loudness")}
-              <select bind:value={s.loudness}>
-                <option value="none">{t(preset.analysis ? "transcode.loudness.noref" : "transcode.loudness.none")}</option>
-                {#each LOUDNESS_TARGETS as l (l.id)}
-                  <option value={l.id}>{t(`transcode.loudness.${l.id}`)} ({l.target.integrated} LUFS, {l.target.true_peak} dBTP)</option>
-                {/each}
-                <option value="custom">{t("transcode.loudness.custom")}</option>
-              </select>
-            </label>
-            {#if s.loudness === "custom"}
-              <label>{t("transcode.loudness.integrated")}<input type="number" step="0.5" bind:value={s.customI} /></label>
-              <label>{t("transcode.loudness.tp")}<input type="number" step="0.5" bind:value={s.customTp} /></label>
-            {/if}
-            {#if s.loudness !== "none" && !preset.analysis}
-              <p class="wide muted small">{t("transcode.loudness.hint")}</p>
-            {/if}
-          {/if}
-          {#if preset.audio && preset.audio_bitrates.length}
-            <p class="wide muted small">{t("transcode.lossy.channels")}</p>
-          {/if}
-        </div>
-      {/if}
-
-      {#if preset && !preset.analysis}
-        <div class="block grid">
-          <h3 class="wide">{t("transcode.dest")}</h3>
-          <label class="check wide"><input type="checkbox" bind:checked={s.nextToSource} /> {t("transcode.next.to.source")}</label>
-          {#if !s.nextToSource}
-            <div class="row wide">
-              <span class="path mono" title={s.dest}>{s.dest || t("transcode.dest.none")}</span>
-              <button onclick={pickDest}>{t("offload.browse")}</button>
-            </div>
-          {/if}
-          <label>
-            {t("transcode.suffix")}
-            <input class="mono" placeholder={preset.suffix || t("transcode.suffix.none")} bind:value={s.suffix} />
-          </label>
-          <label>
-            {t("transcode.existing")}
-            <select bind:value={s.existing}>
-              <option value="rename">{t("transcode.existing.rename")}</option>
-              <option value="skip">{t("transcode.existing.skip")}</option>
-              <option value="overwrite">{t("transcode.existing.overwrite")}</option>
-            </select>
-          </label>
-          <p class="wide muted small">{t("transcode.never.overwrite")}</p>
-        </div>
+      {#if preset && !preset.unavailable}
+        {#if preset.video}
+          <ImageOptions bind:form {preset} />
+          <OverlayOptions bind:form {preset} />
+        {/if}
+        {#if preset.audio || preset.kind === "video" || preset.kind === "loudness"}
+          <SoundOptions bind:form {preset} />
+        {/if}
+        <SpecialOptions bind:form {preset} />
+        <OutputOptions bind:form {preset} example={sources[0] ? name(sources[0]) : ""} />
       {/if}
 
       <div class="block">
         {#if error}<p class="error">{error}</p>{/if}
         {#if needsDest}<p class="muted small">{t("transcode.dest.needed")}</p>{/if}
+        {#if preset?.kind === "merge" && sources.length === 1}<p class="muted small">{t("transcode.merge.two")}</p>{/if}
         <button class="start" disabled={!canStart} onclick={launch}>
-          {t(preset?.analysis ? "transcode.start.analyze" : "transcode.start")}{sources.length ? ` (${sources.length})` : ""}
+          {t(startLabel)}{sources.length ? ` (${sources.length})` : ""}
         </button>
       </div>
     </section>
@@ -422,7 +312,7 @@
     flex: 1;
     min-width: 0;
     display: grid;
-    grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+    grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
     gap: var(--vf-space-4);
     height: 100%;
     padding: var(--vf-space-3);
@@ -434,7 +324,7 @@
     overflow-y: auto;
     min-height: 0;
   }
-  section > * {
+  section > :global(*) {
     flex-shrink: 0;
   }
   h2 {
@@ -483,15 +373,12 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    max-height: 220px;
+    max-height: 260px;
     overflow-y: auto;
     border: 1px solid var(--vf-border);
     border-radius: var(--vf-radius-sm);
   }
   .files li {
-    display: flex;
-    align-items: center;
-    gap: var(--vf-space-2);
     padding: 2px var(--vf-space-2);
     font-size: var(--vf-text-sm);
     border-bottom: 1px solid var(--vf-border);
@@ -499,9 +386,14 @@
   .files li:last-child {
     border-bottom: 0;
   }
+  .line {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-1);
+  }
   .files .name {
     flex-shrink: 0;
-    max-width: 60%;
+    max-width: 55%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -517,6 +409,9 @@
     direction: rtl;
     text-align: left;
   }
+  .trim {
+    padding: var(--vf-space-1) 0 var(--vf-space-2);
+  }
   .x {
     display: inline-flex;
     align-items: center;
@@ -527,62 +422,21 @@
     background: none;
     border: 0;
     color: var(--vf-text-muted);
+    flex: none;
   }
-  .x:hover {
+  .x:hover,
+  .x.on {
+    color: var(--vf-accent);
+  }
+  .x.del:hover {
     color: var(--vf-error);
   }
+  .x:disabled {
+    opacity: 0.3;
+  }
   .x svg {
-    width: 10px;
-    height: 10px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--vf-space-2) var(--vf-space-3);
-  }
-  .grid label {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    font-size: var(--vf-text-xs);
-    color: var(--vf-text-muted);
-  }
-  .grid input,
-  .grid select {
-    width: 100%;
-    min-width: 0;
-  }
-  .wide {
-    grid-column: 1 / -1;
-  }
-  .grid label.check {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--vf-space-1);
-    font-size: var(--vf-text-sm);
-    color: var(--vf-text);
-  }
-  .grid label.check input {
-    width: auto;
-    accent-color: var(--vf-accent);
-  }
-  .path {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--vf-text-sm);
-  }
-  input,
-  select {
-    background: var(--vf-bg);
-    color: var(--vf-text);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-sm);
-    padding: var(--vf-space-1) var(--vf-space-2);
-    font-size: var(--vf-text-sm);
+    width: 11px;
+    height: 11px;
   }
   button {
     background: var(--vf-surface-high);

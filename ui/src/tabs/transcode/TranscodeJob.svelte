@@ -26,7 +26,11 @@
   });
   const target = $derived(job.request.settings?.loudness ?? null);
   const measured = $derived(job.results.some((r) => r.loudness));
-  const analysis = $derived(job.request.settings?.preset === "analyze");
+  const ANALYSES = ["analyze", "vmaf", "cut_detect", "black_detect", "offline_detect", "silence_detect", "framemd5"];
+  const analysis = $derived(ANALYSES.includes(job.request.settings?.preset ?? ""));
+  const scored = $derived(job.results.some((r) => r.vmaf !== null && r.vmaf !== undefined));
+  const detections = $derived(job.results.filter((r) => r.analysis && ["cut_detect", "black_detect", "offline_detect", "silence_detect"].includes(job.request.settings?.preset ?? "")));
+  const span = (a: number, b: number | null) => (b === null ? "" : `${(b - a).toFixed(2).replace(".", ",")} s`);
   const firstOutput = $derived(job.results.find((r) => r.output)?.output ?? null);
 
   const name = (p: string | null) => (p ? (p.split(/[\\/]/).pop() ?? p) : "");
@@ -70,6 +74,9 @@
       {:else if done > 0 && firstOutput}
         <button class="ghost" onclick={openFolder}>{t("transcode.open.folder")}</button>
       {/if}
+      {#if job.report}
+        <button class="ghost" onclick={() => job.report && reveal(job.report).catch((e) => (openError = String(e)))}>{t("transcode.open.report")}</button>
+      {/if}
       <button class="close" onclick={remove} title={t("transcode.remove.title")} aria-label={t("transcode.remove.title")}>
         <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
       </button>
@@ -102,6 +109,7 @@
         <tr>
           <th class="file">{t("transcode.col.file")}</th>
           <th class="st">{t("transcode.col.status")}</th>
+          {#if scored}<th class="num">VMAF</th>{/if}
           {#if measured}
             <th class="num">LUFS</th>
             <th class="num">LRA</th>
@@ -115,9 +123,12 @@
           <tr>
             <td class="file" title={r.output ?? r.source}>
               {name(r.source)}{#if r.output && name(r.output) !== name(r.source)}<span class="muted"> → {name(r.output)}</span>{/if}
-              {#if r.message}<div class="msg">{r.message}</div>{/if}
+              {#if r.outputs.length > 1}<span class="muted"> ({r.outputs.length} {t("transcode.files")})</span>{/if}
+              {#if r.message}<div class="msg" class:info={r.status === "done"}>{r.message}</div>{/if}
+              {#if r.checksum}<div class="sum mono" title="XXH128">XXH128 {r.checksum}</div>{/if}
             </td>
             <td class="st {r.status}">{statusLabel(r)}</td>
+            {#if scored}<td class="num">{db(r.vmaf, 2)}</td>{/if}
             {#if measured}
               {@const l = r.loudness}
               <td class="num">{db(l?.integrated)}</td>
@@ -140,6 +151,26 @@
     {#if job.results.some((r) => r.loudness?.peak_limited)}
       <p class="small bad">* {t("transcode.peak.limited")}</p>
     {/if}
+    {#each detections as r (r.source)}
+      <details class="found">
+        <summary>
+          {name(r.source)} : {r.analysis?.segments.length ?? 0} {t("transcode.found")}
+          {#if r.output}<button class="link" onclick={() => r.output && reveal(r.output).catch((e) => (openError = String(e)))}>{t("transcode.open.file")}</button>{/if}
+        </summary>
+        <table>
+          <tbody>
+            {#each (r.analysis?.segments ?? []).slice(0, 200) as sg, i (i)}
+              <tr>
+                <td class="num">{i + 1}</td>
+                <td class="mono">{sg.start_tc ?? sg.start.toFixed(2)}</td>
+                <td class="mono">{sg.end_tc ?? (sg.end !== null ? sg.end.toFixed(2) : "")}</td>
+                <td class="num">{span(sg.start, sg.end)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </details>
+    {/each}
   {/if}
 </article>
 
@@ -260,6 +291,28 @@
   .msg {
     white-space: normal;
     color: var(--vf-error);
+  }
+  .msg.info {
+    color: var(--vf-text-muted);
+  }
+  .sum {
+    color: var(--vf-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .found summary {
+    cursor: pointer;
+    font-size: var(--vf-text-sm);
+  }
+  .found table {
+    margin-top: var(--vf-space-1);
+  }
+  button.link {
+    background: none;
+    border: 0;
+    color: var(--vf-accent);
+    padding: 0 var(--vf-space-2);
+    font-size: var(--vf-text-xs);
   }
   .st {
     width: 90px;
