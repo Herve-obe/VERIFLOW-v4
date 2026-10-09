@@ -589,12 +589,10 @@ fn build_audio(job: &Job) -> Result<Plan> {
             a.extend(time_reference_args(info, start, rate));
         }
         Kind::Aiff => a.extend([s("-c:a"), s(pcm_codec(true, depth))]),
+        // En 32 bits entiers, FLAC et ALAC écrivent 24 bits utiles.
         Kind::Flac => {
             let fmt = if depth == BitDepth::S16 { "s16" } else { "s32" };
             a.extend([s("-c:a"), s("flac"), s("-sample_fmt"), s(fmt)]);
-            if depth != BitDepth::S16 {
-                a.extend([s("-bits_per_raw_sample"), s("24")]);
-            }
         }
         Kind::Alac => {
             let fmt = if depth == BitDepth::S16 {
@@ -603,9 +601,6 @@ fn build_audio(job: &Job) -> Result<Plan> {
                 "s32p"
             };
             a.extend([s("-c:a"), s("alac"), s("-sample_fmt"), s(fmt)]);
-            if depth != BitDepth::S16 {
-                a.extend([s("-bits_per_raw_sample"), s("24")]);
-            }
         }
         Kind::Mp3 => a.extend([
             s("-c:a"),
@@ -671,6 +666,11 @@ fn build_copy(job: &Job) -> Result<Plan> {
             s("-c"),
             s("copy"),
         ]),
+    }
+    // MP4 : le son PCM y est mal lu (et refusé par les FFmpeg anciens) ; il est
+    // converti en AAC, l'image restant recopiée.
+    if format == "mp4" && info.audio.iter().any(|a| a.codec.starts_with("pcm_")) {
+        a.extend([s("-c:a"), video::aac_encoder(), s("-b:a"), s("320k")]);
     }
     if start > 0.0 {
         a.extend([s("-avoid_negative_ts"), s("make_zero")]);

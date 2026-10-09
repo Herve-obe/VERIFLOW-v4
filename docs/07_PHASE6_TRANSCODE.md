@@ -16,7 +16,7 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 | Proxies | ProRes Proxy, DNxHR LB, H.264, à mi-taille, suffixe `_proxy`, timecode et pistes conservés |
 | Anciens codecs | MPEG-2, MPEG-1, Motion JPEG, DV (PAL ou NTSC selon la cadence), Xvid, WMV, Theora |
 | Images | JPEG, PNG, TIFF, DPX 10 bits, OpenEXR, WebP, JPEG XL : une image (position au choix, milieu du plan par défaut), une image toutes les N secondes, ou toute la séquence numérotée d'après le timecode |
-| Sans réencodage | Changement de conteneur (MOV, MP4, MXF, MKV), découpe, remplacement du son, conformation de cadence, fusion, insert, sous-titres en piste, extraction de l'image, du son (WAV polyphonique) ou de chaque piste (WAV mono) |
+| Sans réencodage | Changement de conteneur (MOV, MP4, MXF, MKV ; vers MP4, un son PCM est converti en AAC), découpe, remplacement du son, conformation de cadence, fusion, insert, sous-titres en piste, extraction de l'image, du son (WAV polyphonique) ou de chaque piste (WAV mono) |
 | Son | WAV/BWF, AIFF, FLAC, ALAC, MP3, AAC, Opus, Ogg Vorbis, AC-3 |
 | Analyses | Loudness et True Peak, détection de plans (EDL CMX 3600), de noir, de médias hors ligne, de silences (CSV), qualité VMAF, empreintes par image (FrameMD5) |
 
