@@ -2,7 +2,7 @@
      leurs empreintes, puis choix entre compléter la copie et tout recopier. -->
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { confirm } from "@tauri-apps/plugin-dialog";
+  import { ask } from "../../stores/confirm.svelte";
   import Modal from "../../components/Modal.svelte";
   import ProgressBar from "../../components/ProgressBar.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -44,9 +44,10 @@
   }
 
   async function replace() {
-    const ok = await confirm(t("offload.existing.replace.confirm").replace("{n}", String(present)), {
-      title: t("offload.existing.title"),
-      kind: "warning",
+    const ok = await ask(t("offload.existing.replace.confirm").replace("{n}", String(present)), {
+      title: t("offload.existing.do.replace"),
+      ok: t("offload.existing.do.replace"),
+      kind: "danger",
     });
     if (ok) onChoose("replace", null);
   }
