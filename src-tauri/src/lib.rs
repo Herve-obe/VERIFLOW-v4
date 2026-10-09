@@ -10,6 +10,7 @@ mod media;
 mod offload;
 mod player;
 mod report;
+mod transcode;
 
 use std::sync::Mutex;
 
@@ -32,6 +33,7 @@ pub fn run() {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
+            app.manage(transcode::TranscodeState::new(app.handle().clone()));
             #[cfg(target_os = "macos")]
             if let Some(main) = app.get_webview_window("main") {
                 let handle = main.clone();
@@ -95,6 +97,12 @@ pub fn run() {
             report::report_branding_get,
             report::report_branding_set,
             report::report_export,
+            transcode::transcode_presets,
+            transcode::transcode_encoder,
+            transcode::transcode_default_mbps,
+            transcode::transcode_expand,
+            transcode::transcode_start,
+            transcode::transcode_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");
