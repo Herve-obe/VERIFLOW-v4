@@ -100,7 +100,9 @@ pub fn measure(path: &Path, info: &MediaInfo, max_channels: Option<u32>) -> Resu
     let graph = audio_graph(
         info,
         max_channels,
-        &["ebur128=peak=sample+true:framelog=quiet".to_owned()],
+        // Journal par image au niveau « verbose » : absent des messages
+        // ordinaires, avec toutes les versions de FFmpeg (4.4 comprise).
+        &["ebur128=peak=sample+true:framelog=verbose".to_owned()],
     );
     let out = tools::command("ffmpeg")?
         .args(["-hide_banner", "-nostats", "-nostdin", "-i"])
@@ -121,7 +123,7 @@ pub fn measure(path: &Path, info: &MediaInfo, max_channels: Option<u32>) -> Resu
     if !out.status.success() {
         return Err(Error::Tool {
             tool: "ffmpeg".into(),
-            message: text.lines().last().unwrap_or_default().to_owned(),
+            message: super::run::useful_error(&text),
         });
     }
     parse_summary(&text).ok_or_else(|| Error::Tool {

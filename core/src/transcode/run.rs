@@ -157,28 +157,37 @@ pub fn run(
         return Err(Error::Cancelled);
     }
     if !status.success() {
-        // Première ligne utile : les dernières lignes de FFmpeg sont génériques.
-        const GENERIC: [&str; 8] = [
-            "Fontconfig",
-            "Task finished",
-            "Terminating thread",
-            "Nothing was written",
-            "Conversion failed",
-            "Error sending frames",
-            "Could not open encoder before EOF",
-            "Error while filtering",
-        ];
-        let message = text
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty() && !GENERIC.iter().any(|g| l.contains(g)))
-            .or_else(|| text.lines().map(str::trim).rfind(|l| !l.is_empty()))
-            .unwrap_or("échec sans message")
-            .to_owned();
+        let message = useful_error(&text);
         return Err(Error::Tool {
             tool: "ffmpeg".into(),
             message,
         });
     }
     Ok(text)
+}
+
+/// Ligne utile des messages d'erreur de FFmpeg : les dernières lignes sont
+/// génériques (« Conversion failed », « Invalid argument »).
+pub fn useful_error(text: &str) -> String {
+    const GENERIC: [&str; 10] = [
+        "deprecated",
+        "Fontconfig",
+        "Task finished",
+        "Terminating thread",
+        "Nothing was written",
+        "Conversion failed",
+        "Error sending frames",
+        "Could not open encoder before EOF",
+        "Error while filtering",
+        "Invalid argument",
+    ];
+    text.lines()
+        .map(str::trim)
+        .filter(|l| {
+            l.starts_with('[') || l.contains("rror") || l.contains("nvalid") || l.contains("not ")
+        })
+        .find(|l| !l.is_empty() && !GENERIC.iter().any(|g| l.contains(g)))
+        .or_else(|| text.lines().map(str::trim).rfind(|l| !l.is_empty()))
+        .unwrap_or("échec sans message")
+        .to_owned()
 }
