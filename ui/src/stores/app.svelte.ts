@@ -1,6 +1,13 @@
 // État global de l'interface : mode VIDEO/AUDIO, onglet actif, projet courant.
 export type Mode = "video" | "audio";
-export const TABS = ["offload", "media", "player", "sync", "transcode", "report"] as const;
+export const TABS = [
+  "offload",
+  "media",
+  "player",
+  "sync",
+  "transcode",
+  "report",
+] as const;
 export type Tab = (typeof TABS)[number];
 
 export interface ProjectInfo {
@@ -19,7 +26,16 @@ export const app = $state({
   playerAudio: null as string[] | null,
   /** Médias à ajouter au rapport du mode courant (bouton « Ajouter au rapport » de MEDIA). */
   reportMedia: null as string[] | null,
+  /** Médias à convertir (bouton « Envoyer vers TRANSCODE » de MEDIA). */
+  transcodeMedia: null as string[] | null,
 });
+
+/** Envoie des médias vers l'onglet TRANSCODE. */
+export function sendToTranscode(paths: string[]) {
+  if (paths.length === 0) return;
+  app.transcodeMedia = paths;
+  app.tab = "transcode";
+}
 
 /** Envoie des médias vers l'onglet REPORT (rapport image en VIDEO, son en AUDIO). */
 export function addToReport(paths: string[]) {
@@ -29,7 +45,10 @@ export function addToReport(paths: string[]) {
 }
 
 /** Ouvre un média dans l'onglet PLAYER, dans le mode qui lui correspond. */
-export function openInPlayer(path: string, kind: "video" | "audio" | "image" | string) {
+export function openInPlayer(
+  path: string,
+  kind: "video" | "audio" | "image" | string,
+) {
   if (kind === "audio") {
     app.playerAudio = [path];
     setMode("audio");
