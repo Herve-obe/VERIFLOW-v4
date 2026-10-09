@@ -4,29 +4,36 @@
 //! fois terminé : une conversion interrompue ne laisse jamais un fichier
 //! incomplet sous son nom final, et l'original n'est jamais écrasé.
 
+pub mod analysis;
+pub mod build;
 pub mod bwf;
+pub mod catalog;
 pub mod encoders;
+pub mod filters;
 pub mod loudness;
-pub mod preset;
+pub mod report;
+pub mod run;
+pub mod settings;
+pub mod special;
+pub mod video;
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+pub use analysis::{Analysis, Segment};
+pub use catalog::{find, Category, Domain, Kind, Preset, PRESETS};
 pub use loudness::Loudness;
-pub use preset::{
-    find, BitDepth, Category, Domain, EncoderChoice, LoudnessTarget, Preset, Settings, PRESETS,
-};
+pub use settings::{AudioMode, BitDepth, LoudnessTarget, Settings};
+pub use video::EncoderChoice;
 
+use crate::media::catalog::{kind_of, MediaKind};
 use crate::media::probe::{probe, MediaInfo};
-use crate::{tools, Error, Result};
+use crate::{Error, Result};
+use build::{build, source_ext, Job, Plan};
 
 /// Fichier déjà présent sous le nom de sortie.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,17 +48,78 @@ pub enum Existing {
 
 /// Demande de conversion d'un lot de fichiers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Request {
     pub sources: Vec<PathBuf>,
     pub settings: Settings,
     /// Dossier de sortie ; à côté de chaque source si absent.
-    #[serde(default)]
     pub dest: Option<PathBuf>,
-    /// Ajouté au nom de chaque fichier produit.
-    #[serde(default)]
+    /// Nommage : préfixe, suffixe, remplacement de texte, numérotation.
+    pub prefix: String,
     pub suffix: String,
-    #[serde(default)]
+    pub replace_from: String,
+    pub replace_to: String,
+    pub numbering: bool,
+    pub number_start: u32,
+    pub number_digits: u32,
     pub existing: Existing,
+    /// Empreinte XXH128 de chaque fichier produit.
+    pub checksum: bool,
+    /// Rapport CSV du lot dans le dossier de sortie.
+    pub report: bool,
+}
+
+impl Default for Request {
+    fn default() -> Self {
+        Self {
+            sources: Vec::new(),
+            settings: Settings::default(),
+            dest: None,
+            prefix: String::new(),
+            suffix: String::new(),
+            replace_from: String::new(),
+            replace_to: String::new(),
+            numbering: false,
+            number_start: 1,
+            number_digits: 3,
+            existing: Existing::Rename,
+            checksum: false,
+            report: false,
+        }
+    }
+}
+
+impl Request {
+    /// Nom (sans extension) du fichier produit à partir de la source n° `index`.
+    pub fn output_name(&self, source: &Path, index: usize, extra: &str) -> String {
+        let mut stem = source
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if !self.replace_from.is_empty() {
+            stem = stem.replace(&self.replace_from, &self.replace_to);
+        }
+        let mut name = format!("{}{stem}{}{extra}", self.prefix, self.suffix);
+        if self.numbering {
+            let n = self.number_start as usize + index;
+            name += &format!(
+                "_{n:0width$}",
+                width = self.number_digits.clamp(1, 8) as usize
+            );
+        }
+        // Caractères refusés par Windows dans un nom de fichier.
+        name.chars()
+            .map(|c| if "<>:\"/\\|?*".contains(c) { '_' } else { c })
+            .collect()
+    }
+
+    fn dir_for(&self, source: &Path) -> PathBuf {
+        self.dest
+            .clone()
+            .or_else(|| source.parent().map(Path::to_path_buf))
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -66,12 +134,39 @@ pub enum Status {
 #[derive(Debug, Clone, Serialize)]
 pub struct FileResult {
     pub source: PathBuf,
+    /// Fichier (ou dossier d'images) produit, ou rapport d'analyse.
     pub output: Option<PathBuf>,
+    /// Tous les fichiers produits (une piste par fichier : plusieurs).
+    pub outputs: Vec<PathBuf>,
     pub status: Status,
     pub message: Option<String>,
     pub encoder: Option<EncoderChoice>,
     pub loudness: Option<Loudness>,
+    pub analysis: Option<Analysis>,
+    pub checksum: Option<String>,
+    pub size: Option<u64>,
+    /// Qualité VMAF du fichier produit (option de vérification).
+    pub vmaf: Option<f64>,
     pub seconds: f64,
+}
+
+impl FileResult {
+    fn new(source: &Path) -> Self {
+        Self {
+            source: source.to_path_buf(),
+            output: None,
+            outputs: Vec::new(),
+            status: Status::Done,
+            message: None,
+            encoder: None,
+            loudness: None,
+            analysis: None,
+            checksum: None,
+            size: None,
+            vmaf: None,
+            seconds: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,7 +185,7 @@ pub enum Event {
     },
     FileDone {
         index: usize,
-        result: FileResult,
+        result: Box<FileResult>,
     },
 }
 
@@ -99,31 +194,32 @@ pub struct Summary {
     pub files: Vec<FileResult>,
     pub cancelled: bool,
     pub seconds: f64,
+    /// Rapport CSV du lot.
+    pub report: Option<PathBuf>,
 }
 
-/// Chemin de sortie d'un fichier, selon la règle choisie pour les fichiers
-/// déjà présents ; `None` : fichier à ignorer. `taken` : sorties déjà
-/// attribuées dans ce lot (deux sources du même nom ne s'écrasent pas).
+/// Chemin de sortie selon la règle choisie pour les fichiers déjà présents ;
+/// `None` : fichier à ignorer. `taken` : sorties déjà attribuées dans ce lot
+/// (deux sources du même nom ne s'écrasent pas). `ext` vide : dossier.
 pub fn output_path(
-    source: &Path,
-    dest: Option<&Path>,
-    suffix: &str,
+    dir: &Path,
+    name: &str,
     ext: &str,
+    source: &Path,
     existing: Existing,
     taken: &HashSet<PathBuf>,
 ) -> Option<PathBuf> {
-    let dir = dest
-        .map(Path::to_path_buf)
-        .or_else(|| source.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
-    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
     let make = |n: u32| {
         let num = if n == 0 {
             String::new()
         } else {
             format!("_{n}")
         };
-        dir.join(format!("{stem}{suffix}{num}.{ext}"))
+        if ext.is_empty() {
+            dir.join(format!("{name}{num}"))
+        } else {
+            dir.join(format!("{name}{num}.{ext}"))
+        }
     };
     let same_as_source = |p: &Path| p == source || (p.exists() && same_file(p, source));
     let first = make(0);
@@ -133,7 +229,11 @@ pub fn output_path(
     }
     match existing {
         Existing::Skip if !taken.contains(&first) => None,
-        Existing::Overwrite if !taken.contains(&first) && !same_as_source(&first) => Some(first),
+        Existing::Overwrite
+            if !taken.contains(&first) && !same_as_source(&first) && !first.is_dir() =>
+        {
+            Some(first)
+        }
         _ => (1..10_000).map(make).find(|p| !busy(p)),
     }
 }
@@ -152,177 +252,348 @@ fn part_path(output: &Path) -> PathBuf {
     output.with_file_name(name)
 }
 
-/// Lance FFmpeg et suit son avancement jusqu'à la fin ou l'annulation.
-fn run_ffmpeg(
-    input: &Path,
-    args: &[String],
-    format: &str,
-    out: &Path,
-    duration: f64,
-    cancel: &AtomicBool,
-    mut progress: impl FnMut(f64, f64),
-) -> Result<()> {
-    let mut cmd = tools::command("ffmpeg")?;
-    cmd.args(["-hide_banner", "-nostdin", "-y", "-v", "error"])
-        .args(["-progress", "pipe:1", "-nostats", "-stats_period", "0.5"])
-        .arg("-i")
-        .arg(input)
-        .args(args)
-        .args(["-f", format])
-        .arg(out)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child: Child = cmd.spawn()?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let child = Mutex::new(child);
-    let finished = AtomicBool::new(false);
-    let cancelled = AtomicBool::new(false);
-    let (status, text) = thread::scope(|scope| -> Result<_> {
-        let errors = scope.spawn(move || {
-            let mut text = String::new();
-            if let Some(mut e) = stderr {
-                let _ = e.read_to_string(&mut text);
-            }
-            text
-        });
-        // Surveillance de l'annulation, indépendante du rythme des messages de FFmpeg.
-        scope.spawn(|| {
-            while !finished.load(Ordering::Relaxed) {
-                if cancel.load(Ordering::Relaxed) {
-                    cancelled.store(true, Ordering::Relaxed);
-                    if let Ok(mut c) = child.lock() {
-                        let _ = c.kill();
-                    }
-                    break;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        });
-        if let Some(out) = stdout {
-            let (mut time, mut speed) = (0.0f64, 0.0f64);
-            for line in BufReader::new(out).lines().map_while(|l| l.ok()) {
-                let Some((k, v)) = line.split_once('=') else {
-                    continue;
-                };
-                match k {
-                    // Les deux clés sont en microsecondes (historique de FFmpeg).
-                    "out_time_us" | "out_time_ms" => {
-                        if let Ok(us) = v.trim().parse::<f64>() {
-                            time = us / 1_000_000.0;
-                        }
-                    }
-                    "speed" => speed = v.trim().trim_end_matches('x').parse().unwrap_or(speed),
-                    "progress" => {
-                        let f = if duration > 0.0 {
-                            (time / duration).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        progress(if v.trim() == "end" { 1.0 } else { f }, speed);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let status = loop {
-            let done = child.lock().unwrap_or_else(|e| e.into_inner()).try_wait();
-            match done {
-                Ok(Some(s)) => break Ok(s),
-                Ok(None) => thread::sleep(Duration::from_millis(50)),
-                Err(e) => break Err(e),
-            }
-        };
-        finished.store(true, Ordering::Relaxed);
-        let text = errors.join().unwrap_or_default();
-        Ok((status?, text))
-    })?;
-    if cancelled.load(Ordering::Relaxed) {
-        return Err(Error::Cancelled);
-    }
-    if !status.success() {
-        let message = text
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("échec sans message")
-            .trim()
-            .to_owned();
-        return Err(Error::Tool {
-            tool: "ffmpeg".into(),
-            message,
-        });
-    }
-    Ok(())
+fn is_wav(path: &Path) -> bool {
+    kind_of(path) == Some(MediaKind::Audio) && matches!(source_ext(path).as_str(), "wav" | "bwf")
 }
 
-/// Convertit (ou mesure) un fichier.
-fn process(
-    preset: &Preset,
-    req: &Request,
+/// Exécute un plan vers `output` (fichier, ou dossier pour une séquence d'images).
+fn write_output(
+    plan: &Plan,
     source: &Path,
-    info: &MediaInfo,
-    output: Option<&Path>,
+    output: &Path,
+    ext: &str,
+    retime: Option<bwf::Retime>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64, f64),
-) -> Result<(Option<EncoderChoice>, Option<Loudness>)> {
-    let settings = &req.settings;
-    let max = preset::max_channels(preset.kind, preset::total_channels(info));
-    // Mesure : préréglage d'analyse, ou normalisation demandée.
-    let mut loud = None;
-    if preset.kind == preset::Kind::Analyze || (preset.is_audio() && settings.loudness.is_some()) {
-        progress(0.0, 0.0);
-        let mut l = loudness::measure(source, info, max)?;
-        if let Some(target) = settings.loudness {
-            if preset.kind != preset::Kind::Analyze && l.integrated.is_finite() {
-                l.plan(target);
-            }
-        }
-        loud = Some(l);
-    }
-    if cancel.load(Ordering::Relaxed) {
-        return Err(Error::Cancelled);
-    }
-    let Some(output) = output else {
-        progress(1.0, 0.0);
-        return Ok((None, loud));
-    };
-    let gain = loud.as_ref().and_then(|l| l.gain);
-    let plan = preset::build(preset, settings, info, gain)?;
+) -> Result<()> {
     if let Some(dir) = output.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let part = part_path(output);
-    let result = run_ffmpeg(
-        source,
-        &plan.args,
-        preset.format,
-        &part,
-        info.duration,
-        cancel,
-        progress,
-    );
+    let input = plan.input.clone().unwrap_or_else(|| source.to_path_buf());
+    let result = if plan.sequence {
+        let _ = std::fs::remove_dir_all(&part);
+        std::fs::create_dir_all(&part)?;
+        let name = output
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let pattern = part.join(format!("{name}_%07d.{ext}"));
+        run::run(plan, &input, Some(&pattern), false, cancel, progress).map(|_| ())
+    } else {
+        run::run(plan, &input, Some(&part), false, cancel, progress).map(|_| ())
+    };
     if let Err(e) = result {
-        let _ = std::fs::remove_file(&part);
+        let _ = if plan.sequence {
+            std::fs::remove_dir_all(&part)
+        } else {
+            std::fs::remove_file(&part)
+        };
         return Err(e);
     }
     // Métadonnées de tournage d'un WAV source recopiées dans le WAV produit.
-    if preset.format == "wav" && preset.is_audio() {
-        let old = info.audio.first().map(|a| a.sample_rate).unwrap_or(0);
-        let new = preset::output_rate(preset, settings, info);
-        let bits = match preset::output_depth(preset, settings, info) {
-            BitDepth::S16 => 16,
-            BitDepth::S24 => 24,
-            BitDepth::F32 => 32,
-        };
-        let _ = bwf::carry(source, &part, old, new, bits);
+    if let Some(t) = retime.filter(|_| plan.format == "wav" && is_wav(source)) {
+        let bits = wav_bits(&part).unwrap_or(24);
+        let _ = bwf::carry(source, &part, &t, bits);
     }
     if output.exists() {
-        std::fs::remove_file(output)?;
+        if output.is_dir() {
+            std::fs::remove_dir_all(output)?;
+        } else {
+            std::fs::remove_file(output)?;
+        }
     }
     std::fs::rename(&part, output)?;
-    Ok((plan.encoder, loud))
+    Ok(())
+}
+
+/// Résolution du WAV produit (lue dans son en-tête).
+fn wav_bits(path: &Path) -> Option<u16> {
+    crate::media::wav::read_info(path).ok().map(|w| w.bits)
+}
+
+/// Mesure de loudness avant normalisation : sur le son tel qu'il sera produit.
+fn measure_for(
+    preset: &Preset,
+    settings: &Settings,
+    info: &MediaInfo,
+    source: &Path,
+) -> Result<Loudness> {
+    let channels = filters::total_channels(info);
+    let max = if preset.is_audio() {
+        build::max_channels(preset.kind, channels)
+    } else {
+        match settings.audio_mode.unwrap_or(preset.audio_mode) {
+            AudioMode::FirstTwo => Some(2),
+            _ => None,
+        }
+    };
+    loudness::measure(source, info, max)
+}
+
+struct Ctx<'a> {
+    preset: &'static Preset,
+    req: &'a Request,
+    cancel: &'a AtomicBool,
+}
+
+/// Traite un fichier (conversion, extraction ou analyse).
+fn process(
+    ctx: &Ctx,
+    index: usize,
+    source: &Path,
+    taken: &mut HashSet<PathBuf>,
+    progress: &mut dyn FnMut(f64, f64),
+    result: &mut FileResult,
+) -> Result<()> {
+    let (preset, req, cancel) = (ctx.preset, ctx.req, ctx.cancel);
+    let settings = &req.settings;
+    let info = probe(source)?;
+    let ext = if preset.ext == "*" {
+        source_ext(source)
+    } else {
+        preset.ext.to_owned()
+    };
+    let dir = req.dir_for(source);
+    let mut job = Job {
+        preset,
+        settings,
+        info: &info,
+        source,
+        gain: None,
+    };
+    // Sortie principale (sauf analyses sans fichier et pistes séparées).
+    let reserve = |extra: &str, ext: &str, taken: &mut HashSet<PathBuf>| -> Result<PathBuf> {
+        let name = req.output_name(source, index, extra);
+        let p = output_path(&dir, &name, ext, source, req.existing, taken)
+            .ok_or_else(|| Error::AlreadyExists(dir.join(&name).display().to_string()))?;
+        taken.insert(p.clone());
+        Ok(p)
+    };
+
+    match preset.kind {
+        Kind::Loudness => {
+            progress(0.0, 0.0);
+            let mut l = measure_for(preset, settings, &info, source)?;
+            l.gain = None;
+            result.loudness = Some(l);
+            progress(1.0, 0.0);
+            return Ok(());
+        }
+        Kind::Vmaf => {
+            let reference = settings
+                .reference
+                .as_deref()
+                .and_then(|r| analysis::find_reference(source, r))
+                .ok_or_else(|| {
+                    Error::Unsupported("original introuvable pour la comparaison VMAF".into())
+                })?;
+            let score = analysis::vmaf(source, &reference, cancel, progress)?;
+            result.analysis = Some(Analysis {
+                segments: Vec::new(),
+                vmaf: Some(score),
+            });
+            result.vmaf = Some(score);
+            result.message = Some(format!("original : {}", reference.display()));
+            return Ok(());
+        }
+        Kind::CutDetect | Kind::BlackDetect | Kind::OfflineDetect | Kind::SilenceDetect => {
+            let (input_args, start, duration) = build::trim(&job)?;
+            let segments = analysis::detect(
+                preset.kind,
+                source,
+                &info,
+                settings.threshold,
+                &input_args,
+                start,
+                duration,
+                cancel,
+                progress,
+            )?;
+            let out = reserve("", &ext, taken)?;
+            if let Some(d) = out.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            let text = if preset.kind == Kind::CutDetect {
+                let cuts: Vec<f64> = segments.iter().map(|s| s.start).collect();
+                let name = source
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let clip = source
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                analysis::to_edl(&name, &clip, &info, &cuts)
+            } else {
+                analysis::to_csv(&segments)
+            };
+            std::fs::write(&out, text)?;
+            result.output = Some(out.clone());
+            result.outputs.push(out);
+            result.analysis = Some(Analysis {
+                segments,
+                vmaf: None,
+            });
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // Normalisation : mesure, puis gain.
+    let normalize = settings.loudness.filter(|_| {
+        (preset.is_audio() || preset.has_video_audio())
+            && !info.audio.is_empty()
+            && settings.audio_mode != Some(AudioMode::None)
+    });
+    if let Some(target) = normalize {
+        progress(0.0, 0.0);
+        let mut l = measure_for(preset, settings, &info, source)?;
+        if l.integrated.is_finite() {
+            job.gain = Some(l.plan(target));
+        }
+        result.loudness = Some(l);
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Error::Cancelled);
+    }
+
+    // Plans et fichiers produits.
+    let mut plans: Vec<(Plan, PathBuf)> = Vec::new();
+    match preset.kind {
+        Kind::ExtractTracks => {
+            let (input_args, start, duration) = build::trim(&job)?;
+            for (extra, plan) in special::tracks(source, &info, &input_args, start, duration)? {
+                let out = reserve(&extra, "wav", taken)?;
+                plans.push((plan, out));
+            }
+        }
+        Kind::Insert => {
+            let file = settings
+                .insert_file
+                .clone()
+                .ok_or_else(|| Error::Unsupported("plan à insérer non choisi".into()))?;
+            let at = settings
+                .insert_at
+                .clone()
+                .ok_or_else(|| Error::Unsupported("point d'insertion non indiqué".into()))?;
+            let insert_info = probe(&file)?;
+            let plan = special::insert(source, &info, &file, &insert_info, &at, &job.format())?;
+            plans.push((plan, reserve("", &ext, taken)?));
+        }
+        _ => {
+            let plan = build(&job)?;
+            let out = if plan.sequence {
+                reserve("", "", taken)?
+            } else {
+                reserve("", &ext, taken)?
+            };
+            plans.push((plan, out));
+        }
+    }
+    let total = plans.len();
+    for (i, (plan, out)) in plans.iter().enumerate() {
+        let src_rate = info.audio.first().map(|a| a.sample_rate).unwrap_or(0);
+        let new_rate = if preset.is_audio() {
+            build::output_rate(preset, settings, &info)
+        } else {
+            src_rate
+        };
+        let retime = bwf::Retime {
+            old_rate: src_rate,
+            new_rate,
+            shift: plan.start,
+        };
+        let mut sub = |f: f64, sp: f64| progress((i as f64 + f) / total as f64, sp);
+        write_output(plan, source, out, &ext, Some(retime), cancel, &mut sub)?;
+        result.outputs.push(out.clone());
+        if result.encoder.is_none() {
+            result.encoder = plan.encoder.clone();
+        }
+    }
+    result.output = result.outputs.first().cloned();
+    // Vérifications : empreinte, qualité VMAF.
+    if let Some(out) = result.output.clone().filter(|o| o.is_file()) {
+        result.size = std::fs::metadata(&out).ok().map(|m| m.len());
+        if req.checksum {
+            result.checksum = Some(report::xxh128(&out)?);
+        }
+        if settings.vmaf_after && preset.is_video() && settings.trim_for(source).is_none() {
+            result.vmaf = Some(analysis::vmaf(&out, source, cancel, &mut |_, _| {})?);
+        }
+    }
+    Ok(())
+}
+
+/// Fusion : tous les fichiers du lot en un seul.
+fn merge(ctx: &Ctx, on: &mut dyn FnMut(Event)) -> FileResult {
+    let req = ctx.req;
+    let first = req.sources[0].clone();
+    on(Event::FileStarted {
+        index: 0,
+        source: first.clone(),
+    });
+    let t0 = Instant::now();
+    let mut result = FileResult::new(&first);
+    let outcome = (|| -> Result<()> {
+        let mut list = Vec::new();
+        for s in &req.sources {
+            list.push((s.clone(), probe(s)?));
+        }
+        let ext = source_ext(&first);
+        let plan = special::merge(&list, catalog::format_for_ext(&ext))?;
+        let extra = if req.suffix.is_empty() { "_fusion" } else { "" };
+        let name = req.output_name(&first, 0, extra);
+        let out = output_path(
+            &req.dir_for(&first),
+            &name,
+            &ext,
+            &first,
+            req.existing,
+            &HashSet::new(),
+        )
+        .ok_or_else(|| Error::AlreadyExists(name.clone()))?;
+        let mut progress = |fraction: f64, speed: f64| {
+            on(Event::Progress {
+                index: 0,
+                fraction,
+                speed,
+            })
+        };
+        write_output(&plan, &first, &out, &ext, None, ctx.cancel, &mut progress)?;
+        result.size = std::fs::metadata(&out).ok().map(|m| m.len());
+        if req.checksum {
+            result.checksum = Some(report::xxh128(&out)?);
+        }
+        result.output = Some(out.clone());
+        result.outputs.push(out);
+        Ok(())
+    })();
+    finish(&mut result, outcome, t0);
+    on(Event::FileDone {
+        index: 0,
+        result: Box::new(result.clone()),
+    });
+    result
+}
+
+fn finish(result: &mut FileResult, outcome: Result<()>, t0: Instant) {
+    match outcome {
+        Ok(()) => {}
+        Err(Error::Cancelled) => result.status = Status::Cancelled,
+        Err(Error::AlreadyExists(p)) => {
+            result.status = Status::Skipped;
+            result.message = Some(format!("fichier déjà présent : {p}"));
+        }
+        Err(e) => {
+            result.status = Status::Failed;
+            result.message = Some(e.to_string());
+        }
+    }
+    result.seconds = t0.elapsed().as_secs_f64();
 }
 
 /// Traite un lot de fichiers l'un après l'autre.
@@ -330,93 +601,68 @@ pub fn execute(req: &Request, cancel: &AtomicBool, mut on: impl FnMut(Event)) ->
     let preset = find(&req.settings.preset).ok_or_else(|| {
         Error::Unsupported(format!("préréglage inconnu : {}", req.settings.preset))
     })?;
-    let started = Instant::now();
-    let mut files = Vec::new();
-    let mut taken = HashSet::new();
-    for (index, source) in req.sources.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            break;
-        }
-        on(Event::FileStarted {
-            index,
-            source: source.clone(),
-        });
-        let t0 = Instant::now();
-        let output = if preset.ext.is_empty() {
-            Ok(None)
-        } else {
-            match output_path(
-                source,
-                req.dest.as_deref(),
-                &req.suffix,
-                preset.ext,
-                req.existing,
-                &taken,
-            ) {
-                Some(p) => Ok(Some(p)),
-                None => Err(()),
-            }
-        };
-        let mut result = FileResult {
-            source: source.clone(),
-            output: None,
-            status: Status::Done,
-            message: None,
-            encoder: None,
-            loudness: None,
-            seconds: 0.0,
-        };
-        match output {
-            Err(()) => {
-                result.status = Status::Skipped;
-                result.message = Some("fichier déjà présent".into());
-            }
-            Ok(output) => {
-                if let Some(o) = &output {
-                    taken.insert(o.clone());
-                }
-                let outcome = probe(source).and_then(|info| {
-                    process(
-                        preset,
-                        req,
-                        source,
-                        &info,
-                        output.as_deref(),
-                        cancel,
-                        &mut |fraction, speed| {
-                            on(Event::Progress {
-                                index,
-                                fraction,
-                                speed,
-                            })
-                        },
-                    )
-                });
-                match outcome {
-                    Ok((encoder, loud)) => {
-                        result.output = output;
-                        result.encoder = encoder;
-                        result.loudness = loud;
-                    }
-                    Err(Error::Cancelled) => result.status = Status::Cancelled,
-                    Err(e) => {
-                        result.status = Status::Failed;
-                        result.message = Some(e.to_string());
-                    }
-                }
-            }
-        }
-        result.seconds = t0.elapsed().as_secs_f64();
-        on(Event::FileDone {
-            index,
-            result: result.clone(),
-        });
-        files.push(result);
+    if let Some(why) = preset.unavailable() {
+        return Err(Error::Unsupported(format!("{} : {why}", preset.label_fr)));
     }
+    let started = Instant::now();
+    let ctx = Ctx {
+        preset,
+        req,
+        cancel,
+    };
+    let mut files = Vec::new();
+    if preset.kind == Kind::Merge {
+        if req.sources.len() < 2 {
+            return Err(Error::Unsupported("fusion : au moins deux fichiers".into()));
+        }
+        files.push(merge(&ctx, &mut on));
+    } else {
+        let mut taken = HashSet::new();
+        for (index, source) in req.sources.iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            on(Event::FileStarted {
+                index,
+                source: source.clone(),
+            });
+            let t0 = Instant::now();
+            let mut result = FileResult::new(source);
+            let mut progress = |fraction: f64, speed: f64| {
+                on(Event::Progress {
+                    index,
+                    fraction,
+                    speed,
+                })
+            };
+            let outcome = process(&ctx, index, source, &mut taken, &mut progress, &mut result);
+            finish(&mut result, outcome, t0);
+            on(Event::FileDone {
+                index,
+                result: Box::new(result.clone()),
+            });
+            files.push(result);
+        }
+    }
+    let report = if req.report && !files.is_empty() {
+        let dir = req
+            .dest
+            .clone()
+            .or_else(|| {
+                files
+                    .iter()
+                    .find_map(|f| f.output.as_ref()?.parent().map(Path::to_path_buf))
+            })
+            .or_else(|| req.sources[0].parent().map(Path::to_path_buf));
+        dir.and_then(|d| report::write(&d, preset.label_fr, &files).ok())
+    } else {
+        None
+    };
     Ok(Summary {
         cancelled: cancel.load(Ordering::Relaxed),
         files,
         seconds: started.elapsed().as_secs_f64(),
+        report,
     })
 }
 

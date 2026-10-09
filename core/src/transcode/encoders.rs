@@ -1,6 +1,4 @@
-//! Encodeurs disponibles sur le poste (charte §6.2) : encodeurs du système ou
-//! de la carte graphique par défaut pour H.264, HEVC, AAC et ProRes (Mac),
-//! encodeurs logiciels de FFmpeg sinon.
+//! Encodeurs et filtres disponibles dans le FFmpeg du poste (charte §6.2).
 //!
 //! Un encodeur listé par FFmpeg n'est pas forcément utilisable (pas de carte
 //! NVIDIA, pilote absent, version du système trop ancienne) : chacun est
@@ -98,20 +96,33 @@ pub fn works(args: &[String], audio: bool) -> bool {
     ok
 }
 
-/// Encodeurs matériels ou du système à essayer, du préféré au moins préféré.
-pub fn hardware_candidates(codec: &str) -> &'static [&'static str] {
-    match (codec, std::env::consts::OS) {
-        ("h264", "macos") => &["h264_videotoolbox"],
-        ("h264", "windows") => &["h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"],
-        ("h264", _) => &["h264_nvenc", "h264_qsv"],
-        ("hevc", "macos") => &["hevc_videotoolbox"],
-        ("hevc", "windows") => &["hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_mf"],
-        ("hevc", _) => &["hevc_nvenc", "hevc_qsv"],
-        ("aac", "macos") => &["aac_at"],
-        ("aac", "windows") => &["aac_mf"],
-        ("prores", "macos") => &["prores_videotoolbox"],
-        _ => &[],
-    }
+/// Noms des filtres compilés dans le FFmpeg utilisé.
+pub fn filters() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let out = tools::command("ffmpeg").ok().and_then(|mut c| {
+            c.args(["-hide_banner", "-filters"])
+                .stdin(Stdio::null())
+                .output()
+                .ok()
+        });
+        out.map(|o| parse_filters(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or_default()
+    })
+}
+
+/// Lit la liste de `ffmpeg -filters` : « TSC lut3d  V->V  description »
+/// (deux colonnes de drapeaux seulement depuis FFmpeg 8).
+pub fn parse_filters(text: &str) -> HashSet<String> {
+    text.lines()
+        .filter_map(|line| {
+            let mut it = line.split_whitespace();
+            let (flags, name, io) = (it.next()?, it.next()?, it.next()?);
+            let flags_ok =
+                (2..=3).contains(&flags.len()) && flags.chars().all(|c| "TSC.".contains(c));
+            (flags_ok && io.contains("->")).then(|| name.to_owned())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -125,6 +136,14 @@ mod tests {
         assert!(names.contains("libx264"));
         assert!(names.contains("aac"));
         assert!(!names.contains("="));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn parses_filter_list() {
+        let text = "Filters:\n  T.. = Timeline support\n TSC lut3d             V->V       Adjust colors using a 3D LUT.\n .. ebur128           A->N       EBU R128 scanner.\n";
+        let names = parse_filters(text);
+        assert!(names.contains("lut3d") && names.contains("ebur128"));
         assert_eq!(names.len(), 2);
     }
 }

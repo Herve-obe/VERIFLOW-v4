@@ -8,7 +8,8 @@ use std::process::Stdio;
 
 use serde::Serialize;
 
-use super::preset::{audio_graph, LoudnessTarget};
+use super::filters::audio_graph;
+use super::settings::LoudnessTarget;
 use crate::media::probe::MediaInfo;
 use crate::{tools, Error, Result};
 

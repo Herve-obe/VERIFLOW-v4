@@ -11,9 +11,9 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use veriflow_core::media::catalog::{self, MediaKind};
-use veriflow_core::transcode::preset::{default_kbps, BitDepth};
 use veriflow_core::transcode::{
-    self, execute, Category, Domain, EncoderChoice, Event, Request, Summary, PRESETS,
+    self, execute, AudioMode, BitDepth, Category, Domain, EncoderChoice, Event, Request, Summary,
+    PRESETS,
 };
 
 type CmdResult<T> = Result<T, String>;
@@ -97,47 +97,63 @@ pub struct PresetView {
     category: Category,
     domain: Domain,
     label: &'static str,
+    /// Famille (« video », « audio », « image », « conform »...) : réglages à afficher.
+    kind: &'static str,
     ext: &'static str,
     scale: &'static str,
     suffix: &'static str,
-    /// Le préréglage produit une image (taille réglable).
+    /// Image réencodée : réglages d'image, incrustations, son des vidéos.
     video: bool,
-    /// Le préréglage produit un fichier son (fréquence, normalisation).
+    /// Taille d'image libre (les formats broadcast imposent la leur).
+    scale_free: bool,
+    /// Fichier son produit (fréquence, résolution, normalisation).
     audio: bool,
     video_bitrate: bool,
     encoder_choice: bool,
     bit_depths: Vec<BitDepth>,
     audio_bitrates: Vec<u32>,
     default_audio_bitrate: u32,
+    audio_mode: AudioMode,
     analysis: bool,
+    /// Raison pour laquelle le préréglage est indisponible sur ce poste.
+    unavailable: Option<String>,
 }
 
 #[tauri::command]
-pub fn transcode_presets(lang: String) -> Vec<PresetView> {
+pub async fn transcode_presets(lang: String) -> CmdResult<Vec<PresetView>> {
     let fr = lang != "en";
-    PRESETS
-        .iter()
-        .map(|p| {
-            let (rates, default_rate) = p.audio_bitrates();
-            PresetView {
-                id: p.id,
-                category: p.category,
-                domain: p.domain,
-                label: if fr { p.label_fr } else { p.label_en },
-                ext: p.ext,
-                scale: p.scale,
-                suffix: p.suffix,
-                video: p.is_video(),
-                audio: p.is_audio(),
-                video_bitrate: p.has_video_bitrate(),
-                encoder_choice: p.has_encoder_choice(),
-                bit_depths: p.bit_depths().to_vec(),
-                audio_bitrates: rates.to_vec(),
-                default_audio_bitrate: default_rate,
-                analysis: p.category == Category::Analysis,
-            }
-        })
-        .collect()
+    // Disponibilité : interroge FFmpeg (liste des encodeurs et filtres).
+    tauri::async_runtime::spawn_blocking(move || {
+        PRESETS
+            .iter()
+            .map(|p| {
+                let (rates, default_rate) = p.audio_bitrates();
+                PresetView {
+                    id: p.id,
+                    category: p.category,
+                    domain: p.domain,
+                    label: if fr { p.label_fr } else { p.label_en },
+                    kind: p.kind.id(),
+                    ext: p.ext,
+                    scale: p.scale,
+                    suffix: p.suffix,
+                    video: p.is_video() || p.is_image(),
+                    scale_free: p.has_scale(),
+                    audio: p.is_audio(),
+                    video_bitrate: p.has_video_bitrate(),
+                    encoder_choice: p.has_encoder_choice(),
+                    bit_depths: p.bit_depths().to_vec(),
+                    audio_bitrates: rates.to_vec(),
+                    default_audio_bitrate: default_rate,
+                    audio_mode: p.audio_mode,
+                    analysis: p.category == Category::Analysis,
+                    unavailable: p.unavailable(),
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(text)
 }
 
 /// Encodeur qui sera utilisé pour ce préréglage sur ce poste (essai compris,
@@ -145,16 +161,21 @@ pub fn transcode_presets(lang: String) -> Vec<PresetView> {
 #[tauri::command]
 pub async fn transcode_encoder(preset: String, software: bool) -> CmdResult<Option<EncoderChoice>> {
     tauri::async_runtime::spawn_blocking(move || {
-        transcode::find(&preset).and_then(|p| transcode::preset::video_encoder(p, software))
+        transcode::find(&preset).and_then(|p| transcode::video::video_encoder(p, software))
     })
     .await
     .map_err(text)
 }
 
-/// Débit vidéo automatique (Mbit/s) pour une hauteur d'image.
+/// Préréglage personnel : enregistré dans un fichier choisi (partage).
 #[tauri::command]
-pub fn transcode_default_mbps(height: u32, hevc: bool) -> f64 {
-    default_kbps(height, hevc) as f64 / 1000.0
+pub fn transcode_preset_write(path: PathBuf, content: String) -> CmdResult<()> {
+    std::fs::write(path, content).map_err(text)
+}
+
+#[tauri::command]
+pub fn transcode_preset_read(path: PathBuf) -> CmdResult<String> {
+    std::fs::read_to_string(path).map_err(text)
 }
 
 /// Fichiers vidéo et son contenus dans les chemins donnés (dossiers parcourus).

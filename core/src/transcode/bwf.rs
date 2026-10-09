@@ -66,17 +66,39 @@ fn tag_value(xml: &str, tag: &str) -> Option<String> {
     Some(xml[start..start + end].trim().to_owned())
 }
 
-/// Met à jour l'iXML pour la fréquence et la résolution du fichier produit.
-pub fn update_ixml(xml: &str, old_rate: u32, new_rate: u32, bits: u16) -> String {
+/// Changement de fréquence et décalage du début (fichier découpé).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Retime {
+    pub old_rate: u32,
+    pub new_rate: u32,
+    /// Secondes retirées au début du fichier.
+    pub shift: f64,
+}
+
+impl Retime {
+    fn changes(&self) -> bool {
+        self.old_rate != self.new_rate || self.shift > 0.0
+    }
+
+    /// Position (échantillons depuis minuit) dans le fichier produit.
+    fn apply(&self, samples: u64) -> u64 {
+        rescale(samples, self.old_rate, self.new_rate)
+            + (self.shift.max(0.0) * self.new_rate as f64).round() as u64
+    }
+}
+
+/// Met à jour l'iXML pour la fréquence, la résolution et le début du fichier produit.
+pub fn update_ixml(xml: &str, t: &Retime, bits: u16) -> String {
+    let new_rate = t.new_rate;
     let mut x = set_tag(xml, "FILE_SAMPLE_RATE", &new_rate.to_string());
     x = set_tag(&x, "AUDIO_BIT_DEPTH", &bits.to_string());
-    if old_rate != new_rate {
+    if t.changes() {
         let hi = tag_value(&x, "TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI")
             .and_then(|v| v.parse::<u64>().ok());
         let lo = tag_value(&x, "TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO")
             .and_then(|v| v.parse::<u64>().ok());
         if let (Some(hi), Some(lo)) = (hi, lo) {
-            let samples = rescale((hi << 32) | lo, old_rate, new_rate);
+            let samples = t.apply((hi << 32) | lo);
             x = set_tag(
                 &x,
                 "TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI",
@@ -101,13 +123,13 @@ fn rescale(samples: u64, old_rate: u32, new_rate: u32) -> u64 {
 }
 
 /// Recalcule la référence temporelle d'un bloc `bext` (octets 338 à 345).
-pub fn update_bext(bext: &mut [u8], old_rate: u32, new_rate: u32) {
-    if bext.len() < 346 || old_rate == new_rate {
+pub fn update_bext(bext: &mut [u8], t: &Retime) {
+    if bext.len() < 346 || !t.changes() {
         return;
     }
     let lo = u32::from_le_bytes(bext[338..342].try_into().unwrap()) as u64;
     let hi = u32::from_le_bytes(bext[342..346].try_into().unwrap()) as u64;
-    let samples = rescale((hi << 32) | lo, old_rate, new_rate);
+    let samples = t.apply((hi << 32) | lo);
     bext[338..342].copy_from_slice(&(samples as u32).to_le_bytes());
     bext[342..346].copy_from_slice(&((samples >> 32) as u32).to_le_bytes());
 }
@@ -124,13 +146,7 @@ fn write_chunk(out: &mut impl Write, id: &[u8], body: &[u8]) -> Result<u64> {
 
 /// Recopie `bext` et `iXML` de `source` dans `output` (WAV RIFF produit).
 /// Renvoie faux si rien n'a été fait (source sans ces blocs, fichier RF64).
-pub fn carry(
-    source: &Path,
-    output: &Path,
-    old_rate: u32,
-    new_rate: u32,
-    bits: u16,
-) -> Result<bool> {
+pub fn carry(source: &Path, output: &Path, t: &Retime, bits: u16) -> Result<bool> {
     let mut src = fs::File::open(source)?;
     let Some(src_chunks) = chunks(&mut src)? else {
         return Ok(false);
@@ -146,7 +162,7 @@ pub fn carry(
             let text = String::from_utf8_lossy(&raw)
                 .trim_end_matches('\0')
                 .to_owned();
-            Some(update_ixml(&text, old_rate, new_rate, bits))
+            Some(update_ixml(&text, t, bits))
         }
         None => None,
     };
@@ -154,7 +170,7 @@ pub fn carry(
         return Ok(false);
     }
     if let Some(b) = bext.as_mut() {
-        update_bext(b, old_rate, new_rate);
+        update_bext(b, t);
     }
     let mut out_file = fs::File::open(output)?;
     let Some(out_chunks) = chunks(&mut out_file)? else {
@@ -221,7 +237,15 @@ mod tests {
     #[test]
     fn ixml_timestamp_follows_new_rate() {
         let xml = "<BWFXML><SPEED><FILE_SAMPLE_RATE>48000</FILE_SAMPLE_RATE><AUDIO_BIT_DEPTH>24</AUDIO_BIT_DEPTH><TIMESTAMP_SAMPLE_RATE>48000</TIMESTAMP_SAMPLE_RATE><TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI>0</TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI><TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO>1728000000</TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO></SPEED><SCENE>12A</SCENE></BWFXML>";
-        let x = update_ixml(xml, 48_000, 96_000, 16);
+        let x = update_ixml(
+            xml,
+            &Retime {
+                old_rate: 48_000,
+                new_rate: 96_000,
+                shift: 0.0,
+            },
+            16,
+        );
         assert_eq!(tag_value(&x, "FILE_SAMPLE_RATE").as_deref(), Some("96000"));
         assert_eq!(tag_value(&x, "AUDIO_BIT_DEPTH").as_deref(), Some("16"));
         assert_eq!(
@@ -246,9 +270,17 @@ mod tests {
         let samples: u64 = 5_000_000_000; // au-delà de 32 bits
         bext[338..342].copy_from_slice(&(samples as u32).to_le_bytes());
         bext[342..346].copy_from_slice(&((samples >> 32) as u32).to_le_bytes());
-        update_bext(&mut bext, 48_000, 44_100);
+        update_bext(
+            &mut bext,
+            &Retime {
+                old_rate: 48_000,
+                new_rate: 44_100,
+                shift: 2.0,
+            },
+        );
         let lo = u32::from_le_bytes(bext[338..342].try_into().unwrap()) as u64;
         let hi = u32::from_le_bytes(bext[342..346].try_into().unwrap()) as u64;
-        assert_eq!((hi << 32) | lo, 4_593_750_000);
+        // 5e9 × 44 100 / 48 000 = 4 593 750 000, plus 2 s à 44,1 kHz.
+        assert_eq!((hi << 32) | lo, 4_593_750_000 + 88_200);
     }
 }
