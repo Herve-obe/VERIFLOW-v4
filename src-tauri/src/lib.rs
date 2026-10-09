@@ -9,6 +9,7 @@ mod macos;
 mod media;
 mod offload;
 mod player;
+mod report;
 
 use std::sync::Mutex;
 
@@ -84,6 +85,16 @@ pub fn run() {
             logs::marker_save,
             logs::marker_delete,
             logs::logs_export,
+            report::report_list,
+            report::report_get,
+            report::report_create,
+            report::report_save,
+            report::report_delete,
+            report::report_schema,
+            report::report_add_media,
+            report::report_branding_get,
+            report::report_branding_set,
+            report::report_export,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de VERIFLOW");

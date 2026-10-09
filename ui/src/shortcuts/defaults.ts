@@ -38,7 +38,8 @@ export type PlayerAction =
   | "step.forward"
   | "mark.in"
   | "mark.out"
-  | "mark.add";
+  | "mark.add"
+  | "report.edit";
 
 export const PLAYER_SHORTCUTS: Record<PlayerAction, Shortcut> = {
   "play.toggle": { key: " " },
@@ -51,4 +52,5 @@ export const PLAYER_SHORTCUTS: Record<PlayerAction, Shortcut> = {
   "mark.in": { key: "i" },
   "mark.out": { key: "o" },
   "mark.add": { key: "m" },
+  "report.edit": { key: "r" }, // fenêtre de saisie du rapport (charte §7.3)
 };

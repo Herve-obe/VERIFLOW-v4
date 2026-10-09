@@ -2,7 +2,8 @@
      vérification bit à bit, ASC MHL et rapports (charte §7.1). -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { open, confirm } from "@tauri-apps/plugin-dialog";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { ask } from "../../stores/confirm.svelte";
   import JobCard from "./JobCard.svelte";
   import ExistingDialog from "./ExistingDialog.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
@@ -208,7 +209,10 @@
     if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
     pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
     if (warnings.length > 0) {
-      const go = await confirm(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, { title: t("offload.warn.title"), kind: "warning" });
+      const go = await ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
+        title: t("offload.warn.title"),
+        ok: t("dialog.continue"),
+      });
       if (!go) return;
     }
     await launchWith({ ...request(), date: pre.date }, "verify", null);

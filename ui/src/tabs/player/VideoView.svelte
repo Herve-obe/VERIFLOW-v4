@@ -4,6 +4,7 @@
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
+  import ReportPopup from "./ReportPopup.svelte";
   import SoundTracks from "./SoundTracks.svelte";
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
@@ -57,6 +58,8 @@
   let canvas = $state<HTMLCanvasElement | null>(null);
   let markers = $state<Marker[]>([]);
   let panel = $state<{ add: () => Promise<void> } | null>(null);
+  // Saisie du rapport (touche R).
+  let reportOpen = $state(false);
   let lut = $state<string | null>(null);
   let tcOverlay = $state(readPref(PREF_TC) === "1");
 
@@ -484,6 +487,7 @@
       case "mark.in": if (logs) markIn = shown; break;
       case "mark.out": if (logs) markOut = shown; break;
       case "mark.add": if (logs) panel?.add(); break;
+      case "report.edit": if (logs && clipPath) reportOpen = true; break;
     }
   }
 
@@ -515,6 +519,10 @@
 </script>
 
 <svelte:window onkeydown={onKeydown} />
+
+{#if reportOpen && clipPath}
+  <ReportPopup kind="image" path={clipPath} onClose={() => (reportOpen = false)} />
+{/if}
 
 {#if !clip}
   <div class="empty">
@@ -615,6 +623,7 @@
   {#if logs}
     <MarkersPanel
       bind:this={panel}
+      onReport={() => (reportOpen = true)}
       path={clipPath}
       frame={shown}
       {tc}
