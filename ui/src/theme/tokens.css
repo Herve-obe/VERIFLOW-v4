@@ -28,6 +28,7 @@
   --vf-success: #2ecc71;
   --vf-warning: #f5a623;
   --vf-error: #ff4d4f;
+  --vf-on-error: #0f1115;
 
   /* Vumètres (zones en dBFS : vert < -18, jaune -18 à -6, rouge > -6) */
   --vf-meter-bg: #0b0d10;

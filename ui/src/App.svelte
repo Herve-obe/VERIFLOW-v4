@@ -4,6 +4,7 @@
   import TopBar from "./layout/TopBar.svelte";
   import StatusBar from "./layout/StatusBar.svelte";
   import DragGhost from "./components/DragGhost.svelte";
+  import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import OffloadTab from "./tabs/offload/OffloadTab.svelte";
   import MediaTab from "./tabs/media/MediaTab.svelte";
   import PlayerTab from "./tabs/player/PlayerTab.svelte";
@@ -53,6 +54,7 @@
   <StatusBar {version} />
 </div>
 <DragGhost />
+<ConfirmDialog />
 
 <style>
   .shell {

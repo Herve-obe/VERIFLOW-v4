@@ -4,7 +4,7 @@
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
   import { cancel, reveal, type DestStatus } from "../../lib/offload";
-  import { confirm } from "@tauri-apps/plugin-dialog";
+  import { ask } from "../../stores/confirm.svelte";
   import { offload, interrupted, removeJob, type Job } from "../../stores/offload.svelte";
 
   let { job }: { job: Job } = $props();
@@ -32,9 +32,10 @@
   /** Retire la fiche après confirmation ; une copie en cours est d'abord annulée. */
   async function remove() {
     const active = job.state === "queued" || job.state === "running";
-    const ok = await confirm(t(active ? "offload.remove.active" : "offload.remove.done"), {
+    const ok = await ask(t(active ? "offload.remove.active" : "offload.remove.done"), {
       title: t("offload.remove.title"),
-      kind: "warning",
+      ok: t(active ? "offload.remove.do.active" : "offload.remove.do"),
+      kind: active ? "danger" : "warning",
     });
     if (!ok) return;
     if (active) await cancel(job.id).catch(() => {});
