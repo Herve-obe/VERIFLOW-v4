@@ -9,7 +9,7 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { explorer } from "../../stores/explorer.svelte";
   import { watch, norm } from "../../lib/explorer";
-  import { app, openInPlayer, addToReport } from "../../stores/app.svelte";
+  import { app, openInPlayer, addToReport, sendToTranscode } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
   import { isTyping } from "../../shortcuts";
@@ -238,6 +238,14 @@
       title={t("media.add.report.hint")}
     >
       {t("media.add.report")}
+    </button>
+    <button
+      class="toplayer"
+      disabled={selection.length === 0}
+      onclick={() => sendToTranscode(selection.map((m) => m.path))}
+      title={t("media.to.transcode.hint")}
+    >
+      {t("media.to.transcode")}
     </button>
     <span class="path mono" title={dir}>{dir || t("media.none")}</span>
     <label class="check"><input type="checkbox" bind:checked={recursive} onchange={() => dir && load(dir)} /> {t("media.recursive")}</label>
