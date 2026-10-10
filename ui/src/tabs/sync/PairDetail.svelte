@@ -111,7 +111,9 @@
     at = -1;
   }
 
-  const ms = (s: number) => `${s >= 0 ? "+" : ""}${(s * 1000).toFixed(1).replace(".", ",")} ms`;
+  // Au-delà d'une seconde : en secondes, à 0,1 ms près.
+  const ms = (s: number) =>
+    `${s >= 0 ? "+" : ""}${Math.abs(s) >= 1 ? `${s.toFixed(4).replace(".", ",")} s` : `${(s * 1000).toFixed(1).replace(".", ",")} ms`}`;
   const frames = (s: number) => `${s >= 0 ? "+" : ""}${(s / frame).toFixed(2).replace(".", ",")}`;
 </script>
 

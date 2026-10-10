@@ -220,6 +220,8 @@ pub fn to_fcpxml(title: &str, items: &[Item]) -> String {
         .map(|i| rate_of(i.video))
         .unwrap_or(FrameRate::new(25, 1));
     let mut rec: i64 = 0;
+    // Un même son peut servir à plusieurs plans : une seule ressource par fichier.
+    let mut sounds: Vec<&std::path::Path> = Vec::new();
     for (i, it) in items.iter().enumerate() {
         let v = it.video;
         let r = rate_of(v);
@@ -247,14 +249,22 @@ pub fn to_fcpxml(title: &str, items: &[Item]) -> String {
             let sr = a.sample_rate.max(1);
             let a_start = samples(a.start.unwrap_or(0.0), sr);
             let a_dur = samples(a.duration, sr);
-            res += &format!(
-                "    <asset id=\"a{i}\" name=\"{}\" start=\"{}\" duration=\"{}\" hasAudio=\"1\" audioSources=\"1\" audioChannels=\"{}\" audioRate=\"{sr}\">\n      <media-rep kind=\"original-media\" src=\"{}\"/>\n    </asset>\n",
+            let k = match sounds.iter().position(|p| *p == a.path.as_path()) {
+                Some(k) => k,
+                None => {
+                    sounds.push(&a.path);
+                    let k = sounds.len() - 1;
+                    res += &format!(
+                "    <asset id=\"a{k}\" name=\"{}\" start=\"{}\" duration=\"{}\" hasAudio=\"1\" audioSources=\"1\" audioChannels=\"{}\" audioRate=\"{sr}\">\n      <media-rep kind=\"original-media\" src=\"{}\"/>\n    </asset>\n",
                 xml_esc(&a.name),
                 sample_time(a_start, sr),
                 sample_time(a_dur.max(1), sr),
                 a.channels.max(1),
                 xml_esc(&file_url(&a.path.to_string_lossy())),
-            );
+                    );
+                    k
+                }
+            };
             // Position dans le plan vidéo et point d'entrée dans le son.
             let lead = offset.max(0.0);
             let skip = (-offset).max(0.0);
@@ -262,7 +272,7 @@ pub fn to_fcpxml(title: &str, items: &[Item]) -> String {
             if dur > 0.0 {
                 let parent = v.start.unwrap_or(0.0) + lead;
                 spine += &format!(
-                    "              <asset-clip ref=\"a{i}\" lane=\"-1\" offset=\"{}\" name=\"{}\" start=\"{}\" duration=\"{}\"/>\n",
+                    "              <asset-clip ref=\"a{k}\" lane=\"-1\" offset=\"{}\" name=\"{}\" start=\"{}\" duration=\"{}\"/>\n",
                     sample_time(samples(parent, sr), sr),
                     xml_esc(&a.name),
                     sample_time(a_start + samples(skip, sr), sr),

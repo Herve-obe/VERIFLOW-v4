@@ -262,7 +262,7 @@
                       <td class="num mono">{row ? offsetText(row.p) : ""}</td>
                       <td class="num">{row ? conf(row.p) : ""}</td>
                       <td class="num" class:warn={row && Math.abs(row.p.drift_frames ?? 0) >= 1}>{row && row.p.drift_frames !== null ? row.p.drift_frames.toFixed(1).replace(".", ",") : ""}</td>
-                      <td class="note">{row?.p.note ?? ""}</td>
+                      <td class="note" title={row?.p.note ?? ""}><span>{row?.p.note ?? ""}</span></td>
                     </tr>
                   {/each}
                 {/each}
@@ -278,7 +278,7 @@
                     <td class="num mono">{offsetText(p)}</td>
                     <td class="num" class:warn={p.confidence !== null && p.confidence < 0.25}>{conf(p)}</td>
                     <td class="num" class:warn={Math.abs(p.drift_frames ?? 0) >= 1}>{p.drift_frames !== null ? p.drift_frames.toFixed(1).replace(".", ",") : ""}</td>
-                    <td class="note" title={p.note ?? ""}>{p.note ?? ""}</td>
+                    <td class="note" title={p.note ?? ""}><span>{p.note ?? ""}</span></td>
                   </tr>
                 {/each}
               {/if}
@@ -443,6 +443,8 @@
     cursor: pointer;
   }
   .table {
+    flex-shrink: 0;
+    min-height: 120px;
     max-height: 320px;
     overflow: auto;
     border: 1px solid var(--vf-border);
@@ -491,11 +493,15 @@
     text-align: right;
   }
   .note {
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    width: 100%;
     color: var(--vf-text-muted);
     font-size: var(--vf-text-xs);
+  }
+  .note span {
+    display: block;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .warn {
     color: var(--vf-warning);
