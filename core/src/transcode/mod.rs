@@ -257,7 +257,7 @@ fn is_wav(path: &Path) -> bool {
 }
 
 /// Exécute un plan vers `output` (fichier, ou dossier pour une séquence d'images).
-fn write_output(
+pub(crate) fn write_output(
     plan: &Plan,
     source: &Path,
     output: &Path,
