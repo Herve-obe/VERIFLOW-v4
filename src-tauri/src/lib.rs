@@ -10,6 +10,7 @@ mod media;
 mod offload;
 mod player;
 mod report;
+mod sync;
 mod transcode;
 
 use std::sync::Mutex;
@@ -29,6 +30,7 @@ pub fn run() {
         .manage(AppState::default())
         .manage(player::PlayerState::default())
         .manage(media::MediaState::default())
+        .manage(sync::SyncState::default())
         .setup(|app| {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
@@ -97,6 +99,13 @@ pub fn run() {
             report::report_branding_get,
             report::report_branding_set,
             report::report_export,
+            sync::sync_expand,
+            sync::sync_analyze,
+            sync::sync_cancel,
+            sync::sync_refine,
+            sync::sync_waveforms,
+            sync::sync_rewrap,
+            sync::sync_timeline,
             transcode::transcode_presets,
             transcode::transcode_encoder,
             transcode::transcode_preset_write,
