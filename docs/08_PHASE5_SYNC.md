@@ -13,7 +13,15 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 | LTC | Cherché sur chaque canal pendant les 4 premières secondes quand le fichier n'a pas de timecode. Le canal LTC est ensuite exclu de la corrélation et du re-wrap. Cadences NTSC : heure corrigée de 1,001 |
 | Aucune | Le plan peut être trouvé par la forme d'onde (option « Chercher par la forme d'onde ») |
 
-### Appariement
+### Méthode (menu, décision d'Hervé du 10/10/2026)
+
+| Méthode | Fonctionnement | Usage |
+|---|---|---|
+| Automatique | Timecode ou LTC d'abord, puis affinage et recherche par la forme d'onde selon les cases | Cas général |
+| Timecode seul | Calage par le timecode ou le LTC uniquement, sans corrélation (la dérive peut quand même être mesurée) | Tournage avec timecode fiable (jam sync) |
+| Forme d'onde seule | L'heure des fichiers est ignorée : chaque plan est cherché dans tous les sons du lot | Timecode absent ou faux (jam sync oublié, horloge décalée) |
+
+### Appariement (méthode automatique)
 
 1. **Par l'heure** : chaque plan est associé au son dont la plage horaire le recouvre le plus (passage de minuit compris).
 2. **Affinage par la forme d'onde** (option) : corrélation GCC-PHAT du son témoin de la caméra et du son de l'enregistreur, sur 10 s au milieu du passage commun, autour du décalage donné par le timecode (tolérance réglable, 2 s par défaut). Précision : l'échantillon à 16 kHz, soit environ 0,06 ms. Si le timecode était faux, la remarque l'indique (« timecode corrigé de … »).
@@ -32,7 +40,7 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 
 | Export | Détail |
 |---|---|
-| Re-wrap | Nouveau fichier MOV ou MXF : image copiée sans réencodage, son de l'enregistreur calé (PCM 24 bits, une piste mono par canal en MXF), son caméra conservé en pistes supplémentaires (option), noms de pistes, timecode d'origine. À côté de chaque vidéo ou dans un dossier, suffixe `_sync` par défaut, jamais d'écrasement de l'original |
+| Re-wrap | Nouveau fichier MOV ou MXF : image copiée sans réencodage, son de l'enregistreur calé (PCM 24 bits ; en MXF une piste mono par canal ; en MOV une piste polyphonique, ou une piste mono par canal avec l'option « Une piste mono par canal »), son caméra conservé en pistes supplémentaires (option), noms de pistes, timecode d'origine. À côté de chaque vidéo ou dans un dossier, suffixe `_sync` par défaut, jamais d'écrasement de l'original |
 | FCPXML 1.10 | Final Cut Pro et DaVinci Resolve : chaque plan avec son son attaché, calé à l'échantillon ; une seule ressource par fichier son |
 | OTIO | DaVinci Resolve, Premiere (via plugin), Avid : pistes V1 et A1 |
 
@@ -48,12 +56,14 @@ La case « Paires validées seulement » limite l'export aux paires cochées (d�
 ## Vérifications réalisées
 
 ### Tests automatiques (cœur)
-7 tests SYNC passent avec FFmpeg 9.0.2, 6.1 et 4.4 (celui de la CI) :
+9 tests SYNC passent avec FFmpeg 9.0.2, 6.1 et 4.4 (celui de la CI) :
 - timecode BWF faux de 0,3 s corrigé par la forme d'onde ;
 - plan sans timecode trouvé par la forme d'onde (−12,5 s) ;
 - LTC 14:30:00:00 lu sur le canal 1 ;
 - dérive de 600 ppm détectée (environ −1,35 image, signe juste) ;
 - re-wrap MOV et MXF : pistes, durée, timecode ;
+- méthodes : « timecode seul » garde le son à la même heure sans affinage, « forme d'onde seule » trouve le vrai son malgré un leurre à la même heure ;
+- MOV avec une piste mono par canal : enregistreur stéréo en 2 pistes mono, plus le son caméra ;
 - FCPXML et OTIO : temps attendus.
 
 ### Essai dans l'application (Linux, Xvfb)
@@ -62,6 +72,11 @@ Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF cou
 - A001C002 : trouvé par la forme d'onde à −50,000 s, confiance 98 % ;
 - re-wrap MOV des deux plans : décalage résiduel mesuré entre la piste de l'enregistreur et la piste caméra des fichiers produits : 0 échantillon ;
 - FCPXML : son attaché à 36 000,3 s dans le BWF pour le premier plan, soit 10 s après son début (valeur attendue).
+
+Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même heure, le vrai son (stéréo) daté de 08:00:00 :
+- méthode Automatique : leurre choisi, confiance 11 % signalée en orange, remarque « forme d'onde peu ressemblante » ;
+- méthode Forme d'onde seule : vrai son trouvé, −10,000 s, confiance 99 % ;
+- re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
 ## Limites connues
 - Correction de la dérive : V2 (charte). V1 : mesure et alerte.
@@ -72,9 +87,9 @@ Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF cou
 
 ## À tester sur poste réel
 1. Rushes réels d'une même journée (caméra avec timecode) et WAV d'un enregistreur (Sound Devices, Zoom, Zaxcom) : appariement par lot, décalages, confiance.
-2. Caméra sans timecode (reflex, smartphone) avec son témoin : recherche par la forme d'onde.
+2. Caméra sans timecode (reflex, smartphone) avec son témoin : recherche par la forme d'onde, puis méthode « Forme d'onde seule » sur un lot au timecode faux.
 3. LTC enregistré sur une piste caméra (Tentacle Sync, Deity TC-1) : badge LTC, canal exclu des fichiers produits.
 4. Rushes en 23,976 et 29,97 DF : timecodes affichés et décalages.
-5. Re-wrap MOV et MXF : import dans DaVinci Resolve, Premiere et Avid ; pistes nommées, timecode, son caméra en plus.
+5. Re-wrap MOV (polyphonique et une piste mono par canal) et MXF : import dans DaVinci Resolve, Premiere et Avid ; pistes nommées, timecode, son caméra en plus.
 6. FCPXML dans Final Cut Pro et Resolve, OTIO dans Resolve : son attaché et calé.
 7. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute.
