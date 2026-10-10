@@ -482,8 +482,8 @@ pub fn analyze(
                         && pair.method != Method::Waveform
                     {
                         pair.note = Some(format!(
-                            "timecode corrigé de {:+.3} s par la forme d'onde",
-                            moved
+                            "timecode corrigé de {} s par la forme d'onde",
+                            format!("{moved:+.3}").replace('.', ",")
                         ));
                     }
                 }

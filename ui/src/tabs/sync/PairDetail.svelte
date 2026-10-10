@@ -133,7 +133,7 @@
     <div class="offset">
       <span class="mono big">{ms(pair.offset)}</span>
       <span class="muted">({frames(pair.offset)} {t("sync.frames")})</span>
-      <span class="muted">{t("sync.sound.starts")} {video.start !== null ? timecodeAt(video.start + pair.offset, video.rate) : ""}</span>
+      <span class="muted">{t("sync.sound.starts")} {video.start !== null ? timecodeAt(video.start + pair.offset, video.rate, video.timecode?.includes(";")) : ""}</span>
     </div>
     <div class="nudges">
       <button class="tc-btn" onclick={() => nudge(-frame)} title={t("sync.nudge.frame")}>−1 {t("sync.frame")}</button>

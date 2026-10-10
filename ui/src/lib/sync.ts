@@ -1,6 +1,7 @@
 // Accès aux commandes SYNC (voir src-tauri/src/sync.rs).
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { framesToTc, supportsDropFrame } from "./timecode";
 
 export interface FrameRate {
   num: number;
@@ -96,14 +97,10 @@ export interface Waves {
 export const fps = (r: FrameRate | null) => (r ? r.num / r.den : 25);
 
 /** Timecode d'une heure (secondes depuis minuit) à la cadence donnée. */
-export function timecodeAt(seconds: number, rate: FrameRate | null): string {
-  const f = fps(rate);
-  const nominal = Math.round(f);
-  const total = Math.round((((seconds % 86400) + 86400) % 86400) * f);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const fr = total % nominal;
-  const s = Math.floor(total / nominal);
-  return `${pad(Math.floor(s / 3600) % 24)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}:${pad(fr)}`;
+export function timecodeAt(seconds: number, rate: FrameRate | null, drop = false): string {
+  const r = rate ?? { num: 25, den: 1 };
+  const frames = Math.round((((seconds % 86400) + 86400) % 86400) * fps(r));
+  return framesToTc(frames, r, drop && supportsDropFrame(r));
 }
 
 export const expand = (paths: string[]) => invoke<{ videos: string[]; audios: string[] }>("sync_expand", { paths });
