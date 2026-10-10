@@ -353,3 +353,114 @@ fn rewrap_and_timelines() {
         36_000.0 * 48_000.0
     );
 }
+
+fn analyze_with(videos: Vec<PathBuf>, audios: Vec<PathBuf>, opts: Options) -> Analysis {
+    analyze(&videos, &audios, opts, &AtomicBool::new(false), |_| {}).unwrap()
+}
+
+#[test]
+fn modes_timecode_only_and_waveform_only() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let room = room(dir.path(), 40);
+    let v = camera(
+        dir.path(),
+        &room,
+        "A001C003.mov",
+        10.0,
+        20.0,
+        Some("10:00:00:00"),
+    );
+    // Leurre à la même heure que la caméra (jam sync oublié) ; le vrai son
+    // porte une heure sans rapport.
+    let decoy = dir.path().join("LEURRE.WAV");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "anoisesrc=d=40:c=pink:r=48000:a=0.4:seed=3",
+        "-write_bext",
+        "1",
+        "-metadata",
+        &format!("time_reference={}", (35_990.0 * 48_000.0) as u64),
+        decoy.to_str().unwrap(),
+    ]);
+    let real = recorder(dir.path(), &room, "VRAI.WAV", 8.0 * 3600.0, "anull");
+    let files = || (vec![v.clone()], vec![decoy.clone(), real.clone()]);
+
+    // Timecode seul : le leurre, décalage du timecode, sans affinage.
+    let (vs, as_) = files();
+    let opts = Options {
+        mode: Mode::Timecode,
+        ..Default::default()
+    };
+    let p = analyze_with(vs, as_, opts).pairs[0].clone();
+    assert_eq!(p.audio, Some(0));
+    assert!(!p.refined);
+    assert!((p.offset + 10.0).abs() < 1e-6, "décalage {}", p.offset);
+
+    // Forme d'onde seule : le vrai son, malgré l'heure.
+    let (vs, as_) = files();
+    let opts = Options {
+        mode: Mode::Waveform,
+        ..Default::default()
+    };
+    let p = analyze_with(vs, as_, opts).pairs[0].clone();
+    assert_eq!(p.audio, Some(1));
+    assert_eq!(p.method, Method::Waveform);
+    assert!((p.offset + 10.0).abs() < 0.001, "décalage {}", p.offset);
+}
+
+#[test]
+fn mov_with_one_mono_track_per_channel() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let room = room(dir.path(), 30);
+    let v = camera(
+        dir.path(),
+        &room,
+        "A001C004.mov",
+        5.0,
+        8.0,
+        Some("10:00:00:00"),
+    );
+    let a = recorder(
+        dir.path(),
+        &room,
+        "SON2.WAV",
+        35_995.0,
+        "pan=stereo|c0=c0|c1=0.5*c0",
+    );
+    let r = analyze_one(vec![v], vec![a]);
+    let p = &r.pairs[0];
+    let mut taken = std::collections::HashSet::new();
+    for (mono, tracks) in [(false, 2), (true, 3)] {
+        let opts = export::RewrapOptions {
+            dest: Some(dir.path().join(format!("sync{mono}"))),
+            mono_tracks: mono,
+            ..Default::default()
+        };
+        let out = export::rewrap(
+            &r.videos[0],
+            &r.audios[0],
+            p.offset,
+            &opts,
+            &mut taken,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert!(out.to_string_lossy().ends_with(".mov"));
+        let info = probe(&out).unwrap();
+        assert_eq!(info.audio.len(), tracks, "pistes mono : {mono}");
+        if mono {
+            assert!(info.audio[..2].iter().all(|t| t.channels == 1));
+        } else {
+            assert_eq!(info.audio[0].channels, 2);
+        }
+    }
+}

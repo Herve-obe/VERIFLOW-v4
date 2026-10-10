@@ -48,7 +48,10 @@ export interface Analysis {
   pairs: Pair[];
 }
 
+export type Mode = "auto" | "timecode" | "waveform";
+
 export interface Options {
+  mode: Mode;
   refine: boolean;
   waveform_search: boolean;
   drift: boolean;
@@ -59,6 +62,7 @@ export interface RewrapOptions {
   dest: string | null;
   format: "mov" | "mxf";
   keep_camera_audio: boolean;
+  mono_tracks: boolean;
   suffix: string;
   existing: "rename" | "overwrite" | "skip";
 }

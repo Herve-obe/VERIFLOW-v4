@@ -33,8 +33,8 @@
   const KEY = "veriflow.sync.settings";
   function load() {
     const d = {
-      options: { refine: true, waveform_search: true, drift: true, window: 2 } as Options,
-      rewrap: { dest: null, format: "mov", keep_camera_audio: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
+      options: { mode: "auto", refine: true, waveform_search: true, drift: true, window: 2 } as Options,
+      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: false, suffix: "_sync", existing: "rename" } as RewrapOptions,
       validatedOnly: false,
       nextToVideo: true,
     };
@@ -213,16 +213,29 @@
 
       <div class="block options">
         <h3>{t("sync.analysis")}</h3>
-        <label class="tc-check"><input type="checkbox" bind:checked={cfg.options.refine} /> {t("sync.opt.refine")}</label>
-        <label class="tc-check"><input type="checkbox" bind:checked={cfg.options.waveform_search} /> {t("sync.opt.search")}</label>
+        <label class="tc-field">
+          {t("sync.opt.mode")}
+          <select bind:value={cfg.options.mode}>
+            <option value="auto">{t("sync.mode.auto")}</option>
+            <option value="timecode">{t("sync.mode.timecode")}</option>
+            <option value="waveform">{t("sync.mode.waveform")}</option>
+          </select>
+        </label>
+        <p class="tc-hint">{t(`sync.mode.${cfg.options.mode}.hint`)}</p>
+        {#if cfg.options.mode === "auto"}
+          <label class="tc-check"><input type="checkbox" bind:checked={cfg.options.refine} /> {t("sync.opt.refine")}</label>
+          <label class="tc-check"><input type="checkbox" bind:checked={cfg.options.waveform_search} /> {t("sync.opt.search")}</label>
+        {/if}
         <label class="tc-check"><input type="checkbox" bind:checked={cfg.options.drift} /> {t("sync.opt.drift")}</label>
-        <label class="tc-field">{t("sync.opt.window")}<input type="number" min="0.1" max="30" step="0.5" bind:value={cfg.options.window} /></label>
+        {#if cfg.options.mode !== "waveform"}
+          <label class="tc-field">{t("sync.opt.window")}<input type="number" min="0.1" max="30" step="0.5" bind:value={cfg.options.window} /></label>
+        {/if}
         {#if running}
           <ProgressBar value={fraction} />
           <p class="muted small ellipsis">{step}</p>
           <button class="tc-btn" onclick={() => cancel()}>{t("transcode.cancel")}</button>
         {:else}
-          <button class="start" disabled={!sync.videos.length || (!sync.audios.length && !cfg.options.waveform_search)} onclick={run}>{t("sync.run")}</button>
+          <button class="start" disabled={!sync.videos.length || !sync.audios.length} onclick={run}>{t("sync.run")}</button>
         {/if}
         {#if error}<p class="error small">{error}</p>{/if}
       </div>
@@ -317,6 +330,9 @@
               </select>
             </label>
             <label class="tc-field">{t("transcode.suffix")}<input class="mono" bind:value={cfg.rewrap.suffix} /></label>
+            {#if cfg.rewrap.format === "mov"}
+              <label class="tc-check tc-wide"><input type="checkbox" bind:checked={cfg.rewrap.mono_tracks} /> {t("sync.mono.tracks")}</label>
+            {/if}
             <label class="tc-check tc-wide"><input type="checkbox" bind:checked={cfg.rewrap.keep_camera_audio} /> {t("sync.keep.camera")}</label>
           </div>
           {#if exporting}

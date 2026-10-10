@@ -36,6 +36,8 @@ pub struct RewrapOptions {
     pub format: String,
     /// Garder le son témoin de la caméra après les pistes de l'enregistreur.
     pub keep_camera_audio: bool,
+    /// En MOV aussi, une piste mono par canal (toujours le cas en MXF).
+    pub mono_tracks: bool,
     pub suffix: String,
     pub existing: Existing,
 }
@@ -46,6 +48,7 @@ impl Default for RewrapOptions {
             dest: None,
             format: s("mov"),
             keep_camera_audio: true,
+            mono_tracks: false,
             suffix: s("_sync"),
             existing: Existing::Rename,
         }
@@ -102,7 +105,7 @@ pub fn rewrap(
         s("copy"),
     ];
     let mut names: Vec<String> = Vec::new();
-    if format == "mxf" {
+    if format == "mxf" || opts.mono_tracks {
         let (graph, outs) = mono_tracks(
             1,
             &ainfo,

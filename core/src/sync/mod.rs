@@ -97,9 +97,24 @@ pub struct Pair {
     pub note: Option<String>,
 }
 
+/// Méthode d'appariement choisie pour le lot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Timecode ou LTC d'abord, forme d'onde selon les options.
+    #[default]
+    Auto,
+    /// Timecode ou LTC seulement, sans corrélation.
+    Timecode,
+    /// Forme d'onde seulement : le timecode est ignoré, chaque plan est
+    /// cherché dans tous les sons du lot.
+    Waveform,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Options {
+    pub mode: Mode,
     /// Affiner le décalage par la forme d'onde quand les deux ont du son.
     pub refine: bool,
     /// Chercher par la forme d'onde les vidéos sans timecode commun.
@@ -113,6 +128,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            mode: Mode::Auto,
             refine: true,
             waveform_search: true,
             drift: true,
@@ -411,6 +427,15 @@ pub fn analyze(
     let v = read(videos, 0, &mut on)?;
     let a = read(audios, videos.len(), &mut on)?;
     let mut pairs = match_by_time(&v, &a);
+    if opts.mode == Mode::Waveform {
+        // L'heure des fichiers est ignorée : chaque plan est cherché partout.
+        for p in &mut pairs {
+            p.audio = None;
+            p.offset = 0.0;
+        }
+    }
+    let search_all =
+        opts.mode == Mode::Waveform || (opts.mode == Mode::Auto && opts.waveform_search);
     for (i, pair) in pairs.iter_mut().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
@@ -422,7 +447,7 @@ pub fn analyze(
             name: video.name.clone(),
         });
         let has_sound = video.channels > 0;
-        if pair.audio.is_none() && opts.waveform_search && has_sound {
+        if pair.audio.is_none() && search_all && has_sound {
             match search(video, &a, cancel) {
                 Ok(Some((ai, offset, conf))) => {
                     pair.audio = Some(ai);
@@ -438,7 +463,9 @@ pub fn analyze(
         }
         let Some(ai) = pair.audio else {
             if pair.note.is_none() {
-                pair.note = Some(if video.start.is_none() {
+                pair.note = Some(if opts.mode == Mode::Waveform {
+                    "pas de son témoin".into()
+                } else if video.start.is_none() {
                     "pas de timecode ni de son témoin".into()
                 } else {
                     "aucun son à la même heure".into()
@@ -462,7 +489,7 @@ pub fn analyze(
         let refine = if pair.method == Method::Waveform {
             common > 2.0
         } else {
-            opts.refine
+            opts.mode == Mode::Auto && opts.refine
         };
         if refine {
             let length = common.min(10.0);
@@ -497,11 +524,15 @@ pub fn analyze(
             }
         }
         // Dérive : décalage mesuré au début et à la fin de la zone commune.
-        if opts.drift && pair.refined && common >= 60.0 {
+        // En « timecode seul », le décalage n'est pas affiné : la mesure, qui
+        // compare le début et la fin, cherche alors dans toute la tolérance.
+        let measured = pair.refined || opts.mode == Mode::Timecode;
+        if opts.drift && measured && common >= 60.0 {
             // Extraits courts : une dérive étale le pic de corrélation.
             let length = 4.0;
-            let start = refine_at(video, audio, pair.offset, 0.1, from + 2.0, length);
-            let end = refine_at(video, audio, pair.offset, 0.1, to - length - 2.0, length);
+            let w = if pair.refined { 0.1 } else { opts.window };
+            let start = refine_at(video, audio, pair.offset, w, from + 2.0, length);
+            let end = refine_at(video, audio, pair.offset, w, to - length - 2.0, length);
             if let (Ok((o1, c1)), Ok((o2, c2))) = (start, end) {
                 if c1 >= MIN_CONFIDENCE && c2 >= MIN_CONFIDENCE {
                     let span = to - from - length - 4.0;

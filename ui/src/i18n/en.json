@@ -703,5 +703,13 @@
   "sync.no.scratch": "This video has no scratch audio: only timecode can align it.",
   "sync.drift.warn": "Drift between start and end of the clip:",
   "sync.validate": "Pair checked",
-  "sync.no.sound.hint": "No sound assigned. Pick one in the list above."
+  "sync.no.sound.hint": "No sound assigned. Pick one in the list above.",
+  "sync.opt.mode": "Method",
+  "sync.mode.auto": "Automatic",
+  "sync.mode.timecode": "Timecode only",
+  "sync.mode.waveform": "Waveform only",
+  "sync.mode.auto.hint": "Timecode or LTC first, refined and completed by the waveform as set below.",
+  "sync.mode.timecode.hint": "Aligned by timecode or LTC only, no correlation. For shoots with reliable timecode (jam sync).",
+  "sync.mode.waveform.hint": "Timecode is ignored: each clip is searched in every sound of the batch. For missing or wrong timecode. Slower.",
+  "sync.mono.tracks": "One mono track per channel (as in MXF)"
 }

@@ -703,5 +703,13 @@
   "sync.no.scratch": "Cette vidéo n'a pas de son témoin : seul le timecode permet de la caler.",
   "sync.drift.warn": "Dérive entre le début et la fin du plan :",
   "sync.validate": "Paire vérifiée",
-  "sync.no.sound.hint": "Aucun son associé. Choisis-en un dans la liste ci-dessus."
+  "sync.no.sound.hint": "Aucun son associé. Choisis-en un dans la liste ci-dessus.",
+  "sync.opt.mode": "Méthode",
+  "sync.mode.auto": "Automatique",
+  "sync.mode.timecode": "Timecode seul",
+  "sync.mode.waveform": "Forme d'onde seule",
+  "sync.mode.auto.hint": "Timecode ou LTC d'abord, affiné et complété par la forme d'onde selon les cases ci-dessous.",
+  "sync.mode.timecode.hint": "Calage par le timecode ou le LTC uniquement, sans corrélation. Pour un tournage avec timecode fiable (jam sync).",
+  "sync.mode.waveform.hint": "Le timecode est ignoré : chaque plan est cherché dans tous les sons du lot. Pour un timecode absent ou faux. Plus long.",
+  "sync.mono.tracks": "Une piste mono par canal (comme en MXF)"
 }
