@@ -22,9 +22,9 @@ Le build (`.github/workflows/build.yml`, étape « Contrôler FFmpeg ») lance l
 La GPL impose de pouvoir fournir le code source des binaires distribués :
 - FFmpeg : dépôt officiel https://git.ffmpeg.org/ffmpeg.git (miroir https://github.com/FFmpeg/FFmpeg). Version Linux : commit `2a571b6068` de la branche `release/9.0` (n9.0.2 + 17 commits). Autres systèmes : version 9.0.2.
 - Scripts et bibliothèques du build Linux : https://github.com/BtbN/FFmpeg-Builds (au même autobuild).
-- Builds Windows et macOS : pages de gyan.dev, evermeet.cx et martin-riedl.de, qui publient leur configuration et leurs sources.
+- Builds Windows et macOS : configuration lisible avec `ffmpeg -buildconf` ; la mise à disposition des sources par gyan.dev, evermeet.cx et martin-riedl.de reste à vérifier.
 
-À chaque version publiée de VERIFLOW, ces liens figurent dans les notes de version ; sur demande, VERIFLOW fournit une archive des sources correspondantes.
+**Décision à prendre avant toute diffusion (Hervé)** : la manière de fournir ces sources (archive jointe aux Releases, ou offre écrite), conformément à la GPLv3 §6.
 
 ## Mettre à jour FFmpeg
 
