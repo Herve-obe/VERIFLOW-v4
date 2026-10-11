@@ -23,6 +23,10 @@ MR="https://ffmpeg.martin-riedl.de/download"
 # macOS Intel : builds statiques GPL d'evermeet.cx, compilés pour macOS 10.13
 # et plus (ceux de martin-riedl.de exigent macOS 12). Permet Catalina (10.15).
 EV="https://evermeet.cx/ffmpeg"
+# Copie de secours des mêmes fichiers evermeet, déposée à la main dans une
+# Release du dépôt (le miroir d'evermeet est parfois injoignable). Même
+# empreinte exigée : la copie ne peut pas différer de l'original.
+EV_MIRROR="https://github.com/Herve-obe/VERIFLOW-v4/releases/download/ffmpeg-mirror"
 # Version minimale de macOS acceptée pour les binaires Intel embarqués.
 MACOS_INTEL_MIN="10.15"
 # Linux : builds statiques GPL de BtbN (variante linux64-gpl, branche 9.0),
@@ -111,7 +115,16 @@ fetch_btbn() {
 
 # Récupère un outil depuis evermeet.cx (macOS Intel) : fetch_ev <outil> <destination>
 fetch_ev() {
-  download "$EV/$1-${VERSION}.zip" "$WORK/ev-$1.zip" "$(ev_sha "$1")"
+  local name="$1-${VERSION}.zip"
+  if curl -fsSL --retry 2 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$EV/$name"; then
+    echo "Téléchargé depuis evermeet.cx : $name"
+  else
+    echo "evermeet.cx injoignable pour $name, copie de secours : $EV_MIRROR/$name" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=FFmpeg macOS Intel::evermeet.cx injoignable, copie de secours utilisée pour $name"
+  fi
+  if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
+    download "$EV_MIRROR/$name" "$WORK/ev-$1.zip" "$(ev_sha "$1")"
+  fi
   unzip -o -q "$WORK/ev-$1.zip" -d "$WORK/ev-$1"
   cp "$WORK/ev-$1/$1" "$2"
   chmod +x "$2"

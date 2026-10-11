@@ -11,6 +11,8 @@ VERIFLOW livre `ffmpeg` et `ffprobe` dans son installeur (charte §5.2) : il fon
 | macOS Intel | evermeet.cx | GPLv3 | Statique, macOS 10.13 et plus (Catalina) |
 | Linux x64 | BtbN/FFmpeg-Builds, variante `linux64-gpl`, branche 9.0, autobuild `autobuild-2026-09-30-13-08`, fichier `ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz` | GPLv3 | Statique. Remplace le 11/10/2026 le build de martin-riedl.de, compilé avec DeckLink (`--enable-nonfree`), donc non redistribuable |
 
+**Copie de secours macOS Intel** : le miroir d'evermeet.cx est parfois injoignable. Les deux fichiers (`ffmpeg-9.0.2.zip`, `ffprobe-9.0.2.zip`) sont aussi déposés tels quels dans la Release `ffmpeg-mirror` du dépôt ; le script s'en sert si evermeet ne répond pas, avec la même empreinte SHA-256 exigée.
+
 BtbN conserve durablement les autobuilds de fin de mois : c'en est un qui est épinglé.
 
 ## Contrôle de licence
