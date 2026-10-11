@@ -27,6 +27,14 @@ EV="https://evermeet.cx/ffmpeg"
 # Release du dépôt (le miroir d'evermeet est parfois injoignable). Même
 # empreinte exigée : la copie ne peut pas différer de l'original.
 EV_MIRROR="https://github.com/Herve-obe/VERIFLOW-v4/releases/download/ffmpeg-mirror"
+# Seconde copie : dossier Google Drive d'Hervé (VERIFLOW), fichiers partagés
+# par lien. Même empreinte exigée.
+ev_drive() {
+  case "$1" in
+    ffmpeg) echo "https://drive.usercontent.google.com/download?id=1hOtwvGQTiQ3ndocq1g3zLSdjFWidARrT&export=download&confirm=t" ;;
+    ffprobe) echo "https://drive.usercontent.google.com/download?id=1JudgX-dDZAmvBTkJZpaCaHOJD1fziSAz&export=download&confirm=t" ;;
+  esac
+}
 # Version minimale de macOS acceptée pour les binaires Intel embarqués.
 MACOS_INTEL_MIN="10.15"
 # Linux : builds statiques GPL de BtbN (variante linux64-gpl, branche 9.0),
@@ -122,8 +130,19 @@ fetch_ev() {
     echo "evermeet.cx injoignable pour $name, copie de secours : $EV_MIRROR/$name" >&2
     [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=FFmpeg macOS Intel::evermeet.cx injoignable, copie de secours utilisée pour $name"
   fi
+  local url
+  for url in "$EV_MIRROR/$name" "$(ev_drive "$1")"; do
+    if [ -s "$WORK/ev-$1.zip" ] && [ "$(sha256 "$WORK/ev-$1.zip")" = "$(ev_sha "$1")" ]; then
+      break
+    fi
+    echo "Copie de secours : $url" >&2
+    curl -fsSL --retry 2 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$url" || rm -f "$WORK/ev-$1.zip"
+  done
+  # Vérification finale (empreinte), message clair en cas d'échec.
   if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
-    download "$EV_MIRROR/$name" "$WORK/ev-$1.zip" "$(ev_sha "$1")"
+    echo "ERREUR : $name introuvable ou altéré (evermeet.cx et copies de secours)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Téléchargement FFmpeg::$name introuvable ou altéré (evermeet.cx et copies de secours)"
+    exit 1
   fi
   unzip -o -q "$WORK/ev-$1.zip" -d "$WORK/ev-$1"
   cp "$WORK/ev-$1/$1" "$2"
