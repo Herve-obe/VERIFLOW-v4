@@ -172,7 +172,7 @@ fn preview_colors_follow_rec709() {
     assert!(status.success());
     let mut player = VideoPlayer::open(&path, 1280, 720, FrameFormat::Jpeg).unwrap();
     let jpeg = player.frame(0).unwrap().unwrap();
-    for ((x, y), want) in [((320, 360), [191, 191, 191]), ((960, 360), [191, 0, 191])] {
+    for ((x, y), want) in [((320, 360), [191u8, 191, 191]), ((960, 360), [191, 0, 191])] {
         let got = jpeg_pixel(&jpeg, dir.path(), x, y);
         for c in 0..3 {
             assert!(
