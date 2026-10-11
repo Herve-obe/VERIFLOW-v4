@@ -714,5 +714,13 @@
   "sync.mono.tracks": "One mono track per channel (as in MXF)",
   "player.monitor": "Monitor",
   "player.monitor.hint": "Monitor output: full-screen picture on another display (Esc on that display to close)",
-  "player.monitor.main": "main display"
+  "player.monitor.main": "main display",
+  "player.scopes": "Scopes",
+  "player.scopes.hint": "Waveform, RGB parade, vectorscope and histogram of the displayed picture",
+  "player.scope": "Scope",
+  "player.scope.waveform": "Waveform (luma)",
+  "player.scope.parade": "RGB parade",
+  "player.scope.vectorscope": "Vectorscope",
+  "player.scope.histogram": "Histogram",
+  "player.scope.hint": "Computed on the displayed preview (8-bit, LUT included), Rec. 709. 0% = black, 100% = white."
 }

@@ -46,6 +46,21 @@ struct Timing {
     start_time: f64,
     frame_duration: f64,
     preroll: f64,
+    /// Matrice YUV de la source pour la conversion en RGB.
+    matrix: &'static str,
+}
+
+/// Matrice YUV de la source : celle déclarée, sinon Rec. 709 en HD et plus,
+/// Rec. 601 en définition standard (usage des logiciels de montage).
+fn source_matrix(color_space: &str, height: u32) -> &'static str {
+    match color_space {
+        "bt709" => "bt709",
+        "smpte170m" | "bt470bg" => "bt601",
+        "bt2020nc" | "bt2020c" => "bt2020",
+        "smpte240m" => "smpte240m",
+        _ if height >= 720 => "bt709",
+        _ => "bt601",
+    }
 }
 
 /// Image décodée (RGBA brut ou JPEG selon `FrameFormat`).
@@ -124,12 +139,21 @@ impl Decoder {
         let target = timing.start_time + (start as f64 - 0.5) * timing.frame_duration;
         let seek = (target - timing.preroll).max(0.0);
         let mut filter = format!(
-            "select=gte(t\\,{target:.6}),scale={}:{}:flags=bilinear",
-            size.0, size.1
+            "select=gte(t\\,{target:.6}),scale={}:{}:flags=bilinear:in_color_matrix={}:out_range=full,format=gbrp",
+            size.0, size.1, timing.matrix
         );
+        // Image en RGB d'abord (matrice de la source) ; l'encodeur JPEG la
+        // repasse en YUV plein écart Rec. 601, la norme JFIF que décode le
+        // navigateur. Sans cela, une source Rec. 709 est affichée avec des
+        // couleurs légèrement fausses.
         // LUT d'affichage appliquée sur l'image réduite (rapide), jamais au fichier.
         if let Some(lut) = lut {
             filter += &lut_filter(lut);
+        }
+        if format == FrameFormat::Jpeg {
+            // Retour explicite en YUV Rec. 601 plein écart (JFIF) : FFmpeg 9
+            // reprendrait sinon la matrice Rec. 709 de la source.
+            filter += ",scale=out_color_matrix=bt601:out_range=full,format=yuvj444p";
         }
         let mut child = tools::command("ffmpeg")?
             .args(["-v", "error", "-nostdin", "-copyts", "-noaccurate_seek"])
@@ -311,6 +335,7 @@ impl VideoPlayer {
                 } else {
                     PREROLL_SECONDS
                 },
+                matrix: source_matrix(&video.color_space, video.height),
             },
             clip: VideoClip {
                 frame_count: video.frame_count,

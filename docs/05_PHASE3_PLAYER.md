@@ -123,6 +123,12 @@ Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_
 - Sortie SDI (Blackmagic DeckLink, AJA) : non prévue. Le SDK DeckLink est propriétaire ; un FFmpeg compilé avec lui n'est plus redistribuable (voir le remplacement du FFmpeg Linux). Un moniteur de contrôle se branche en HDMI ou DisplayPort comme second écran, ou via un convertisseur HDMI vers SDI.
 - Essai (Linux, Xvfb, un écran) : fenêtre plein écran en 16:9 avec bandes noires ; après 3 s de lecture lancée dans la fenêtre principale, image 77 (10:00:03:02) affichée sur les deux ; Échap ferme la fenêtre et remet le menu à zéro. Pas d'essai sur deux écrans réels ici.
 
+## Scopes et couleurs de l'aperçu (ajout du 11/10/2026, demande d'Hervé)
+
+- Bouton « Scopes » du PLAYER VIDEO : forme d'onde luma, parade RGB, vectorscope (cibles des barres à 75 %, ligne des tons chair), histogramme RGB et luma. Calculés en temps réel sur l'image affichée (aperçu 8 bits, LUT comprise), luma et chrominance Rec. 709. Choix mémorisé.
+- **Correction des couleurs de l'aperçu** : la conversion vers le JPEG d'affichage ne précisait pas les matrices. Une source Rec. 709 était affichée avec un léger défaut (gris 75 % en 189/191/188 au lieu de 190/190/190, magenta 75 % en 175/0/185 avec FFmpeg 9). L'image passe désormais en RGB avec la matrice de la source (celle déclarée, sinon Rec. 709 en HD et Rec. 601 en SD), puis en YUV Rec. 601 plein écart (JFIF). Test automatique sur FFmpeg 9.0.2, 6.1 et 4.4 : gris et magenta 75 % à ±3 près.
+- Essai dans l'application : mire ProRes 422 HQ Rec. 709 à 75 %, les six barres tombent dans leurs cibles du vectorscope ; forme d'onde et parade aux niveaux attendus.
+
 ## Reste à faire (hors de cette PR)
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).

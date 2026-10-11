@@ -7,6 +7,7 @@
   import ReportPopup from "./ReportPopup.svelte";
   import SoundTracks from "./SoundTracks.svelte";
   import { closeMonitor, onClosed, openMonitor, screens, sendFrame, type Screen } from "../../lib/monitor";
+  import Scopes from "./Scopes.svelte";
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -44,6 +45,7 @@
   }: { slot?: Slot; path?: string | null; active?: () => boolean; logs?: boolean } = $props();
 
   const avSlot = $derived(`${slot}-av` as AudioSlot);
+  const PREF_SCOPES = "veriflow.player.scopes";
   const PREF_TC = "veriflow.player.tc.overlay";
 
   let clip = $state<VideoClip | null>(null);
@@ -68,6 +70,7 @@
   let screenList = $state<Screen[]>([]);
   const stopClosed = onClosed(() => (monitorScreen = -1));
   loadScreens();
+  let scopes = $state(readPref(PREF_SCOPES) === "1");
 
   // Son de la vidéo : ouvert dans le moteur audio, il sert d'horloge en lecture normale.
   let avReady = $state(false);
@@ -495,6 +498,11 @@
     }
   }
 
+  function toggleScopes() {
+    scopes = !scopes;
+    writePref(PREF_SCOPES, scopes ? "1" : "0");
+  }
+
   function toggleTc() {
     tcOverlay = !tcOverlay;
     writePref(PREF_TC, tcOverlay ? "1" : "0");
@@ -573,6 +581,9 @@
       {#if avReady}
         <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
       {/if}
+      {#if scopes}
+        <Scopes source={canvas} tick={shown} />
+      {/if}
     </div>
 
     <div class="bar">
@@ -638,6 +649,7 @@
             <option value={monitorScreen}>{t("player.monitor")} {monitorScreen + 1}</option>
           {/if}
         </select>
+        <button class="opt" class:on={scopes} onclick={toggleScopes} title={t("player.scopes.hint")}>{t("player.scopes")}</button>
         {#if lut}
           <span class="lut" title={lut}>LUT {lutName}</span>
           <button class="opt" onclick={removeLut} aria-label={t("player.lut.remove")} title={t("player.lut.remove")}>✕</button>
