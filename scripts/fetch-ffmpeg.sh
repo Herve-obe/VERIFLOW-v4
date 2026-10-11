@@ -61,7 +61,11 @@ sha256() {
 # download <url> <fichier> <empreinte attendue>
 download() {
   echo "Téléchargement : $1"
-  curl -fsSL --retry 4 --retry-delay 5 -o "$2" "$1"
+  if ! curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors -o "$2" "$1"; then
+    echo "ERREUR : téléchargement impossible : $1" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Téléchargement FFmpeg::$1"
+    exit 1
+  fi
   local got
   got="$(sha256 "$2")"
   if [ -z "$3" ]; then
