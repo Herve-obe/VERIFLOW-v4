@@ -59,6 +59,11 @@ jobs:
           ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe"
           src-tauri/binaries/veriflow-ffmpeg-${{ matrix.target }}$ext -hide_banner -version | head -1
           src-tauri/binaries/veriflow-ffprobe-${{ matrix.target }}$ext -hide_banner -version | head -1
+          # Licence : un FFmpeg compilé avec --enable-nonfree n'est pas redistribuable.
+          if src-tauri/binaries/veriflow-ffmpeg-${{ matrix.target }}$ext -hide_banner -buildconf | grep -q -- --enable-nonfree; then
+            echo "ERREUR : FFmpeg compilé avec --enable-nonfree, non redistribuable" >&2
+            exit 1
+          fi
 
       - name: Compiler et empaqueter
         uses: tauri-apps/tauri-action@v0
