@@ -67,6 +67,8 @@ download() {
   if [ -z "$3" ]; then
     # Source pas encore épinglée : l'empreinte est affichée pour être recopiée ici.
     echo "AVERTISSEMENT : empreinte à épingler pour $1 : $got" >&2
+    # Dans GitHub Actions : annotation visible dans le résumé du build.
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=Empreinte à épingler::$1 $got"
     return 0
   fi
   if [ "$got" != "$3" ]; then
@@ -93,6 +95,7 @@ fetch_btbn() {
     asset="$(curl -fsSL --retry 4 "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$BTBN_TAG" |
       grep -o '"name": *"ffmpeg-n9\.0[^"]*-linux64-gpl-9\.0\.tar\.xz"' | head -1 | sed 's/.*"\(ffmpeg-[^"]*\)"/\1/')"
     echo "AVERTISSEMENT : fichier à épingler (BTBN_ASSET) : $asset" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=Fichier à épingler::$asset"
   fi
   download "$BTBN/$BTBN_TAG/$asset" "$WORK/btbn.tar.xz" "$BTBN_SHA"
   tar -xJf "$WORK/btbn.tar.xz" -C "$WORK"
