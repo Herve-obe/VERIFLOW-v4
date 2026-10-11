@@ -10,6 +10,7 @@ mod media;
 mod offload;
 mod player;
 mod report;
+mod subtitles;
 mod sync;
 mod transcode;
 
@@ -99,6 +100,9 @@ pub fn run() {
             report::report_branding_get,
             report::report_branding_set,
             report::report_export,
+            subtitles::subtitles_load,
+            subtitles::subtitles_save,
+            subtitles::subtitles_check,
             sync::sync_expand,
             sync::sync_analyze,
             sync::sync_cancel,

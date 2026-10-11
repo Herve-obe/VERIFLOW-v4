@@ -344,7 +344,7 @@ Liste de référence : celle de Shutter Encoder (VALIDÉ). Grâce à la GPL, x26
 | Audio | WAV, AIFF, FLAC, ALAC, MP3, AAC (encodeurs OS), AC-3, Opus, Vorbis | Dolby Digital Plus, TrueHD (licences Dolby à vérifier) |
 | Images | JPEG, PNG, TIFF, DPX, OpenEXR, WebP ; JPEG XL si le FFmpeg du poste le permet ; image unique, une image toutes les N secondes, séquence numérotée d'après le timecode | PSD |
 | Conteneurs | MOV, MP4, MXF OP1a, MKV, WebM, AVI, MPG, DV, WMV, OGG, WAV/BWF | MXF OP-Atom (Avid) |
-| Fonctions sans réencodage | Rewrap, remplacement du son (calage par timecode), découpe, extraction (image, son polyphonique, une piste par fichier), fusion, conformation de cadence, insert, sous-titres en piste | Éditeur de sous-titres |
+| Fonctions sans réencodage | Rewrap, remplacement du son (calage par timecode), découpe, extraction (image, son polyphonique, une piste par fichier), fusion, conformation de cadence, insert, sous-titres en piste ; éditeur de sous-titres SRT et WebVTT (avancé de V2 en V1 le 11/10/2026) | |
 | Traitements | Préréglages et préréglages personnels (export, import), file d'attente, proxies, taille, recadrage, rotation, désentrelacement, conversion de cadence (interpolation comprise), images dupliquées, LUT, réglages couleur, incrustation (timecode, nom, texte, logo, sous-titres), normalisation loudness (EBU R 128, ATSC A/85), nommage (préfixe, suffixe, remplacement, numérotation) | |
 | Analyses | Loudness et True Peak, détection de plans (EDL), de noir, de médias hors ligne, de silences, VMAF, FrameMD5 | |
 | Hors périmètre | Outils IA de Shutter Encoder (séparation, transcription, etc.), gravure DVD/Blu-ray, téléchargement web, FTP | |

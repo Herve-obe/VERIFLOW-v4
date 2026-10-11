@@ -2,6 +2,7 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
   import Section from "./Section.svelte";
+  import SubtitleEditor from "./SubtitleEditor.svelte";
   import { t } from "../../i18n/index.svelte";
   import { defaultTextStyle, POSITIONS, type PresetView, type TextStyle } from "../../lib/transcode";
   import type { Form } from "../../lib/transcodeForm.svelte";
@@ -23,6 +24,9 @@
     const r = await open({ multiple: false, directory: false, title: t("transcode.subtitles"), filters: [{ name: "SRT, VTT, ASS", extensions: ["srt", "vtt", "ass", "ssa"] }] });
     if (typeof r === "string") form.settings.subtitles.file = r;
   }
+
+  // Éditeur : fichier à éditer (null : nouveau), fermé si undefined.
+  let editing = $state<string | null | undefined>(undefined);
 
   type Key = "timecode" | "filename" | "text";
   function toggle(k: Key, on: boolean) {
@@ -92,6 +96,9 @@
     <div class="tc-row">
       <span class="tc-path" title={subs.file}>{name(subs.file)}</span>
       <button class="tc-btn" onclick={pickSubs}>{t("offload.browse")}</button>
+      {#if /\.(srt|vtt)$/i.test(subs.file)}
+        <button class="tc-btn" onclick={() => (editing = subs.file)}>{t("sub.edit")}</button>
+      {/if}
       <button class="tc-btn" onclick={() => (form.settings.subtitles.file = null)}>{t("transcode.remove.short")}</button>
     </div>
     <div class="tc-grid">
@@ -109,7 +116,13 @@
       {/if}
     </div>
   {:else}
-    <button class="tc-btn" onclick={pickSubs}>+ {t("transcode.subtitles.add")}</button>
+    <div class="tc-row">
+      <button class="tc-btn" onclick={pickSubs}>+ {t("transcode.subtitles.add")}</button>
+      <button class="tc-btn" onclick={() => (editing = null)}>{t("sub.new")}</button>
+    </div>
+  {/if}
+  {#if editing !== undefined}
+    <SubtitleEditor path={editing} onClose={() => (editing = undefined)} onSaved={(p) => (form.settings.subtitles.file = p)} />
   {/if}
   <p class="tc-hint">{t("transcode.overlay.hint")}</p>
 </Section>
