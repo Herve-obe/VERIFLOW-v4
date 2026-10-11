@@ -31,8 +31,8 @@ MACOS_INTEL_MIN="10.15"
 # BtbN conserve ceux-là durablement.
 BTBN="https://github.com/BtbN/FFmpeg-Builds/releases/download"
 BTBN_TAG="autobuild-2026-09-30-13-08"
-BTBN_ASSET=""
-BTBN_SHA=""
+BTBN_ASSET="ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+BTBN_SHA="68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269"
 
 # Compatible bash 3.2 (macOS) : pas de tableaux associatifs.
 mr_path() {
