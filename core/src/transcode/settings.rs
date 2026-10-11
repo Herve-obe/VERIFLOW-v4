@@ -324,6 +324,8 @@ pub struct Settings {
     pub threshold: Option<f64>,
     /// Qualité VMAF du fichier produit, comparé à la source.
     pub vmaf_after: bool,
+    /// MXF OP-Atom (Avid) : un fichier pour l'image, un par canal son.
+    pub op_atom: bool,
 }
 
 impl Settings {
