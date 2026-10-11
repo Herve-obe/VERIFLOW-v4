@@ -6,6 +6,7 @@
   import MarkersPanel from "./MarkersPanel.svelte";
   import ReportPopup from "./ReportPopup.svelte";
   import SoundTracks from "./SoundTracks.svelte";
+  import { closeMonitor, onClosed, openMonitor, screens, sendFrame, type Screen } from "../../lib/monitor";
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
@@ -62,6 +63,11 @@
   let reportOpen = $state(false);
   let lut = $state<string | null>(null);
   let tcOverlay = $state(readPref(PREF_TC) === "1");
+  // Sortie moniteur : écran choisi (-1 : fermée).
+  let monitorScreen = $state(-1);
+  let screenList = $state<Screen[]>([]);
+  const stopClosed = onClosed(() => (monitorScreen = -1));
+  loadScreens();
 
   // Son de la vidéo : ouvert dans le moteur audio, il sert d'horloge en lecture normale.
   let avReady = $state(false);
@@ -200,6 +206,7 @@
       ipcMs = ipcMs * 0.8 + (t1 - t0) * 0.2;
       drawMs = drawMs * 0.8 + (t2 - t1) * 0.2;
       shown = i;
+      if (monitorScreen >= 0) sendFrame({ slot, index: i });
       fpsCount++;
       const now = performance.now();
       if (now - fpsSince > 1000) {
@@ -465,6 +472,29 @@
     show(shown);
   }
 
+  async function loadScreens() {
+    try {
+      screenList = await screens();
+    } catch (err) {
+      app.status = String(err);
+    }
+  }
+
+  async function chooseMonitor(v: number) {
+    try {
+      if (v < 0) await closeMonitor();
+      else {
+        await openMonitor(v);
+        // Laisse la fenêtre se charger, puis lui envoie l'image en cours.
+        window.setTimeout(() => sendFrame({ slot, index: shown }), 800);
+      }
+      monitorScreen = v;
+    } catch (err) {
+      app.status = String(err);
+      monitorScreen = -1;
+    }
+  }
+
   function toggleTc() {
     tcOverlay = !tcOverlay;
     writePref(PREF_TC, tcOverlay ? "1" : "0");
@@ -511,6 +541,8 @@
   });
 
   onDestroy(() => {
+    if (monitorScreen >= 0) sendFrame({ slot, index: null });
+    stopClosed.then((u) => u());
     pause();
     window.clearTimeout(primeTimer);
     videoClose(slot).catch(() => {});
@@ -589,6 +621,23 @@
           </button>
         {/if}
         <button class="opt" class:on={tcOverlay} onclick={toggleTc} title={t("player.tc.overlay.hint")}>{t("player.tc.overlay")}</button>
+        <select
+          class="opt monitor"
+          class:on={monitorScreen >= 0}
+          value={monitorScreen}
+          onfocus={loadScreens}
+          onchange={(e) => chooseMonitor(Number(e.currentTarget.value))}
+          title={t("player.monitor.hint")}
+          aria-label={t("player.monitor")}
+        >
+          <option value={-1}>{t("player.monitor")}</option>
+          {#each screenList as sc (sc.index)}
+            <option value={sc.index}>{sc.name} ({sc.width} × {sc.height}){sc.main ? ` · ${t("player.monitor.main")}` : ""}</option>
+          {/each}
+          {#if monitorScreen >= 0 && !screenList.some((x) => x.index === monitorScreen)}
+            <option value={monitorScreen}>{t("player.monitor")} {monitorScreen + 1}</option>
+          {/if}
+        </select>
         {#if lut}
           <span class="lut" title={lut}>LUT {lutName}</span>
           <button class="opt" onclick={removeLut} aria-label={t("player.lut.remove")} title={t("player.lut.remove")}>✕</button>
@@ -782,6 +831,9 @@
     padding: 2px var(--vf-space-2);
     font-size: var(--vf-text-sm);
     cursor: pointer;
+  }
+  .opt.monitor {
+    max-width: 130px;
   }
   .opt.on {
     color: var(--vf-on-accent);

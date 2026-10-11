@@ -711,5 +711,8 @@
   "sync.mode.auto.hint": "Timecode ou LTC d'abord, affiné et complété par la forme d'onde selon les cases ci-dessous.",
   "sync.mode.timecode.hint": "Calage par le timecode ou le LTC uniquement, sans corrélation. Pour un tournage avec timecode fiable (jam sync).",
   "sync.mode.waveform.hint": "Le timecode est ignoré : chaque plan est cherché dans tous les sons du lot. Pour un timecode absent ou faux. Plus long.",
-  "sync.mono.tracks": "Une piste mono par canal (comme en MXF)"
+  "sync.mono.tracks": "Une piste mono par canal (comme en MXF)",
+  "player.monitor": "Moniteur",
+  "player.monitor.hint": "Sortie moniteur : l'image en plein écran sur un autre écran (Échap sur cet écran pour fermer)",
+  "player.monitor.main": "écran principal"
 }
