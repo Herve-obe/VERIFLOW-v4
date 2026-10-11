@@ -118,7 +118,7 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Interface | Svelte 5 + TypeScript | MIT | Onglets, formulaires, tableaux |
 | Cœur | Rust | GPL-3.0-or-later (VERIFLOW) | Logique métier |
 | Copie et checksums | Rust (crates `xxhash-rust`, RustCrypto `md-5`, `sha1`, `sha2`) | BSL-1.0 / MIT / Apache 2.0 | OFFLOAD |
-| Décodage, encodage, analyse | Programmes `ffmpeg` et `ffprobe` 9.0.2 (build GPL statique avec x264, x265) **intégrés à l'installeur** (décision du 05/10/2026 : outil autonome, sans Internet) et pilotés en processus séparé. Sources épinglées par empreinte SHA-256 : gyan.dev (Windows), evermeet.cx (macOS Intel, macOS 10.13+), martin-riedl.de (macOS Apple Silicon et Linux) | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
+| Décodage, encodage, analyse | Programmes `ffmpeg` et `ffprobe` 9.0.2 (build GPL statique avec x264, x265) **intégrés à l'installeur** (décision du 05/10/2026 : outil autonome, sans Internet) et pilotés en processus séparé. Sources épinglées par empreinte SHA-256 : gyan.dev (Windows), evermeet.cx (macOS Intel, macOS 10.13+), martin-riedl.de (macOS Apple Silicon), BtbN (Linux, depuis le 11/10/2026). Aucun build `--enable-nonfree` : le build le refuse (voir `docs/FFMPEG.md`) | GPL | MEDIA, PLAYER, SYNC, TRANSCODE |
 | Lecture vidéo | Décodage FFmpeg avec saut exact à l'image, aperçu JPEG 4:4:4 affiché dans l'interface | GPL / navigateur intégré | PLAYER VIDEO, image par image (validé en phase 0 bis) |
 | Audio temps réel | `cpal` (WASAPI, CoreAudio, ALSA/JACK) | Apache 2.0 | PLAYER AUDIO |
 | Rééchantillonnage | `rubato` | MIT | Conversion si la carte son ne suit pas |
