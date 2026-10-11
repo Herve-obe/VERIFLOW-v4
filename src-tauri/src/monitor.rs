@@ -67,7 +67,7 @@ pub async fn monitor_open(index: usize, app: AppHandle) -> CmdResult<()> {
                 .inner_size(size.width, size.height)
                 .position(pos.x, pos.y)
                 .build()
-                .map(|w| {
+                .inspect(|w| {
                     // Fermée (Échap, ou par le système) : la fenêtre principale est prévenue.
                     let handle = app.clone();
                     w.on_window_event(move |e| {
@@ -75,7 +75,6 @@ pub async fn monitor_open(index: usize, app: AppHandle) -> CmdResult<()> {
                             let _ = handle.emit_to("main", "monitor-closed", ());
                         }
                     });
-                    w
                 })
                 .map_err(text)?
         }
