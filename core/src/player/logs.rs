@@ -537,7 +537,7 @@ pub fn to_csv(clips: &[LogClip]) -> String {
     out
 }
 
-fn xml_esc(s: &str) -> String {
+pub(crate) fn xml_esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -553,7 +553,7 @@ fn gcd(a: u64, b: u64) -> u64 {
 }
 
 /// Durée FCPXML : fraction exacte de secondes (« 1001/30000s », « 4s »).
-fn fcp_time(frames: i64, rate: FrameRate) -> String {
+pub(crate) fn fcp_time(frames: i64, rate: FrameRate) -> String {
     let num = frames.unsigned_abs() * rate.den as u64;
     let den = rate.num as u64;
     let g = gcd(num, den);

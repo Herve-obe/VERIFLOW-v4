@@ -7,6 +7,7 @@ Fonctions livrées et fusionnées, testées automatiquement et sous Linux, mais 
 | 0 bis | [#2](https://github.com/Herve-obe/VERIFLOW-v4/pull/2) | 05/10/2026 | Partiellement testée (Windows, 06/10/2026) : lecture vidéo et audio dans le lecteur rapide de MEDIA, FFmpeg intégré | Onglet PLAYER lui-même (ProRes, XAVC, H.264, timecode, J/K/L), noms de pistes, SOLO/MUTE, LUFS, FFmpeg intégré sous macOS (blocage de sécurité possible) |
 | 1 | [#3](https://github.com/Herve-obe/VERIFLOW-v4/pull/3) | 06/10/2026 | Partiellement testée (Windows, 06/10/2026) : offload d'une carte vers 1 disque et ouverture du rapport PDF, après correction de la relecture Windows dans [#4](https://github.com/Herve-obe/VERIFLOW-v4/pull/4) | Offload vers 2 disques, dossier `ascmhl/`, reprise d'une carte déjà copiée, éjection de la source, avertissement disque mécanique, coupure d'une destination pendant la copie, macOS |
 | 3 | [#5](https://github.com/Herve-obe/VERIFLOW-v4/pull/5) | 09/10/2026 | Testée par Hervé (Windows et macOS Catalina) : PLAYER, son synchronisé, reprise OFFLOAD, fenêtres de confirmation | Points en stand-by ci-dessous |
+| 4 | [#6](https://github.com/Herve-obe/VERIFLOW-v4/pull/6) | 09/10/2026 | Testée par Hervé sur Windows ; macOS non testé (Mac indisponible) | Sur macOS Catalina : onglet REPORT complet, en particulier le glisser-déposer de la fenêtre « Colonnes », le tri par colonne, les exports PDF, XLSX et EDL, la touche R du PLAYER |
 
 ## En stand-by (demandé par Hervé le 08/10/2026)
 

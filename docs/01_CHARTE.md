@@ -334,16 +334,19 @@ Améliorations apportées par VERIFLOW (PROPOSÉ) :
 
 Liste de référence : celle de Shutter Encoder (VALIDÉ). Grâce à la GPL, x264 et x265 sont disponibles (§6.2).
 
+**Décision du 09/10/2026 (Hervé)** : TRANSCODE reprend toutes les capacités de conversion de Shutter Encoder (Paul Pacifico), avec un code et une interface propres à VERIFLOW (pas de plagiat), et y ajoute les fonctions propres à VERIFLOW : métadonnées de tournage (bext, iXML, timecode) conservées, son calé par timecode, empreintes XXH128 et rapport du lot, normalisation sans compression. Les outils IA, la gravure DVD/Blu-ray, le téléchargement web, l'envoi FTP et le résumé par e-mail restent hors périmètre. Un préréglage dont le FFmpeg du poste ne dispose pas est affiché indisponible, avec la raison.
+
 | Catégorie | V1 | V2 ou à étudier |
 |---|---|---|
 | Vidéo intermédiaire | ProRes (toutes variantes), DNxHD, DNxHR, CineForm, QT Animation, non compressé, FFV1, XAVC Intra et AVC-Intra 100 (via x264) | |
-| Vidéo diffusion | H.264, HEVC (encodeurs OS/GPU par défaut, x264/x265 en option), XAVC Long GOP, AV1, VP9, MPEG-2 / XDCAM HD422 et HD35 | H.266/VVC (maturité et brevets à évaluer) |
+| Vidéo diffusion | H.264, HEVC (encodeurs OS/GPU par défaut, x264/x265 en option), XAVC Long GOP, AV1, VP9, MPEG-2 / XDCAM HD422 et HD35, H.266/VVC si le FFmpeg du poste le permet, préréglages web (YouTube, Vimeo, formats verticaux et carrés) | Brevets H.266 à vérifier avant la vente |
 | Vidéo autres | MJPEG, HAP, VP8, DV, MPEG-1, Theora, WMV, Xvid | |
 | Audio | WAV, AIFF, FLAC, ALAC, MP3, AAC (encodeurs OS), AC-3, Opus, Vorbis | Dolby Digital Plus, TrueHD (licences Dolby à vérifier) |
-| Images | JPEG, PNG, TIFF, DPX, OpenEXR | JPEG XL, PSD |
-| Conteneurs | MOV, MP4, MXF OP1a, MXF OP-Atom, MKV, WebM, AVI, WAV/BWF | |
-| Fonctions sans réencodage | Rewrap, remplacement audio, découpe, extraction, fusion, conformation de cadence | Sous-titres |
-| Traitements | Presets, file d'attente, proxies, redimensionnement, LUT, TC incrusté, watermark, normalisation loudness (EBU R128 / ATSC A/85), analyse True Peak | |
+| Images | JPEG, PNG, TIFF, DPX, OpenEXR, WebP ; JPEG XL si le FFmpeg du poste le permet ; image unique, une image toutes les N secondes, séquence numérotée d'après le timecode | PSD |
+| Conteneurs | MOV, MP4, MXF OP1a, MKV, WebM, AVI, MPG, DV, WMV, OGG, WAV/BWF | MXF OP-Atom (Avid) |
+| Fonctions sans réencodage | Rewrap, remplacement du son (calage par timecode), découpe, extraction (image, son polyphonique, une piste par fichier), fusion, conformation de cadence, insert, sous-titres en piste | Éditeur de sous-titres |
+| Traitements | Préréglages et préréglages personnels (export, import), file d'attente, proxies, taille, recadrage, rotation, désentrelacement, conversion de cadence (interpolation comprise), images dupliquées, LUT, réglages couleur, incrustation (timecode, nom, texte, logo, sous-titres), normalisation loudness (EBU R 128, ATSC A/85), nommage (préfixe, suffixe, remplacement, numérotation) | |
+| Analyses | Loudness et True Peak, détection de plans (EDL), de noir, de médias hors ligne, de silences, VMAF, FrameMD5 | |
 | Hors périmètre | Outils IA de Shutter Encoder (séparation, transcription, etc.), gravure DVD/Blu-ray, téléchargement web, FTP | |
 
 ---

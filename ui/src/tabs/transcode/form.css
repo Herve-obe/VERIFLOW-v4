@@ -1,0 +1,155 @@
+/* Panneaux de réglages de l'onglet TRANSCODE (classes « tc-* »). Couleurs :
+   uniquement les variables de theme/tokens.css. */
+
+.tc-section {
+  background: var(--vf-surface);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius-md);
+}
+.tc-section > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--vf-space-2) var(--vf-space-3);
+  font-size: var(--vf-text-sm);
+  color: var(--vf-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  user-select: none;
+}
+.tc-section > summary::-webkit-details-marker {
+  display: none;
+}
+.tc-section > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  margin-right: var(--vf-space-2);
+  transition: transform var(--vf-transition);
+}
+.tc-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+.tc-section .tc-badge {
+  margin-left: var(--vf-space-2);
+  padding: 0 6px;
+  border-radius: var(--vf-radius-sm);
+  background: var(--vf-accent);
+  color: var(--vf-on-accent);
+  font-size: var(--vf-text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.tc-body {
+  padding: 0 var(--vf-space-3) var(--vf-space-3);
+}
+/* Colonnes minmax(0, 1fr) et champs à 100 % : un champ ne peut jamais
+   élargir sa colonne au-delà du cadre (moteur web de Catalina). */
+.tc-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--vf-space-2) var(--vf-space-3);
+  align-items: end;
+}
+.tc-grid.three {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+.tc-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.tc-wide {
+  grid-column: 1 / -1;
+}
+.tc-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--vf-text-xs);
+  color: var(--vf-text-muted);
+}
+.tc-field > input,
+.tc-field > select,
+.tc-field > .tc-row {
+  margin-top: 2px;
+}
+.tc-field input,
+.tc-field select,
+.tc-input {
+  width: 100%;
+  min-width: 0;
+  background: var(--vf-bg);
+  color: var(--vf-text);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius-sm);
+  padding: var(--vf-space-1) var(--vf-space-2);
+  font-size: var(--vf-text-sm);
+  box-sizing: border-box;
+}
+.tc-check {
+  display: flex;
+  align-items: center;
+  font-size: var(--vf-text-sm);
+  color: var(--vf-text);
+  min-width: 0;
+}
+.tc-check input {
+  margin: 0 var(--vf-space-2) 0 0;
+  accent-color: var(--vf-accent);
+  flex: none;
+}
+.tc-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.tc-row > * + * {
+  margin-left: var(--vf-space-2);
+}
+.tc-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vf-font-mono);
+  font-size: var(--vf-text-xs);
+  color: var(--vf-text);
+}
+.tc-btn {
+  background: var(--vf-surface-high);
+  color: var(--vf-text);
+  border: 1px solid var(--vf-border);
+  border-radius: var(--vf-radius-sm);
+  padding: var(--vf-space-1) var(--vf-space-2);
+  font-size: var(--vf-text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.tc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tc-hint {
+  margin: var(--vf-space-1) 0 0;
+  font-size: var(--vf-text-xs);
+  color: var(--vf-text-muted);
+  line-height: 1.45;
+}
+.tc-warn {
+  color: var(--vf-warning);
+}
+.tc-sub {
+  margin: var(--vf-space-3) 0 var(--vf-space-1);
+  font-size: var(--vf-text-xs);
+  color: var(--vf-text);
+  font-weight: 600;
+}
+.tc-sub:first-child {
+  margin-top: 0;
+}
