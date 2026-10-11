@@ -124,3 +124,61 @@ fn display_lut_is_applied_and_removed() {
     std::fs::write(&bad, "pas une LUT").unwrap();
     assert!(p.set_lut(Some(&bad)).is_err());
 }
+
+/// Couleur RGB d'un point d'une image JPEG, décodée comme le navigateur (JFIF).
+fn jpeg_pixel(jpeg: &[u8], dir: &Path, x: u32, y: u32) -> [u8; 3] {
+    let file = dir.join("frame.jpg");
+    std::fs::write(&file, jpeg).unwrap();
+    let out = Command::new(tools::locate("ffmpeg").unwrap())
+        .args(["-v", "error", "-i"])
+        .arg(&file)
+        .args(["-vf", &format!("crop=1:1:{x}:{y},format=rgb24")])
+        .args(["-frames:v", "1", "-f", "rawvideo", "-"])
+        .output()
+        .unwrap();
+    [out.stdout[0], out.stdout[1], out.stdout[2]]
+}
+
+#[test]
+fn preview_colors_follow_rec709() {
+    if tools::locate("ffmpeg").is_none() || tools::locate("ffprobe").is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    // Gris 75 % et magenta 75 %, codés en YUV Rec. 709 (écart vidéo) et balisés.
+    let path = dir.path().join("barres709.mkv");
+    let status = Command::new(tools::locate("ffmpeg").unwrap())
+        .args(["-v", "error", "-y"])
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0xBFBFBF:size=640x720:rate=25:duration=1",
+        ])
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0xBF00BF:size=640x720:rate=25:duration=1",
+        ])
+        .args([
+            "-filter_complex",
+            "[0][1]hstack,scale=out_color_matrix=bt709:out_range=tv,format=yuv444p",
+        ])
+        .args(["-c:v", "ffv1", "-colorspace", "bt709", "-color_range", "tv"])
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let mut player = VideoPlayer::open(&path, 1280, 720, FrameFormat::Jpeg).unwrap();
+    let jpeg = player.frame(0).unwrap().unwrap();
+    for ((x, y), want) in [((320, 360), [191, 191, 191]), ((960, 360), [191, 0, 191])] {
+        let got = jpeg_pixel(&jpeg, dir.path(), x, y);
+        for c in 0..3 {
+            assert!(
+                (got[c] as i32 - want[c] as i32).abs() <= 3,
+                "point {x},{y} : {got:?} au lieu de {want:?}"
+            );
+        }
+    }
+}

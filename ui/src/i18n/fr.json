@@ -711,5 +711,13 @@
   "sync.mode.auto.hint": "Timecode ou LTC d'abord, affiné et complété par la forme d'onde selon les cases ci-dessous.",
   "sync.mode.timecode.hint": "Calage par le timecode ou le LTC uniquement, sans corrélation. Pour un tournage avec timecode fiable (jam sync).",
   "sync.mode.waveform.hint": "Le timecode est ignoré : chaque plan est cherché dans tous les sons du lot. Pour un timecode absent ou faux. Plus long.",
-  "sync.mono.tracks": "Une piste mono par canal (comme en MXF)"
+  "sync.mono.tracks": "Une piste mono par canal (comme en MXF)",
+  "player.scopes": "Scopes",
+  "player.scopes.hint": "Forme d'onde, parade RGB, vectorscope et histogramme de l'image affichée",
+  "player.scope": "Scope",
+  "player.scope.waveform": "Forme d'onde (luma)",
+  "player.scope.parade": "Parade RGB",
+  "player.scope.vectorscope": "Vectorscope",
+  "player.scope.histogram": "Histogramme",
+  "player.scope.hint": "Calculé sur l'aperçu affiché (8 bits, LUT comprise), Rec. 709. 0 % = noir, 100 % = blanc."
 }

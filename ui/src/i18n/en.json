@@ -711,5 +711,13 @@
   "sync.mode.auto.hint": "Timecode or LTC first, refined and completed by the waveform as set below.",
   "sync.mode.timecode.hint": "Aligned by timecode or LTC only, no correlation. For shoots with reliable timecode (jam sync).",
   "sync.mode.waveform.hint": "Timecode is ignored: each clip is searched in every sound of the batch. For missing or wrong timecode. Slower.",
-  "sync.mono.tracks": "One mono track per channel (as in MXF)"
+  "sync.mono.tracks": "One mono track per channel (as in MXF)",
+  "player.scopes": "Scopes",
+  "player.scopes.hint": "Waveform, RGB parade, vectorscope and histogram of the displayed picture",
+  "player.scope": "Scope",
+  "player.scope.waveform": "Waveform (luma)",
+  "player.scope.parade": "RGB parade",
+  "player.scope.vectorscope": "Vectorscope",
+  "player.scope.histogram": "Histogram",
+  "player.scope.hint": "Computed on the displayed preview (8-bit, LUT included), Rec. 709. 0% = black, 100% = white."
 }
