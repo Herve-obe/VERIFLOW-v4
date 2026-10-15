@@ -724,3 +724,42 @@ fn output_names_never_overwrite_the_source() {
     };
     assert_eq!(req.output_name(&src, 0, ""), "A_B clip");
 }
+
+#[test]
+fn dnxhd_in_mxf_op_atom_for_avid() {
+    if !ffmpeg_available() || !available("dnxhd_lb") {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let src = clip_sized(dir.path(), "A001C010.mov", "1920x1080", 1);
+    let mut req = request(vec![src], "dnxhd_lb", &dir.path().join("out"));
+    req.settings.op_atom = true;
+    let summary = run(&req);
+    let mut names: Vec<String> = summary.files[0]
+        .outputs
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["A001C010_A1.mxf", "A001C010_A2.mxf", "A001C010_V1.mxf"],
+        "un fichier image et un par canal"
+    );
+    let out = dir.path().join("out");
+    let v = out.join("A001C010_V1.mxf");
+    assert_eq!(ffprobe(&v, "stream=codec_type"), ["video"]);
+    assert_eq!(ffprobe(&v, "stream=codec_name"), ["dnxhd"]);
+    assert!(
+        ffprobe(&v, "format_tags=timecode").contains(&"10:00:00:00".to_string()),
+        "timecode de l'image"
+    );
+    for a in ["A001C010_A1.mxf", "A001C010_A2.mxf"] {
+        let a = out.join(a);
+        assert_eq!(ffprobe(&a, "stream=codec_name,channels"), ["pcm_s24le,1"]);
+        assert!(
+            ffprobe(&a, "format_tags=timecode").contains(&"10:00:00:00".to_string()),
+            "timecode du son"
+        );
+    }
+}

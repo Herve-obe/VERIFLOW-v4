@@ -73,6 +73,9 @@
     {#if preset.kind === "video"}
       <label class="tc-check"><input type="checkbox" bind:checked={form.settings.vmaf_after} /> {t("transcode.vmaf.after")}</label>
     {/if}
+    {#if preset.id.startsWith("dnxhd_")}
+      <label class="tc-check" title={t("transcode.op.atom.hint")}><input type="checkbox" bind:checked={form.settings.op_atom} /> {t("transcode.op.atom")}</label>
+    {/if}
     <label class="tc-check"><input type="checkbox" bind:checked={form.report} /> {t("transcode.report")}</label>
   </Section>
 {:else}
