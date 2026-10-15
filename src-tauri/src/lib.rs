@@ -11,6 +11,7 @@ mod monitor;
 mod offload;
 mod player;
 mod report;
+mod subtitles;
 mod sync;
 mod transcode;
 
@@ -112,6 +113,9 @@ pub fn run() {
             monitor::monitor_screens,
             monitor::monitor_open,
             monitor::monitor_close,
+            subtitles::subtitles_load,
+            subtitles::subtitles_save,
+            subtitles::subtitles_check,
             sync::sync_expand,
             sync::sync_analyze,
             sync::sync_cancel,
