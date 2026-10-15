@@ -275,56 +275,8 @@
     {#if ltcNotice}
       <LtcNotice names={strips.map((st) => st.name)} {ltc} onChoice={setLtc} />
     {/if}
-    <header>
-      <div class="clock">
-        <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
-        <span class="small mono">{secondsToClock(position)} / {secondsToClock(duration)}</span>
-      </div>
-      <Transport {playing} onToggle={toggle} onStop={stop} />
-      <div class="meta">
-        {#if first?.ixml.scene}<span>{t("player.scene")} <b>{first.ixml.scene}</b></span>{/if}
-        {#if first?.ixml.take}<span>{t("player.take")} <b>{first.ixml.take}</b></span>{/if}
-        <span>{strips.length} {t("player.tracks")}, {session.session.sample_rate / 1000} kHz, {first?.bits} bits{first?.format === "Float" ? " float" : ""}</span>
-        <span class:warn={session.output.resampling}>
-          {t("player.output")} : {session.output.device}{session.output.first_channel > 0
-            ? ` (${session.output.first_channel + 1}-${session.output.first_channel + 2})`
-            : ""}, {session.output.sample_rate / 1000} kHz
-          ({session.output.resampling ? t("player.resampling") : t("player.native")})
-        </span>
-        <OutputPicker />
-        {#if markIn !== null || markOut !== null}
-          <span class="marks mono">
-            {t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)} · {t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}
-          </span>
-        {/if}
-      </div>
-      <button class="change" onclick={open}>{t("player.change")}</button>
-    </header>
     </div>
 
-    <div class="scrubwrap">
-      <input
-        class="scrub"
-        type="range"
-        min="0"
-        max={duration}
-        step="0.01"
-        value={position}
-        oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
-      />
-      {#each markers as m (m.id)}
-        {#if m.in_frame !== null && m.out_frame !== null}
-          <span
-            class="span"
-            style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
-            style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
-            style:background={markerCss(m.color)}
-          ></span>
-        {:else}
-          <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
-        {/if}
-      {/each}
-    </div>
 
     <div class="console">
       <div class="strips">
@@ -371,6 +323,56 @@
         </dl>
       </div>
     </div>
+
+    <div class="scrubwrap">
+      <input
+        class="scrub"
+        type="range"
+        min="0"
+        max={duration}
+        step="0.01"
+        value={position}
+        oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
+      />
+      {#each markers as m (m.id)}
+        {#if m.in_frame !== null && m.out_frame !== null}
+          <span
+            class="span"
+            style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
+            style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
+            style:background={markerCss(m.color)}
+          ></span>
+        {:else}
+          <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
+        {/if}
+      {/each}
+    </div>
+
+    <header>
+      <div class="clock">
+        <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
+        <span class="small mono">{secondsToClock(position)} / {secondsToClock(duration)}</span>
+      </div>
+      <Transport {playing} onToggle={toggle} onStop={stop} />
+      <div class="meta">
+        {#if first?.ixml.scene}<span>{t("player.scene")} <b>{first.ixml.scene}</b></span>{/if}
+        {#if first?.ixml.take}<span>{t("player.take")} <b>{first.ixml.take}</b></span>{/if}
+        <span>{strips.length} {t("player.tracks")}, {session.session.sample_rate / 1000} kHz, {first?.bits} bits{first?.format === "Float" ? " float" : ""}</span>
+        <span class:warn={session.output.resampling}>
+          {t("player.output")} : {session.output.device}{session.output.first_channel > 0
+            ? ` (${session.output.first_channel + 1}-${session.output.first_channel + 2})`
+            : ""}, {session.output.sample_rate / 1000} kHz
+          ({session.output.resampling ? t("player.resampling") : t("player.native")})
+        </span>
+        <OutputPicker />
+        {#if markIn !== null || markOut !== null}
+          <span class="marks mono">
+            {t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)} · {t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}
+          </span>
+        {/if}
+      </div>
+      <button class="change" onclick={open}>{t("player.change")}</button>
+    </header>
   </div>
   {#if logs}
     <MarkersPanel
@@ -479,7 +481,8 @@
     position: relative;
     min-height: 0;
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    /* Comme le lecteur vidéo : console, barre de défilement, transport. */
+    grid-template-rows: auto 1fr auto auto;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--vf-space-3);
     height: 100%;
@@ -520,9 +523,11 @@
     width: 100%;
     accent-color: var(--vf-accent);
   }
+  /* Tranches centrées ; au-delà de la largeur, défilement horizontal. */
   .console {
     display: flex;
-    align-items: flex-start;
+    justify-content: center;
+    align-items: flex-end;
     gap: var(--vf-space-3);
     min-height: 0;
     min-width: 0;
@@ -532,7 +537,7 @@
     align-items: flex-start;
     gap: var(--vf-space-1);
     overflow-x: auto;
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     padding-bottom: var(--vf-space-2);
   }
@@ -600,6 +605,8 @@
   }
   .masterstrip {
     width: 120px;
+    /* Même bas que les pistes (marge laissée à leur barre de défilement). */
+    margin-bottom: var(--vf-space-2);
   }
   .lufs {
     display: grid;
