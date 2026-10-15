@@ -38,6 +38,8 @@ pub struct RewrapOptions {
     pub keep_camera_audio: bool,
     /// En MOV aussi, une piste mono par canal (toujours le cas en MXF).
     pub mono_tracks: bool,
+    /// Corriger la dérive mesurée en rééchantillonnant le son de l'enregistreur.
+    pub correct_drift: bool,
     pub suffix: String,
     pub existing: Existing,
 }
@@ -49,6 +51,7 @@ impl Default for RewrapOptions {
             format: s("mov"),
             keep_camera_audio: true,
             mono_tracks: false,
+            correct_drift: true,
             suffix: s("_sync"),
             existing: Existing::Rename,
         }
@@ -64,10 +67,36 @@ fn kept_channels(audio: &SyncFile) -> Vec<usize> {
 
 /// Nouveau fichier : image de la vidéo recopiée, son de l'enregistreur calé
 /// (pistes nommées d'après l'iXML), timecode de la vidéo.
+/// Correction de dérive : (décalage à appliquer au début du son, vitesse).
+///
+/// `offset` est mesuré au milieu du passage commun et `drift` est l'écart
+/// accumulé sur tout ce passage (positif : son en retard à la fin). Le son est
+/// lu `speed` fois plus vite (rééchantillonnage, comme un pull-up/pull-down),
+/// et décalé pour rester calé au milieu.
+pub fn drift_correction(video: &SyncFile, audio: &SyncFile, offset: f64, drift: f64) -> (f64, f64) {
+    let from = offset.max(0.0);
+    let to = (offset + audio.duration).min(video.duration);
+    let common = to - from;
+    if common <= 0.0 {
+        return (offset, 1.0);
+    }
+    let speed = 1.0 + drift / common;
+    let middle = (from + to) / 2.0;
+    // Instant du son entendu au milieu : il doit y rester après accélération.
+    (middle - (middle - offset) / speed, speed)
+}
+
+/// Calage d'une paire : décalage et dérive mesurée (s).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Timing {
+    pub offset: f64,
+    pub drift: Option<f64>,
+}
+
 pub fn rewrap(
     video: &SyncFile,
     audio: &SyncFile,
-    offset: f64,
+    timing: Timing,
     opts: &RewrapOptions,
     taken: &mut HashSet<PathBuf>,
     cancel: &AtomicBool,
@@ -79,11 +108,28 @@ pub fn rewrap(
     if ainfo.audio.is_empty() {
         return Err(Error::Unsupported(format!("{} : pas de son", audio.name)));
     }
+    let (offset, speed) = match timing.drift {
+        Some(d) if opts.correct_drift && d != 0.0 => {
+            drift_correction(video, audio, timing.offset, d)
+        }
+        _ => (timing.offset, 1.0),
+    };
+    let rate = ainfo.audio[0].sample_rate.max(1);
+    // Rééchantillonnage : le son est lu `speed` fois plus vite.
+    let speed_filters = if speed == 1.0 {
+        Vec::new()
+    } else {
+        vec![
+            format!("asetrate={:.6}", rate as f64 * speed),
+            format!("aresample={rate}"),
+        ]
+    };
     let mut in_args = Vec::new();
     if offset > 0.0 {
         in_args.extend([s("-itsoffset"), format!("{offset:.6}")]);
     } else if offset < 0.0 {
-        in_args.extend([s("-ss"), format!("{:.6}", -offset)]);
+        // Le saut se fait dans le temps du fichier, avant l'accélération.
+        in_args.extend([s("-ss"), format!("{:.6}", -offset * speed)]);
     }
     let channels = kept_channels(audio);
     let pan = if channels.len() as u32 == audio.channels {
@@ -110,7 +156,7 @@ pub fn rewrap(
             1,
             &ainfo,
             pan,
-            &[s("aresample=48000")],
+            &[speed_filters.clone(), vec![s("aresample=48000")]].concat(),
             channels.len() as u32,
         );
         a.extend([s("-filter_complex"), graph]);
@@ -122,10 +168,10 @@ pub fn rewrap(
                 .iter()
                 .map(|c| audio.tracks.get(*c).cloned().unwrap_or_default()),
         );
-    } else if let Some(p) = pan {
+    } else if pan.is_some() || speed != 1.0 {
         a.extend([
             s("-filter_complex"),
-            audio_chain(1, &ainfo, Some(p), &[], "aout"),
+            audio_chain(1, &ainfo, pan, &speed_filters, "aout"),
             s("-map"),
             s("[aout]"),
         ]);

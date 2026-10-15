@@ -272,6 +272,34 @@ fn clock_drift_is_measured() {
         .unwrap_or_else(|| panic!("dérive non mesurée : {p:?}"));
     // Enregistreur trop rapide : le son est en avance à la fin (dérive négative).
     assert!((frames + 1.35).abs() < 0.3, "dérive {frames} images");
+
+    // Re-wrap avec correction : calé au début comme à la fin.
+    let opts = export::RewrapOptions {
+        dest: Some(dir.path().join("corrige")),
+        ..Default::default()
+    };
+    let out = export::rewrap(
+        &r.videos[0],
+        &r.audios[0],
+        export::Timing {
+            offset: p.offset,
+            drift: p.drift,
+        },
+        &opts,
+        &mut std::collections::HashSet::new(),
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+    )
+    .unwrap();
+    let synced = describe(&out);
+    let video = &r.videos[0];
+    for at in [2.0, 84.0] {
+        let (offset, _) = refine_at(video, &synced, 0.0, 0.1, at, 4.0).unwrap();
+        assert!(
+            offset.abs() < 0.002,
+            "décalage résiduel à {at} s : {offset}"
+        );
+    }
 }
 
 #[test]
@@ -303,7 +331,10 @@ fn rewrap_and_timelines() {
         let out = export::rewrap(
             video,
             audio,
-            p.offset,
+            export::Timing {
+                offset: p.offset,
+                drift: None,
+            },
             &opts,
             &mut taken,
             &AtomicBool::new(false),
@@ -447,7 +478,10 @@ fn mov_with_one_mono_track_per_channel() {
         let out = export::rewrap(
             &r.videos[0],
             &r.audios[0],
-            p.offset,
+            export::Timing {
+                offset: p.offset,
+                drift: None,
+            },
             &opts,
             &mut taken,
             &AtomicBool::new(false),
