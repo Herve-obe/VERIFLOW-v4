@@ -683,7 +683,7 @@
   "sync.keep.camera": "Garder le son caméra en pistes supplémentaires",
   "sync.rewrap.run": "Créer les fichiers synchronisés",
   "sync.timelines": "Timelines pour le montage",
-  "sync.export.hint": "Le re-wrap ne réencode pas l'image. FCPXML s'ouvre dans Final Cut Pro et DaVinci Resolve, OTIO dans Resolve, Premiere (via plugin) et Avid.",
+  "sync.export.hint": "Le re-wrap ne réencode pas l'image. FCPXML s'ouvre dans Final Cut Pro et DaVinci Resolve, OTIO dans Resolve, Premiere (via plugin) et Avid. La correction de dérive ne s'applique qu'au re-wrap.",
   "sync.howto": "Ajoute des vidéos et des sons, puis lance l'analyse. Les paires sont trouvées par le timecode, le LTC enregistré sur une piste, ou la forme d'onde du son témoin.",
   "sync.no.sound": "Aucun son",
   "sync.frames": "images",
@@ -722,5 +722,6 @@
   "player.scope.parade": "Parade RGB",
   "player.scope.vectorscope": "Vectorscope",
   "player.scope.histogram": "Histogramme",
-  "player.scope.hint": "Calculé sur l'aperçu affiché (8 bits, LUT comprise), Rec. 709. 0 % = noir, 100 % = blanc."
+  "player.scope.hint": "Calculé sur l'aperçu affiché (8 bits, LUT comprise), Rec. 709. 0 % = noir, 100 % = blanc.",
+  "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)"
 }

@@ -191,6 +191,9 @@ pub struct ExportItem {
     video: SyncFile,
     audio: Option<SyncFile>,
     offset: f64,
+    /// Dérive mesurée (s), corrigée au re-wrap si demandé.
+    #[serde(default)]
+    drift: Option<f64>,
 }
 
 #[derive(Clone, Serialize)]
@@ -244,7 +247,10 @@ pub async fn sync_rewrap(
             let r = export::rewrap(
                 &it.video,
                 audio,
-                it.offset,
+                export::Timing {
+                    offset: it.offset,
+                    drift: it.drift,
+                },
                 &options,
                 &mut taken,
                 &cancel,
