@@ -683,7 +683,7 @@
   "sync.keep.camera": "Keep camera sound as extra tracks",
   "sync.rewrap.run": "Create synced files",
   "sync.timelines": "Editing timelines",
-  "sync.export.hint": "Re-wrap does not re-encode the picture. FCPXML opens in Final Cut Pro and DaVinci Resolve, OTIO in Resolve, Premiere (via plugin) and Avid.",
+  "sync.export.hint": "Re-wrap does not re-encode the picture. FCPXML opens in Final Cut Pro and DaVinci Resolve, OTIO in Resolve, Premiere (via plugin) and Avid. Drift correction applies to re-wrap only.",
   "sync.howto": "Add videos and sounds, then run the analysis. Pairs are found by timecode, LTC recorded on a track, or the scratch audio waveform.",
   "sync.no.sound": "No sound",
   "sync.frames": "frames",
@@ -745,5 +745,6 @@
   "sub.issue.too_long": "too long",
   "sub.issue.too_fast": "reading too fast",
   "sub.issue.line_too_long": "line too long",
-  "sub.issue.too_many_lines": "too many lines"
+  "sub.issue.too_many_lines": "too many lines",
+  "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)"
 }
