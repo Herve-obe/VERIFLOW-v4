@@ -278,7 +278,7 @@ Aucun logiciel ne peut garantir à lui seul une valeur juridique. VERIFLOW fourn
 
 **Mode VIDEO**
 - Lecture fluide et **précise à l'image**, shuttle, jog.
-- **LUT d'affichage** (.cube) et **TC incrusté** en V1 (VALIDÉ). **Scopes** (forme d'onde, parade RGB, vectorscope, histogramme) avancés de V2 en V1 le 11/10/2026. Sortie moniteur externe en V2.
+- **LUT d'affichage** (.cube) et **TC incrusté** en V1 (VALIDÉ). **Scopes** (forme d'onde, parade RGB, vectorscope, histogramme) et **sortie moniteur** sur un second écran (plein écran, image propre) avancés de V2 en V1 le 11/10/2026 ; sortie SDI par carte Blackmagic DeckLink exclue (SDK propriétaire, FFmpeg alors non redistribuable).
 - Logs : marqueurs avec couleur, commentaire, in/out, scène/prise.
 - Exports : **EDL CMX3600, ALE, CSV, FCPXML, OTIO** (VALIDÉ).
 
