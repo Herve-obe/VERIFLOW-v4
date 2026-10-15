@@ -209,3 +209,52 @@ pub fn tracks(
     }
     Ok(out)
 }
+
+/// MXF OP-Atom (Avid Media Composer) : un fichier mono PCM 24 bits par canal,
+/// `_A1`, `_A2`... ; même timecode que l'image.
+pub fn opatom_audio(
+    info: &MediaInfo,
+    input_args: &[String],
+    start: f64,
+    duration: f64,
+) -> Vec<(String, Plan)> {
+    let rate = info
+        .video
+        .as_ref()
+        .map(|v| v.rate)
+        .unwrap_or(crate::player::timecode::FrameRate::new(25, 1));
+    let tc = tc_after(info, start);
+    (0..total_channels(info))
+        .map(|c| {
+            let graph = audio_chain(0, info, Some(format!("pan=mono|c0=c{c}")), &[], "aout");
+            let mut args = vec![
+                s("-map_metadata"),
+                s("0"),
+                s("-filter_complex"),
+                graph,
+                s("-map"),
+                s("[aout]"),
+                s("-c:a"),
+                s("pcm_s24le"),
+                s("-ar"),
+                s("48000"),
+                s("-mxf_audio_edit_rate"),
+                format!("{}/{}", rate.num, rate.den),
+            ];
+            if let Some(tc) = &tc {
+                args.extend([s("-timecode"), tc.to_string()]);
+            }
+            (
+                format!("_A{}", c + 1),
+                Plan {
+                    input_args: input_args.to_vec(),
+                    args,
+                    format: s("mxf_opatom"),
+                    duration,
+                    start,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}

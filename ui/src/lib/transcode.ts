@@ -122,6 +122,7 @@ export interface Settings {
   reference: string | null;
   threshold: number | null;
   vmaf_after: boolean;
+  op_atom: boolean;
 }
 
 export const defaultTextStyle = (position: Position = "bottom"): TextStyle => ({ position, size: 4, opacity: 1, background: true });
@@ -168,6 +169,7 @@ export function defaultSettings(preset: string): Settings {
     reference: null,
     threshold: null,
     vmaf_after: false,
+    op_atom: false,
   };
 }
 
