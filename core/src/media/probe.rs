@@ -19,6 +19,9 @@ pub struct VideoStream {
     pub height: u32,
     pub rate: FrameRate,
     pub pix_fmt: String,
+    /// Matrice YUV déclarée (« bt709 », « smpte170m »...), vide si absente.
+    #[serde(default)]
+    pub color_space: String,
     /// Nombre d'images, mesuré ou estimé à partir de la durée.
     pub frame_count: i64,
     /// Horodatage de la première image, en secondes (souvent 0).
@@ -82,6 +85,7 @@ struct RawStream {
     avg_frame_rate: Option<String>,
     r_frame_rate: Option<String>,
     pix_fmt: Option<String>,
+    color_space: Option<String>,
     nb_frames: Option<String>,
     duration: Option<String>,
     start_time: Option<String>,
@@ -160,6 +164,7 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
                     height: s.height.unwrap_or(0),
                     rate,
                     pix_fmt: s.pix_fmt.clone().unwrap_or_default(),
+                    color_space: s.color_space.clone().unwrap_or_default(),
                     frame_count,
                     start_time: num(&s.start_time).unwrap_or(0.0),
                 });
