@@ -7,6 +7,7 @@ mod logs;
 #[cfg(target_os = "macos")]
 mod macos;
 mod media;
+mod monitor;
 mod offload;
 mod player;
 mod report;
@@ -36,6 +37,15 @@ pub fn run() {
             app.manage(offload::OffloadState::new(app.handle().clone()));
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
+            // Fermer la fenêtre principale ferme aussi la sortie moniteur.
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let _ = monitor::monitor_close(handle.clone());
+                    }
+                });
+            }
             #[cfg(target_os = "macos")]
             if let Some(main) = app.get_webview_window("main") {
                 let handle = main.clone();
@@ -99,6 +109,9 @@ pub fn run() {
             report::report_branding_get,
             report::report_branding_set,
             report::report_export,
+            monitor::monitor_screens,
+            monitor::monitor_open,
+            monitor::monitor_close,
             sync::sync_expand,
             sync::sync_analyze,
             sync::sync_cancel,

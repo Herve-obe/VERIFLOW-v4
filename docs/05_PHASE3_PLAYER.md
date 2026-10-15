@@ -116,6 +116,13 @@ Captures : `docs/captures/phase3_logs_tc_incruste.png`, `phase3_lut_affichage.pn
 
 Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_necessaire.png`.
 
+## Sortie moniteur (ajout du 11/10/2026, demande d'Hervé)
+
+- Menu « Moniteur » du lecteur vidéo (PLAYER et lecteur rapide de MEDIA) : liste des écrans branchés (nom, définition, écran principal signalé). Le choix d'un écran ouvre une fenêtre sans bordure, plein écran, fond noir, image propre (sans TC incrusté ni interface), LUT d'affichage comprise. Échap sur cet écran, ou « Moniteur » dans le menu, la ferme ; fermer VERIFLOW la ferme aussi.
+- Aucun second décodage : la fenêtre moniteur relit chaque image affichée dans le cache du lecteur.
+- Sortie SDI (Blackmagic DeckLink, AJA) : non prévue. Le SDK DeckLink est propriétaire ; un FFmpeg compilé avec lui n'est plus redistribuable (voir le remplacement du FFmpeg Linux). Un moniteur de contrôle se branche en HDMI ou DisplayPort comme second écran, ou via un convertisseur HDMI vers SDI.
+- Essai (Linux, Xvfb, un écran) : fenêtre plein écran en 16:9 avec bandes noires ; après 3 s de lecture lancée dans la fenêtre principale, image 77 (10:00:03:02) affichée sur les deux ; Échap ferme la fenêtre et remet le menu à zéro. Pas d'essai sur deux écrans réels ici.
+
 ## Scopes et couleurs de l'aperçu (ajout du 11/10/2026, demande d'Hervé)
 
 - Bouton « Scopes » du PLAYER VIDEO : forme d'onde luma, parade RGB, vectorscope (cibles des barres à 75 %, ligne des tons chair), histogramme RGB et luma. Calculés en temps réel sur l'image affichée (aperçu 8 bits, LUT comprise), luma et chrominance Rec. 709. Choix mémorisé.

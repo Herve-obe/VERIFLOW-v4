@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions de la fenêtre principale",
-  "windows": ["main"],
+  "description": "Permissions de la fenêtre principale et de la sortie moniteur",
+  "windows": ["main", "monitor"],
   "permissions": ["core:default", "dialog:default"]
 }
