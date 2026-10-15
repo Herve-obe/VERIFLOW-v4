@@ -712,5 +712,7 @@
   "sync.mode.timecode.hint": "Calage par le timecode ou le LTC uniquement, sans corrélation. Pour un tournage avec timecode fiable (jam sync).",
   "sync.mode.waveform.hint": "Le timecode est ignoré : chaque plan est cherché dans tous les sons du lot. Pour un timecode absent ou faux. Plus long.",
   "sync.mono.tracks": "Une piste mono par canal (comme en MXF)",
+  "transcode.op.atom": "MXF OP-Atom pour Avid (un fichier image, un par canal son)",
+  "transcode.op.atom.hint": "Fichiers _V1, _A1, _A2... à copier dans Avid MediaFiles/MXF : Media Composer les lit sans import ni lien AMA.",
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)"
 }
