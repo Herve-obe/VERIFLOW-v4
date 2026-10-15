@@ -42,6 +42,16 @@
 
   /* Lecteur vidéo */
   --vf-video-bg: #000000;
+  /* Scopes (forme d'onde, parade, vectorscope, histogramme). */
+  --vf-scope-bg: #050607;
+  --vf-scope-grid: rgb(255 255 255 / 0.18);
+  --vf-scope-label: rgb(255 255 255 / 0.45);
+  --vf-scope-trace: #7dffa0;
+  --vf-scope-red: #ff5a5a;
+  --vf-scope-green: #5aff7a;
+  --vf-scope-blue: #5a9bff;
+  --vf-scope-skin: #f5b48a;
+  --vf-scope-width: 300px;
   --vf-mark: #c77dff;
 
   /* Couleurs des marqueurs du PLAYER (palette Avid). */
