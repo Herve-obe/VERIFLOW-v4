@@ -10,6 +10,7 @@ pub mod offload;
 pub mod player;
 pub mod project;
 pub mod report;
+pub mod subtitles;
 pub mod sync;
 pub mod tools;
 pub mod transcode;
