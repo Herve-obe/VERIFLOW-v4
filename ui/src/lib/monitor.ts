@@ -24,3 +24,6 @@ export const sendFrame = (f: MonitorFrame) => emitTo("monitor", "monitor-frame",
 export const onFrame = (cb: (f: MonitorFrame) => void): Promise<UnlistenFn> =>
   listen<MonitorFrame>("monitor-frame", (e) => cb(e.payload));
 export const onClosed = (cb: () => void): Promise<UnlistenFn> => listen("monitor-closed", () => cb());
+/** Fenêtre moniteur chargée et à l'écoute : elle demande l'image en cours. */
+export const sendReady = () => emitTo("main", "monitor-ready").catch(() => {});
+export const onReady = (cb: () => void): Promise<UnlistenFn> => listen("monitor-ready", () => cb());
