@@ -683,7 +683,7 @@
   "sync.keep.camera": "Keep camera sound as extra tracks",
   "sync.rewrap.run": "Create synced files",
   "sync.timelines": "Editing timelines",
-  "sync.export.hint": "Re-wrap does not re-encode the picture. FCPXML opens in Final Cut Pro and DaVinci Resolve, OTIO in Resolve, Premiere (via plugin) and Avid.",
+  "sync.export.hint": "Re-wrap does not re-encode the picture. FCPXML opens in Final Cut Pro and DaVinci Resolve, OTIO in Resolve, Premiere (via plugin) and Avid. Drift correction applies to re-wrap only.",
   "sync.howto": "Add videos and sounds, then run the analysis. Pairs are found by timecode, LTC recorded on a track, or the scratch audio waveform.",
   "sync.no.sound": "No sound",
   "sync.frames": "frames",
@@ -711,5 +711,6 @@
   "sync.mode.auto.hint": "Timecode or LTC first, refined and completed by the waveform as set below.",
   "sync.mode.timecode.hint": "Aligned by timecode or LTC only, no correlation. For shoots with reliable timecode (jam sync).",
   "sync.mode.waveform.hint": "Timecode is ignored: each clip is searched in every sound of the batch. For missing or wrong timecode. Slower.",
-  "sync.mono.tracks": "One mono track per channel (as in MXF)"
+  "sync.mono.tracks": "One mono track per channel (as in MXF)",
+  "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)"
 }

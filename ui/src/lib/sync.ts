@@ -63,6 +63,7 @@ export interface RewrapOptions {
   format: "mov" | "mxf";
   keep_camera_audio: boolean;
   mono_tracks: boolean;
+  correct_drift: boolean;
   suffix: string;
   existing: "rename" | "overwrite" | "skip";
 }
@@ -71,6 +72,7 @@ export interface ExportItem {
   video: SyncFile;
   audio: SyncFile | null;
   offset: number;
+  drift?: number | null;
 }
 
 export interface ExportResult {
