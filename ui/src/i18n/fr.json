@@ -746,5 +746,7 @@
   "sub.issue.too_fast": "lecture trop rapide",
   "sub.issue.line_too_long": "ligne trop longue",
   "sub.issue.too_many_lines": "trop de lignes",
+  "transcode.op.atom": "MXF OP-Atom pour Avid (un fichier image, un par canal son)",
+  "transcode.op.atom.hint": "Fichiers _V1, _A1, _A2... à copier dans Avid MediaFiles/MXF : Media Composer les lit sans import ni lien AMA.",
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)"
 }

@@ -29,6 +29,7 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 | Son | Pistes des vidéos : toutes, pistes 1 et 2, mix stéréo (impaires à gauche, paires à droite), sans son ; fréquence, résolution, débit ; normalisation EBU R 128, ATSC A/85, streaming, podcast ou cible libre, par gain simple plafonné au True Peak |
 | Traitement | Selon le préréglage : images, cadence de conformation, fichiers son de remplacement (associés par le nom) et calage par timecode, plan à insérer, original pour VMAF, seuils de détection |
 | Éditeur de sous-titres | Section Incrustations : « Éditer » (fichier SRT ou VTT choisi) ou « Créer des sous-titres ». Temps de début et de fin (HH:MM:SS,mmm), texte, ajout, coupe en deux, fusion, suppression, tri, décalage global. Contrôles en direct : 42 caractères par ligne, 2 lignes, 17 caractères par seconde, 5/6 s à 7 s, 2 images d'écart à la cadence choisie, chevauchements. Enregistrement en SRT ou WebVTT (UTF-8) ; le fichier enregistré devient celui de la conversion (ajout du 11/10/2026) |
+| MXF OP-Atom (Avid) | Préréglages DNxHD 1080 : case « MXF OP-Atom pour Avid ». Un fichier image `_V1.mxf` et un fichier par canal son `_A1.mxf`, `_A2.mxf`... (PCM 24 bits, 48 kHz), même timecode (ajout du 11/10/2026) |
 | Destination et nommage | Dossier ou à côté des originaux ; préfixe, suffixe, remplacement de texte, numérotation ; fichier déjà présent : nouveau nom, ignorer ou remplacer (jamais l'original) ; aperçu du nom produit |
 | Vérification | Empreinte XXH128 de chaque fichier produit, qualité VMAF du fichier produit, rapport CSV du lot |
 
@@ -76,7 +77,6 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 - Détection de noir sur un montage : passage 09:00:02:00 à 09:00:03:00 trouvé, fichier CSV écrit.
 
 ## Limites connues
-- MXF OP-Atom (Avid) : non fait (DNxHD est livré en MXF OP1a, lu par Avid via AMA et par Resolve).
 - Éditeur de sous-titres : SRT et WebVTT seulement (les fichiers ASS restent utilisables tels quels, sans édition, pour garder leurs styles).
 - Découpe : points saisis en timecode ou secondes, sans lecteur dans l'onglet (le PLAYER donne les timecodes).
 - Encodeurs matériels non essayés ici (pas de carte graphique ni de Mac sur la machine de test).
@@ -92,4 +92,5 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 7. Remplacement du son calé par timecode (vidéo et WAV BWF du même plan).
 8. Analyses : détection de plans sur un montage (import de l'EDL dans Resolve), loudness d'un mix, VMAF d'un proxy.
 9. Préréglage personnel : enregistrer, exporter, importer sur l'autre poste.
-10. Éditeur de sous-titres : ouvrir un SRT reçu d'un client, corriger les signalements, enregistrer, incruster ; créer un VTT de zéro.
+10. MXF OP-Atom : fichiers DNxHD _V1 et _A1, _A2 copiés dans Avid MediaFiles/MXF, reconnus par Media Composer avec le bon timecode.
+11. Éditeur de sous-titres : ouvrir un SRT reçu d'un client, corriger les signalements, enregistrer, incruster ; créer un VTT de zéro.
