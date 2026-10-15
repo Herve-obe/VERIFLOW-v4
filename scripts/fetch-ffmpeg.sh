@@ -23,22 +23,32 @@ MR="https://ffmpeg.martin-riedl.de/download"
 # macOS Intel : builds statiques GPL d'evermeet.cx, compilés pour macOS 10.13
 # et plus (ceux de martin-riedl.de exigent macOS 12). Permet Catalina (10.15).
 EV="https://evermeet.cx/ffmpeg"
+# Copie de secours des mêmes fichiers evermeet, conservée dans le dépôt
+# (branche de stockage vendor/ffmpeg-evermeet, jamais fusionnée) : le miroir
+# d'evermeet est parfois injoignable. Même empreinte exigée : la copie ne
+# peut pas différer de l'original.
+EV_MIRROR="https://raw.githubusercontent.com/Herve-obe/VERIFLOW-v4/vendor/ffmpeg-evermeet"
 # Version minimale de macOS acceptée pour les binaires Intel embarqués.
 MACOS_INTEL_MIN="10.15"
+# Linux : builds statiques GPL de BtbN (variante linux64-gpl, branche 9.0),
+# sans --enable-nonfree. Ceux de martin-riedl.de sont compilés avec DeckLink
+# (--enable-nonfree), donc non redistribuables. Autobuild de fin de mois :
+# BtbN conserve ceux-là durablement.
+BTBN="https://github.com/BtbN/FFmpeg-Builds/releases/download"
+BTBN_TAG="autobuild-2026-09-30-13-08"
+BTBN_ASSET="ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+BTBN_SHA="68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269"
 
 # Compatible bash 3.2 (macOS) : pas de tableaux associatifs.
 mr_path() {
   case "$1" in
     macos-arm64) echo "macos/arm64/1789931890_${VERSION}" ;;
-    linux-amd64) echo "linux/amd64/1789931100_${VERSION}" ;;
   esac
 }
 mr_sha() {
   case "$1" in
     macos-arm64-ffmpeg) echo "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" ;;
     macos-arm64-ffprobe) echo "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6" ;;
-    linux-amd64-ffmpeg) echo "fa8ecf4abbd290d98f7d188b8649cc6b391ae209a98452be955a15aab1909d7f" ;;
-    linux-amd64-ffprobe) echo "3f428c49070be3d24ec338602b76d412e401ffcb8a5641ef0e729181a232fc32" ;;
   esac
 }
 
@@ -56,12 +66,18 @@ sha256() {
 # download <url> <fichier> <empreinte attendue>
 download() {
   echo "Téléchargement : $1"
-  curl -fsSL --retry 4 --retry-delay 5 -o "$2" "$1"
+  if ! curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors -o "$2" "$1"; then
+    echo "ERREUR : téléchargement impossible : $1" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Téléchargement FFmpeg::$1"
+    exit 1
+  fi
   local got
   got="$(sha256 "$2")"
   if [ -z "$3" ]; then
     # Source pas encore épinglée : l'empreinte est affichée pour être recopiée ici.
     echo "AVERTISSEMENT : empreinte à épingler pour $1 : $got" >&2
+    # Dans GitHub Actions : annotation visible dans le résumé du build.
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=Empreinte à épingler::$1 $got"
     return 0
   fi
   if [ "$got" != "$3" ]; then
@@ -80,9 +96,42 @@ fetch_mr() {
   chmod +x "$3"
 }
 
+# Récupère ffmpeg et ffprobe depuis BtbN (Linux) : fetch_btbn <destination sans suffixe>
+fetch_btbn() {
+  local asset="$BTBN_ASSET"
+  if [ -z "$asset" ]; then
+    # Nom pas encore épinglé : lu dans la liste des fichiers de l'autobuild.
+    asset="$(curl -fsSL --retry 4 "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$BTBN_TAG" |
+      grep -o '"name": *"ffmpeg-n9\.0[^"]*-linux64-gpl-9\.0\.tar\.xz"' | head -1 | sed 's/.*"\(ffmpeg-[^"]*\)"/\1/')"
+    echo "AVERTISSEMENT : fichier à épingler (BTBN_ASSET) : $asset" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=Fichier à épingler::$asset"
+  fi
+  download "$BTBN/$BTBN_TAG/$asset" "$WORK/btbn.tar.xz" "$BTBN_SHA"
+  tar -xJf "$WORK/btbn.tar.xz" -C "$WORK"
+  for tool in ffmpeg ffprobe; do
+    cp "$WORK/${asset%.tar.xz}/bin/$tool" "$1-$tool"
+    chmod +x "$1-$tool"
+  done
+}
+
 # Récupère un outil depuis evermeet.cx (macOS Intel) : fetch_ev <outil> <destination>
 fetch_ev() {
-  download "$EV/$1-${VERSION}.zip" "$WORK/ev-$1.zip" "$(ev_sha "$1")"
+  local name="$1-${VERSION}.zip"
+  if curl -fsSL --retry 2 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$EV/$name"; then
+    echo "Téléchargé depuis evermeet.cx : $name"
+  else
+    echo "evermeet.cx injoignable pour $name, copie de secours : $EV_MIRROR/$name" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=FFmpeg macOS Intel::evermeet.cx injoignable, copie de secours utilisée pour $name"
+  fi
+  if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
+    curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$EV_MIRROR/$name" || rm -f "$WORK/ev-$1.zip"
+  fi
+  # Vérification finale (empreinte), message clair en cas d'échec.
+  if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
+    echo "ERREUR : $name introuvable ou altéré (evermeet.cx et copie de secours du dépôt)" >&2
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Téléchargement FFmpeg::$name introuvable ou altéré (evermeet.cx et copie de secours du dépôt)"
+    exit 1
+  fi
   unzip -o -q "$WORK/ev-$1.zip" -d "$WORK/ev-$1"
   cp "$WORK/ev-$1/$1" "$2"
   chmod +x "$2"
@@ -118,7 +167,8 @@ case "$TARGET" in
     done
     ;;
   x86_64-unknown-linux-gnu)
-    for tool in ffmpeg ffprobe; do fetch_mr linux-amd64 "$tool" "$DEST/veriflow-$tool-$TARGET"; done
+    fetch_btbn "$DEST/veriflow"
+    for tool in ffmpeg ffprobe; do mv "$DEST/veriflow-$tool" "$DEST/veriflow-$tool-$TARGET"; done
     ;;
   aarch64-apple-darwin)
     for tool in ffmpeg ffprobe; do fetch_mr macos-arm64 "$tool" "$DEST/veriflow-$tool-$TARGET"; done

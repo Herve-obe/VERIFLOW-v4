@@ -27,7 +27,8 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 2. **Affinage par la forme d'onde** (option) : corrélation GCC-PHAT du son témoin de la caméra et du son de l'enregistreur, sur 10 s au milieu du passage commun, autour du décalage donné par le timecode (tolérance réglable, 2 s par défaut). Précision : l'échantillon à 16 kHz, soit environ 0,06 ms. Si le timecode était faux, la remarque l'indique (« timecode corrigé de … »).
 3. **Recherche sans timecode** (option) : corrélation du son témoin sur toute la durée de chaque son, à 2 kHz, puis affinage.
 4. **Confiance** : 1 moins le rapport du second pic au premier. En dessous de 25 %, le résultat est écarté ou signalé.
-5. **Dérive** (option) : décalage mesuré au début et à la fin du passage commun (extraits de 4 s, passage commun d'au moins 60 s). La dérive est donnée en images sur la durée du plan ; alerte au-delà d'une image. Correction prévue en V2 (charte).
+5. **Dérive** (option) : décalage mesuré au début et à la fin du passage commun (extraits de 4 s, passage commun d'au moins 60 s). La dérive est donnée en images sur la durée du plan ; alerte au-delà d'une image.
+6. **Correction de la dérive** (re-wrap, case cochée par défaut ; décision d'Hervé du 11/10/2026, avancée de V2 en V1) : le son de l'enregistreur est rééchantillonné (comme un pull-up ou pull-down) pour suivre l'horloge de la caméra, et reste calé au milieu du plan. FCPXML et OTIO ne portent que le décalage.
 
 ### Interface
 
@@ -60,7 +61,7 @@ La case « Paires validées seulement » limite l'export aux paires cochées (d�
 - timecode BWF faux de 0,3 s corrigé par la forme d'onde ;
 - plan sans timecode trouvé par la forme d'onde (−12,5 s) ;
 - LTC 14:30:00:00 lu sur le canal 1 ;
-- dérive de 600 ppm détectée (environ −1,35 image, signe juste) ;
+- dérive de 600 ppm détectée (environ −1,35 image, signe juste), puis corrigée au re-wrap : décalage résiduel inférieur à 2 ms au début et à la fin d'un plan de 90 s ;
 - re-wrap MOV et MXF : pistes, durée, timecode ;
 - méthodes : « timecode seul » garde le son à la même heure sans affinage, « forme d'onde seule » trouve le vrai son malgré un leurre à la même heure ;
 - MOV avec une piste mono par canal : enregistreur stéréo en 2 pistes mono, plus le son caméra ;
@@ -79,7 +80,7 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 - re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
 ## Limites connues
-- Correction de la dérive : V2 (charte). V1 : mesure et alerte.
+- Correction de la dérive : au re-wrap seulement, pas dans les timelines FCPXML et OTIO.
 - AAF : V2 (charte).
 - Les remarques produites par le cœur (« timecode corrigé de … ») sont en français quelle que soit la langue de l'interface.
 - Son témoin très faible ou absent : seule la méthode par timecode est possible (message dans le détail de la paire).
@@ -92,4 +93,4 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 4. Rushes en 23,976 et 29,97 DF : timecodes affichés et décalages.
 5. Re-wrap MOV (polyphonique et une piste mono par canal) et MXF : import dans DaVinci Resolve, Premiere et Avid ; pistes nommées, timecode, son caméra en plus.
 6. FCPXML dans Final Cut Pro et Resolve, OTIO dans Resolve : son attaché et calé.
-7. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute.
+7. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute, puis re-wrap avec correction : calage au début et à la fin.

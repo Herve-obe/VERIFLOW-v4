@@ -53,9 +53,9 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 - **Disponibilité selon le FFmpeg du poste** : liste des encodeurs et filtres lue au démarrage ; un préréglage impossible est grisé avec la raison. Encodeurs du système et de la carte graphique (VideoToolbox, NVENC, Quick Sync, AMF, Media Foundation) essayés une fois, encodeur logiciel sinon.
 - FFmpeg intégrés (version 9.0.2), constaté le 09/10/2026 :
   - Windows (gyan.dev, « essentials ») : ni HAP, ni H.266, ni SVT-AV1 (AV1 par libaom), ni JPEG XL ;
-  - Linux (martin-riedl.de) : ni Xvid, ni JPEG XL ;
+  - Linux (BtbN, depuis le 11/10/2026 ; avant : martin-riedl.de) : liste des encodeurs à revérifier sur l'installeur Linux ;
   - macOS : à vérifier sur le poste.
-  - **Point à traiter** : le FFmpeg Linux de martin-riedl.de est compilé avec `--enable-nonfree`, ce qui le rend en principe non redistribuable. À remplacer avant toute diffusion.
+  - **Réglé le 11/10/2026** : le FFmpeg Linux de martin-riedl.de était compilé avec `--enable-nonfree` (DeckLink), donc non redistribuable ; remplacé par le build GPL de BtbN (voir `docs/FFMPEG.md`).
 - Hors périmètre (charte) : outils IA, gravure DVD/Blu-ray, téléchargement web, FTP, e-mail. Dolby Digital Plus et TrueHD : licences Dolby à vérifier avant d'être proposés.
 
 ## Vérifications réalisées
