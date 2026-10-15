@@ -937,6 +937,7 @@ mod tests {
                 height: 1080,
                 rate: FrameRate::new(25, 1),
                 pix_fmt: "yuv420p".into(),
+                color_space: String::new(),
                 frame_count: 250,
                 start_time: 0.0,
             }),
