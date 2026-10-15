@@ -528,6 +528,8 @@
     display: flex;
     justify-content: center;
     align-items: flex-end;
+    /* Hauteur des tranches seulement, posée en bas de la zone. */
+    align-self: end;
     gap: var(--vf-space-3);
     min-height: 0;
     min-width: 0;
@@ -603,9 +605,12 @@
     background: var(--vf-error);
     color: var(--vf-on-accent);
   }
+  /* Même hauteur que les pistes : nom, vumètres et fader sur les mêmes
+     lignes (marge du bas laissée à la barre de défilement des pistes). */
   .masterstrip {
     width: 120px;
-    /* Même bas que les pistes (marge laissée à leur barre de défilement). */
+    align-self: stretch;
+    justify-content: flex-start;
     margin-bottom: var(--vf-space-2);
   }
   .lufs {
