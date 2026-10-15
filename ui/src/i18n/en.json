@@ -723,5 +723,7 @@
   "player.scope.vectorscope": "Vectorscope",
   "player.scope.histogram": "Histogram",
   "player.scope.hint": "Computed on the displayed preview (8-bit, LUT included), Rec. 709. 0% = black, 100% = white.",
+  "transcode.op.atom": "MXF OP-Atom for Avid (one picture file, one per audio channel)",
+  "transcode.op.atom.hint": "_V1, _A1, _A2... files to copy into Avid MediaFiles/MXF: Media Composer reads them without import or AMA link.",
   "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)"
 }

@@ -484,6 +484,23 @@ fn process(
             let plan = special::insert(source, &info, &file, &insert_info, &at, &job.format())?;
             plans.push((plan, reserve("", &ext, taken)?));
         }
+        Kind::DnxHd(_) if settings.op_atom => {
+            // Image seule, puis un fichier par canal son.
+            let mut video_only = settings.clone();
+            video_only.audio_mode = Some(AudioMode::None);
+            let mut plan = build(&Job {
+                settings: &video_only,
+                ..job
+            })?;
+            plan.format = "mxf_opatom".into();
+            plans.push((plan, reserve("_V1", "mxf", taken)?));
+            if settings.audio_mode != Some(AudioMode::None) && !info.audio.is_empty() {
+                let (input_args, start, duration) = build::trim(&job)?;
+                for (extra, plan) in special::opatom_audio(&info, &input_args, start, duration) {
+                    plans.push((plan, reserve(&extra, "mxf", taken)?));
+                }
+            }
+        }
         _ => {
             let plan = build(&job)?;
             let out = if plan.sequence {

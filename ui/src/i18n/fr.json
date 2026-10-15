@@ -723,5 +723,7 @@
   "player.scope.vectorscope": "Vectorscope",
   "player.scope.histogram": "Histogramme",
   "player.scope.hint": "Calculé sur l'aperçu affiché (8 bits, LUT comprise), Rec. 709. 0 % = noir, 100 % = blanc.",
+  "transcode.op.atom": "MXF OP-Atom pour Avid (un fichier image, un par canal son)",
+  "transcode.op.atom.hint": "Fichiers _V1, _A1, _A2... à copier dans Avid MediaFiles/MXF : Media Composer les lit sans import ni lien AMA.",
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)"
 }
