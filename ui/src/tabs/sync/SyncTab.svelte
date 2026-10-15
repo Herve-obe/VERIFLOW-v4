@@ -34,7 +34,7 @@
   function load() {
     const d = {
       options: { mode: "auto", refine: true, waveform_search: true, drift: true, window: 2 } as Options,
-      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: false, suffix: "_sync", existing: "rename" } as RewrapOptions,
+      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: false, correct_drift: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
       validatedOnly: false,
       nextToVideo: true,
     };
@@ -126,7 +126,7 @@
     if (!a) return [];
     return a.pairs
       .filter((p) => p.audio !== null && (!cfg.validatedOnly || p.validated))
-      .map((p) => ({ video: $state.snapshot(a.videos[p.video]), audio: $state.snapshot(a.audios[p.audio as number]), offset: p.offset }));
+      .map((p) => ({ video: $state.snapshot(a.videos[p.video]), audio: $state.snapshot(a.audios[p.audio as number]), offset: p.offset, drift: p.drift }));
   };
   const exportCount = $derived(a ? a.pairs.filter((p) => p.audio !== null && (!cfg.validatedOnly || p.validated)).length : 0);
 
@@ -334,6 +334,7 @@
               <label class="tc-check tc-wide"><input type="checkbox" bind:checked={cfg.rewrap.mono_tracks} /> {t("sync.mono.tracks")}</label>
             {/if}
             <label class="tc-check tc-wide"><input type="checkbox" bind:checked={cfg.rewrap.keep_camera_audio} /> {t("sync.keep.camera")}</label>
+            <label class="tc-check tc-wide"><input type="checkbox" bind:checked={cfg.rewrap.correct_drift} /> {t("sync.correct.drift")}</label>
           </div>
           {#if exporting}
             <ProgressBar value={exportFraction} />

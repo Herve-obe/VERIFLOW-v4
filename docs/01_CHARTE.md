@@ -326,7 +326,7 @@ Améliorations apportées par VERIFLOW (PROPOSÉ) :
 |---|---|
 | Méthodes | **TC des métadonnées** (BWF timeReference, piste tmcd QuickTime, TC MXF), **décodage LTC** enregistré sur une piste audio, **corrélation de formes d'onde** (VALIDÉ) |
 | Mode de travail | Par lot : appariement automatique vidéo/son, validation manuelle possible clip par clip |
-| Dérive d'horloge | Détection et alerte en V1, correction en V2 (VALIDÉ) |
+| Dérive d'horloge | Détection, alerte et correction au re-wrap en V1 (correction avancée de V2 en V1 le 11/10/2026) |
 | Cadences | 23.976, 24, 25, 29.97 DF et NDF, 30, 47.95, 48, 50, 59.94 DF et NDF, 60 (VALIDÉ) |
 | Exports | **Re-wrap sans réencodage** (vidéo + son synchronisé dans un nouveau fichier), **FCPXML** et **OTIO**. AAF en V2 (VALIDÉ) |
 
