@@ -328,7 +328,7 @@ Améliorations apportées par VERIFLOW (PROPOSÉ) :
 | Mode de travail | Par lot : appariement automatique vidéo/son, validation manuelle possible clip par clip |
 | Dérive d'horloge | Détection, alerte et correction au re-wrap en V1 (correction avancée de V2 en V1 le 11/10/2026) |
 | Cadences | 23.976, 24, 25, 29.97 DF et NDF, 30, 47.95, 48, 50, 59.94 DF et NDF, 60 (VALIDÉ) |
-| Exports | **Re-wrap sans réencodage** (vidéo + son synchronisé dans un nouveau fichier), **FCPXML** et **OTIO**. AAF en V2 (VALIDÉ) |
+| Exports | **Re-wrap sans réencodage** (vidéo + son synchronisé dans un nouveau fichier), **FCPXML**, **OTIO** et **AAF** (médias liés ; avancé de V2 en V1 le 16/10/2026) (VALIDÉ) |
 
 ### 7.6 TRANSCODE (priorité 6)
 

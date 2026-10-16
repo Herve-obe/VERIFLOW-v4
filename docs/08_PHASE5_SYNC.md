@@ -44,12 +44,14 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 | Re-wrap | Nouveau fichier MOV ou MXF : image copiée sans réencodage, son de l'enregistreur calé (PCM 24 bits ; en MXF une piste mono par canal ; en MOV une piste polyphonique, ou une piste mono par canal avec l'option « Une piste mono par canal »), son caméra conservé en pistes supplémentaires (option), noms de pistes, timecode d'origine. À côté de chaque vidéo ou dans un dossier, suffixe `_sync` par défaut, jamais d'écrasement de l'original |
 | FCPXML 1.10 | Final Cut Pro et DaVinci Resolve : chaque plan avec son son attaché, calé à l'échantillon ; une seule ressource par fichier son |
 | OTIO | DaVinci Resolve, Premiere (via plugin), Avid : pistes V1 et A1 |
+| AAF | Media Composer, Pro Tools, DaVinci Resolve (avancé de V2 en V1 le 16/10/2026) : séquence avec piste TC1 (début 00:00:00:00, comme le FCPXML), V1 (les plans bout à bout), une piste par canal de l'enregistreur (hors canal LTC) calée à l'échantillon, puis le son témoin des caméras. Médias liés, rien n'est copié dans le fichier : pour chaque fichier, une source « bande » avec son timecode d'origine, une source fichier (descripteur, chemin `file:///`) et un master clip, comme un lien AMA de Media Composer. WAV/BWF en WAVEDescriptor (résumé RIFF jusqu'à l'en-tête du bloc data), vidéos en MultipleDescriptor (image CDCI, son PCM) |
 
 La case « Paires validées seulement » limite l'export aux paires cochées (décochée par défaut).
 
 ## Choix techniques
 
-- Cœur `core/src/sync/` : `mod.rs` (lecture de l'heure, appariement, affinage, dérive), `correlate.rs` (décodage mono par FFmpeg avec passe-haut à 120 Hz, GCC-PHAT avec fenêtre de Hann, enveloppes), `export.rs` (re-wrap, FCPXML, OTIO).
+- Cœur `core/src/sync/` : `mod.rs` (lecture de l'heure, appariement, affinage, dérive), `correlate.rs` (décodage mono par FFmpeg avec passe-haut à 120 Hz, GCC-PHAT avec fenêtre de Hann, enveloppes), `export.rs` (re-wrap, FCPXML, OTIO, AAF).
+- AAF : module `core/src/aaf/` (`mod.rs` : stockage structuré CFB à secteurs de 4 Kio par la crate `cfb` (MIT), objets, propriétés, références fortes et faibles ; `mobs.rs` : médias liés, séquences, clips, blancs, timecode). Le métadictionnaire et le dictionnaire, indépendants du contenu, viennent d'un gabarit (`core/src/aaf/template.bin`, 270 Ko) produit par `scripts/aaf-template.py` à partir de pyaaf2 1.7.1 (MIT, Mark Reid), dont les fichiers s'ouvrent dans Media Composer, Pro Tools et Resolve. À régénérer seulement si pyaaf2 change.
 - FFT : crate `realfft` 3.5 (MIT ou Apache 2.0, compatible GPLv3).
 - Convention : `décalage = début du son − début de la vidéo` (positif : le son commence après l'image).
 - Pont Tauri `src-tauri/src/sync.rs` : analyse et re-wrap annulables, avancement par événements.
@@ -65,7 +67,8 @@ La case « Paires validées seulement » limite l'export aux paires cochées (d�
 - re-wrap MOV et MXF : pistes, durée, timecode ;
 - méthodes : « timecode seul » garde le son à la même heure sans affinage, « forme d'onde seule » trouve le vrai son malgré un leurre à la même heure ;
 - MOV avec une piste mono par canal : enregistreur stéréo en 2 pistes mono, plus le son caméra ;
-- FCPXML et OTIO : temps attendus.
+- FCPXML et OTIO : temps attendus ;
+- AAF : CLSID de la racine, sept mobs (3 par fichier lié et la séquence), métadictionnaire présent ; nom des stockages raccourcis comme le SDK AAF.
 
 ### Essai dans l'application (Linux, Xvfb)
 Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF couvrant les deux, horloge fausse de 0,3 s :
@@ -74,14 +77,18 @@ Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF cou
 - re-wrap MOV des deux plans : décalage résiduel mesuré entre la piste de l'enregistreur et la piste caméra des fichiers produits : 0 échantillon ;
 - FCPXML : son attaché à 36 000,3 s dans le BWF pour le premier plan, soit 10 s après son début (valeur attendue).
 
+Essai AAF (16/10/2026) : deux plans ProRes 422 LT à 10:00:00:00 et 10:00:20:00 (son témoin stéréo), un BWF 4 pistes commencé à 09:59:55:00. Analyse automatique : −5,000 s et −25,000 s. Bouton AAF, fichier relu par deux lecteurs indépendants :
+- pyaaf2 1.7.1 : tous les objets relus, références faibles résolues (définitions de données, conteneur AAF), timecode d'origine 10:00:00:00 dans la source « bande » ;
+- LibAAF (lecteur AAF d'Ardour, aaftool) : V1 avec les deux plans bout à bout, A1 à A4 (canaux 1 à 4 du BWF) avec entrée dans le son à 5 s et 25 s, A5 et A6 (son caméra). Restent deux messages sans effet : une définition de type propre à Avid inconnue de LibAAF (« GenericCharacter », aussi dans les fichiers de pyaaf2) et le MultipleDescriptor des vidéos, que LibAAF ne lit pas (il ne traite que le son).
+
 Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même heure, le vrai son (stéréo) daté de 08:00:00 :
 - méthode Automatique : leurre choisi, confiance 11 % signalée en orange, remarque « forme d'onde peu ressemblante » ;
 - méthode Forme d'onde seule : vrai son trouvé, −10,000 s, confiance 99 % ;
 - re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
 ## Limites connues
-- Correction de la dérive : au re-wrap seulement, pas dans les timelines FCPXML et OTIO.
-- AAF : V2 (charte).
+- Correction de la dérive : au re-wrap seulement, pas dans les timelines FCPXML, OTIO et AAF.
+- AAF : pas encore ouvert dans Media Composer, Pro Tools ni Resolve (logiciels absents de l'environnement de développement). Vidéos liées par le conteneur générique AMA ; MXF caméra lié de la même façon, à vérifier dans Media Composer.
 - Les remarques produites par le cœur (« timecode corrigé de … ») sont en français quelle que soit la langue de l'interface.
 - Son témoin très faible ou absent : seule la méthode par timecode est possible (message dans le détail de la paire).
 - Plusieurs plans dans un même son : bien gérés ; un plan à cheval sur deux sons : associé au son qui le recouvre le plus.
@@ -94,3 +101,4 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 5. Re-wrap MOV (polyphonique et une piste mono par canal) et MXF : import dans DaVinci Resolve, Premiere et Avid ; pistes nommées, timecode, son caméra en plus.
 6. FCPXML dans Final Cut Pro et Resolve, OTIO dans Resolve : son attaché et calé.
 7. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute, puis re-wrap avec correction : calage au début et à la fin.
+8. AAF dans Media Composer (File > Import, médias liés), Pro Tools (File > Import > Session Data) et Resolve (File > Import > Timeline) : pistes, calage à l'échantillon, timecode d'origine des clips, relink si les médias ont été déplacés.

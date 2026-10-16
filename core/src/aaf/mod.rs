@@ -1,13 +1,14 @@
-//! Écriture de fichiers AAF (Advanced Authoring Format, AMWA AS-01/SMPTE 377
-//! pour le modèle objet) : stockage structuré Microsoft (CFB, secteurs de
-//! 4 Kio), objets rangés en arborescence, propriétés dans un flux
-//! « properties » par objet.
+//! Écriture de fichiers AAF (Advanced Authoring Format, spécifications de
+//! l'AMWA) : stockage structuré Microsoft (CFB, secteurs de 4 Kio), objets
+//! rangés en arborescence, propriétés dans un flux « properties » par objet,
+//! profil « Edit Protocol ».
 //!
 //! Le métadictionnaire (définitions des classes et des types) et le
 //! dictionnaire (définitions des données, conteneurs, codecs) ne dépendent pas
 //! du contenu : ils sont recopiés d'un gabarit généré par
 //! `scripts/aaf-template.py` à partir de pyaaf2 (MIT), dont les fichiers
-//! s'ouvrent dans Media Composer, Pro Tools et DaVinci Resolve.
+//! s'ouvrent dans Media Composer, Pro Tools et DaVinci Resolve (licence de
+//! pyaaf2 : `LICENSE-pyaaf2`).
 
 pub mod mobs;
 
