@@ -41,6 +41,19 @@
     }
   }
 
+  // Curseur visible quand la souris bouge, masqué après 2 s d'immobilité :
+  // l'image reste propre sans que la souris se « perde » sur cet écran.
+  const IDLE_MS = 2000;
+  let idle = $state(false);
+  let idleTimer: number | undefined;
+  function wake() {
+    idle = false;
+    window.clearTimeout(idleTimer);
+    idleTimer = window.setTimeout(() => (idle = true), IDLE_MS);
+  }
+  wake();
+  onDestroy(() => window.clearTimeout(idleTimer));
+
   const stop = onFrame(show);
   // Prête à recevoir : le lecteur envoie alors l'image en cours.
   stop.then(() => sendReady());
@@ -49,21 +62,24 @@
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && closeMonitor()} />
 
-<div class="monitor">
+<div class="monitor" class:idle onpointermove={wake} role="presentation">
   <canvas bind:this={canvas}></canvas>
 </div>
 
 <style>
-  /* Curseur caché sur cette fenêtre seulement (et pas via body : la
-     feuille de style pourrait se retrouver dans la fenêtre principale). */
   .monitor {
     position: fixed;
     inset: 0;
-    cursor: none;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--vf-video-bg);
+  }
+  /* Curseur masqué sur cette fenêtre seulement, après 2 s d'immobilité (et
+     pas via body : la feuille de style pourrait se retrouver dans la
+     fenêtre principale). */
+  .monitor.idle {
+    cursor: none;
   }
   canvas {
     max-width: 100%;
