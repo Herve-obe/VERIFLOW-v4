@@ -16,6 +16,7 @@ Fonctions livrées et fusionnées, testées automatiquement et sous Linux, mais 
 | PLAYER | [#12](https://github.com/Herve-obe/VERIFLOW-v4/pull/12) | 15/10/2026 | Non testée sur poste réel (test automatique des couleurs sur FFmpeg 9.0.2, 6.1 et 4.4 ; mire testée sous Linux) | Bouton « Scopes » : forme d'onde, parade RGB, vectorscope, histogramme sur des rushes réels Rec. 709, fluidité en lecture ; couleurs de l'aperçu comparées à Resolve (gris et magenta 75 %) |
 | PLAYER | [#13](https://github.com/Herve-obe/VERIFLOW-v4/pull/13) | 15/10/2026 | Non testée sur poste réel (essai sous Linux avec un seul écran virtuel) | Sortie moniteur avec un vrai second écran (Windows et macOS) : choix de l'écran dans le menu « Moniteur », plein écran, lecture fluide et synchrone, LUT, fermeture par Échap et à la fermeture de VERIFLOW |
 | TRANSCODE | [#14](https://github.com/Herve-obe/VERIFLOW-v4/pull/14) | 15/10/2026 | Non testée sur poste réel (6 tests du cœur ; essai sous Linux) | Éditeur de sous-titres : ouvrir un SRT reçu d'un client, corriger les signalements, enregistrer, incruster ; créer un VTT de zéro ; accents et caractères spéciaux à l'enregistrement (Windows et macOS) |
+| PLAYER | [#16](https://github.com/Herve-obe/VERIFLOW-v4/pull/16) | 16/10/2026 | Partiellement testée (Windows, 16/10/2026) : curseur de la souris visible dans la fenêtre | Sortie moniteur sur un vrai second écran : image affichée dès l'ouverture, curseur sur cet écran ; macOS |
 
 ## En stand-by (demandé par Hervé le 08/10/2026)
 
