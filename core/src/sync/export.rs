@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::SyncFile;
+use crate::aaf::mobs as aaf_mobs;
 use crate::media::probe::probe;
 use crate::player::logs::{fcp_time, file_url, xml_esc};
 use crate::player::timecode::FrameRate;
@@ -451,4 +452,202 @@ pub fn to_otio(title: &str, items: &[Item]) -> String {
         "metadata": { "veriflow": { "sync": true } },
     });
     serde_json::to_string_pretty(&doc).unwrap_or_default()
+}
+
+/// Fichier lié dans l'AAF : sa cadence image s'il en a une.
+fn aaf_media<'a>(f: &'a SyncFile, seq_rate: FrameRate) -> aaf_mobs::Media<'a> {
+    let info = probe(&f.path).ok();
+    let rate = |r: FrameRate| (r.num as i32, r.den.max(1) as i32);
+    let picture = f.video.then(|| {
+        let v = info.as_ref().and_then(|i| i.video.as_ref());
+        let r = f.rate.or(v.map(|v| v.rate)).unwrap_or(seq_rate);
+        aaf_mobs::Picture {
+            rate: rate(r),
+            frames: v
+                .map(|v| v.frame_count)
+                .filter(|n| *n > 0)
+                .unwrap_or_else(|| frames(f.duration, r).max(1)),
+            width: f.width.max(v.map_or(0, |v| v.width)),
+            height: f.height.max(v.map_or(0, |v| v.height)),
+            codec: v.map(|v| v.codec.clone()).unwrap_or_default(),
+            pix_fmt: v.map(|v| v.pix_fmt.clone()).unwrap_or_default(),
+        }
+    });
+    let mut sounds: Vec<aaf_mobs::Sound> = info
+        .as_ref()
+        .map(|i| {
+            i.audio
+                .iter()
+                .filter(|a| a.channels > 0 && a.sample_rate > 0)
+                .map(|a| aaf_mobs::Sound {
+                    sample_rate: a.sample_rate,
+                    channels: a.channels,
+                    bits: a.bits.unwrap_or(24),
+                    length: samples(f.duration, a.sample_rate),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if sounds.is_empty() && f.channels > 0 && f.sample_rate > 0 {
+        sounds.push(aaf_mobs::Sound {
+            sample_rate: f.sample_rate,
+            channels: f.channels,
+            bits: 24,
+            length: samples(f.duration, f.sample_rate),
+        });
+    }
+    let tc_rate = f.rate.unwrap_or(seq_rate);
+    aaf_mobs::Media {
+        path: &f.path,
+        url: file_url(&crate::absolute_path(&f.path).to_string_lossy()),
+        name: f
+            .path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| f.name.clone()),
+        picture,
+        sounds,
+        wave: if f.video {
+            None
+        } else {
+            aaf_mobs::wave_summary(&f.path)
+        },
+        timecode: f.start.map(|s| {
+            (
+                frames(s, tc_rate),
+                rate(tc_rate),
+                f.timecode.as_deref().is_some_and(|t| t.contains(';')),
+            )
+        }),
+    }
+}
+
+/// AAF (Media Composer, Pro Tools, DaVinci Resolve) : séquence avec piste de
+/// timecode, V1 (les plans bout à bout), une piste par canal de
+/// l'enregistreur calée à l'échantillon, puis le son témoin des caméras.
+/// Les médias sont liés (aucune essence copiée dans le fichier).
+pub fn write_aaf(path: &std::path::Path, title: &str, items: &[Item]) -> Result<()> {
+    use aaf_mobs::{filler, sequence, slot, source_clip, Kind};
+    let seq_rate = items
+        .first()
+        .map(|i| rate_of(i.video))
+        .unwrap_or(FrameRate::new(25, 1));
+    let sr = items
+        .iter()
+        .find_map(|i| i.audio.map(|(a, _)| a.sample_rate))
+        .filter(|r| *r > 0)
+        .unwrap_or(48_000);
+    let edit = (seq_rate.num as i32, seq_rate.den.max(1) as i32);
+
+    // Un lien par fichier, même s'il sert à plusieurs plans.
+    let mut mobs = Vec::new();
+    let mut linked: Vec<(PathBuf, aaf_mobs::Linked)> = Vec::new();
+    let mut link = |f: &SyncFile, mobs: &mut Vec<aaf_mobs::Mob>| -> usize {
+        if let Some(i) = linked.iter().position(|(p, _)| *p == f.path) {
+            return i;
+        }
+        let mut l = aaf_mobs::link(&aaf_media(f, seq_rate));
+        mobs.append(&mut l.mobs);
+        linked.push((f.path.clone(), l));
+        linked.len() - 1
+    };
+    let refs: Vec<(usize, Option<usize>)> = items
+        .iter()
+        .map(|it| {
+            (
+                link(it.video, &mut mobs),
+                it.audio.map(|(a, _)| link(a, &mut mobs)),
+            )
+        })
+        .collect();
+
+    let rec_tracks = items
+        .iter()
+        .filter_map(|i| i.audio.map(|(a, _)| kept_channels(a).len()))
+        .max()
+        .unwrap_or(0);
+    let cam_tracks = refs
+        .iter()
+        .map(|(v, _)| linked[*v].1.sounds.len())
+        .max()
+        .unwrap_or(0);
+    let mut picture = Vec::new();
+    let mut rec: Vec<Vec<aaf_mobs::Component>> = (0..rec_tracks).map(|_| Vec::new()).collect();
+    let mut cam: Vec<Vec<aaf_mobs::Component>> = (0..cam_tracks).map(|_| Vec::new()).collect();
+    let mut pos: i64 = 0;
+    let to_samples = |f: i64| (f as f64 * sr as f64 / seq_rate.as_f64()).round() as i64;
+    for (it, (v, a)) in items.iter().zip(&refs) {
+        let len = frames(it.video.duration, seq_rate).max(1);
+        let span = to_samples(pos + len) - to_samples(pos);
+        let vl = &linked[*v].1;
+        match vl.picture {
+            Some(s) => picture.push(source_clip(Kind::Picture, len, 0, &vl.master, s)),
+            None => picture.push(filler(Kind::Picture, len)),
+        }
+        // Son de l'enregistreur : blanc, clip calé, blanc.
+        let placed = it.audio.zip(*a).map(|((af, offset), ai)| {
+            let lead = samples(offset.max(0.0), sr).min(span);
+            let skip = (-offset).max(0.0);
+            let dur = samples(
+                (it.video.duration - offset.max(0.0)).min(af.duration - skip),
+                sr,
+            )
+            .clamp(0, span - lead);
+            (
+                kept_channels(af),
+                &linked[ai].1,
+                lead,
+                samples(skip, sr),
+                dur,
+            )
+        });
+        for (k, track) in rec.iter_mut().enumerate() {
+            match &placed {
+                Some((kept, al, lead, start, dur)) if *dur > 0 && k < kept.len() => {
+                    let s = al.sounds.get(kept[k]).map_or(kept[k] as u32 + 1, |s| s.0);
+                    if *lead > 0 {
+                        track.push(filler(Kind::Sound, *lead));
+                    }
+                    track.push(source_clip(Kind::Sound, *dur, *start, &al.master, s));
+                    if span - lead - dur > 0 {
+                        track.push(filler(Kind::Sound, span - lead - dur));
+                    }
+                }
+                _ => track.push(filler(Kind::Sound, span)),
+            }
+        }
+        // Son témoin de la caméra, sur toute la durée du plan.
+        for (k, track) in cam.iter_mut().enumerate() {
+            match vl.sounds.get(k) {
+                Some((s, _)) => track.push(source_clip(Kind::Sound, span, 0, &vl.master, *s)),
+                None => track.push(filler(Kind::Sound, span)),
+            }
+        }
+        pos += len;
+    }
+
+    let mut slots = vec![
+        slot(
+            1,
+            "TC1",
+            edit,
+            aaf_mobs::timecode(pos, 0, seq_rate.nominal() as u16, false),
+            Some(1),
+        ),
+        slot(2, "V1", edit, sequence(Kind::Picture, picture), Some(1)),
+    ];
+    for (k, parts) in rec.into_iter().chain(cam).enumerate() {
+        let n = k as u32 + 1;
+        slots.push(slot(
+            n + 2,
+            &format!("A{n}"),
+            (sr as i32, 1),
+            sequence(Kind::Sound, parts),
+            Some(n),
+        ));
+    }
+    let mut comp = aaf_mobs::mob(aaf_mobs::COMPOSITION, aaf_mobs::mob_id(title), title, slots);
+    comp.obj = comp.obj.data(0x4408, aaf_mobs::usage_top_level());
+    mobs.push(comp);
+    crate::aaf::write(path, &aaf_mobs::header(mobs))
 }

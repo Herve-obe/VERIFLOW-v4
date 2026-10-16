@@ -117,7 +117,7 @@ export const refine = (video: SyncFile, audio: SyncFile, offset: number, window:
 export const waveforms = (video: SyncFile, audio: SyncFile, offset: number, at: number, length: number, points: number) =>
   invoke<Waves>("sync_waveforms", { video, audio, offset, at, length, points });
 export const rewrap = (items: ExportItem[], options: RewrapOptions) => invoke<ExportResult[]>("sync_rewrap", { items, options });
-export const timeline = (kind: "fcpxml" | "otio", title: string, items: ExportItem[], path: string) =>
+export const timeline = (kind: "fcpxml" | "otio" | "aaf", title: string, items: ExportItem[], path: string) =>
   invoke<void>("sync_timeline", { kind, title, items, path });
 export const onProgress = (cb: (e: SyncEvent) => void): Promise<UnlistenFn> => listen<SyncEvent>("sync", (e) => cb(e.payload));
 export const onExport = (cb: (e: ExportProgress) => void): Promise<UnlistenFn> => listen<ExportProgress>("sync-export", (e) => cb(e.payload));

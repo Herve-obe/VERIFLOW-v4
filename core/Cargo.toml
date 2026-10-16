@@ -35,6 +35,8 @@ typst-layout = "0.15.1"
 typst-pdf = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
 rust_xlsxwriter = "0.99"
+cfb = "0.15"
+uuid = { version = "1", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
