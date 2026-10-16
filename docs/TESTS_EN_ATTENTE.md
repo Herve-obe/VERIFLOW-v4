@@ -17,6 +17,7 @@ Fonctions livrées et fusionnées, testées automatiquement et sous Linux, mais 
 | PLAYER | [#13](https://github.com/Herve-obe/VERIFLOW-v4/pull/13) | 15/10/2026 | Non testée sur poste réel (essai sous Linux avec un seul écran virtuel) | Sortie moniteur avec un vrai second écran (Windows et macOS) : choix de l'écran dans le menu « Moniteur », plein écran, lecture fluide et synchrone, LUT, fermeture par Échap et à la fermeture de VERIFLOW |
 | TRANSCODE | [#14](https://github.com/Herve-obe/VERIFLOW-v4/pull/14) | 15/10/2026 | Non testée sur poste réel (6 tests du cœur ; essai sous Linux) | Éditeur de sous-titres : ouvrir un SRT reçu d'un client, corriger les signalements, enregistrer, incruster ; créer un VTT de zéro ; accents et caractères spéciaux à l'enregistrement (Windows et macOS) |
 | PLAYER | [#16](https://github.com/Herve-obe/VERIFLOW-v4/pull/16) | 16/10/2026 | Partiellement testée (Windows, 16/10/2026) : curseur de la souris visible dans la fenêtre | Sortie moniteur sur un vrai second écran : image affichée dès l'ouverture, curseur sur cet écran ; macOS |
+| PLAYER | [#15](https://github.com/Herve-obe/VERIFLOW-v4/pull/15) | 16/10/2026 | Testée en partie par Hervé (Windows) au fil des retours ; essais sous Linux (2, 12, 20 pistes) | Lecteurs vidéo et audio : même disposition (infos à droite, barre de défilement et transport en bas), MASTER aligné, défilement des pistes au-delà de la largeur, retour et avance rapides de 5 s en audio ; macOS et lecteur rapide de MEDIA |
 
 ## En stand-by (demandé par Hervé le 08/10/2026)
 
