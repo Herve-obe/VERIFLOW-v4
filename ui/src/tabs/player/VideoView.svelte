@@ -640,7 +640,7 @@
           {/if}
         {/each}
       </div>
-      <span class="mono small">{t("player.frame")} {shown} / {last}</span>
+      <span class="mono small pos">{t("player.frame")} {shown} / {last}</span>
     </div>
 
     <div class="controls">
@@ -795,10 +795,18 @@
     align-items: center;
     gap: var(--vf-space-4);
   }
+  /* Largeurs fixes, identiques dans les lecteurs vidéo et audio : la barre
+     de défilement commence et finit au même endroit. */
   .tc {
+    flex: none;
+    width: 12ch;
     font-size: var(--vf-text-timecode);
     color: var(--vf-accent);
-    min-width: 11ch;
+  }
+  .pos {
+    flex: none;
+    min-width: 27ch;
+    text-align: right;
   }
   .scrubwrap {
     position: relative;
