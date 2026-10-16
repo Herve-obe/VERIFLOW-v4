@@ -60,6 +60,7 @@
   let fraction = $state(0);
   let error = $state("");
   let exporting = $state(false);
+  let writing = $state(false);
   let exportStep = $state("");
   let exportFraction = $state(0);
   let results = $state<ExportResult[]>([]);
@@ -153,14 +154,18 @@
     }
   }
 
-  async function doTimeline(kind: "fcpxml" | "otio") {
+  async function doTimeline(kind: "fcpxml" | "otio" | "aaf") {
     const path = await save({ defaultPath: `VERIFLOW_SYNC.${kind}`, filters: [{ name: kind.toUpperCase(), extensions: [kind] }] });
     if (!path) return;
+    // L'AAF relit chaque fichier (ffprobe) : boutons inactifs le temps de l'écriture.
+    writing = true;
     try {
       await timeline(kind, app.project?.name ?? "VERIFLOW SYNC", items(), path);
       results = [{ video: "", output: path, error: null }];
     } catch (e) {
       error = String(e);
+    } finally {
+      writing = false;
     }
   }
 
@@ -348,8 +353,9 @@
           {/if}
           <p class="tc-sub">{t("sync.timelines")}</p>
           <div class="tc-row">
-            <button class="tc-btn" disabled={!exportCount} onclick={() => doTimeline("fcpxml")}>FCPXML</button>
-            <button class="tc-btn" disabled={!exportCount} onclick={() => doTimeline("otio")}>OTIO</button>
+            <button class="tc-btn" disabled={!exportCount || writing} onclick={() => doTimeline("fcpxml")}>FCPXML</button>
+            <button class="tc-btn" disabled={!exportCount || writing} onclick={() => doTimeline("otio")}>OTIO</button>
+            <button class="tc-btn" disabled={!exportCount || writing} onclick={() => doTimeline("aaf")}>AAF</button>
           </div>
           {#each results as r, i (i)}
             <p class="small" class:error={!!r.error}>

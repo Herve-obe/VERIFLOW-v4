@@ -268,24 +268,29 @@ pub async fn sync_rewrap(
     .map_err(text)?
 }
 
-/// Timeline FCPXML ou OTIO des paires.
+/// Timeline FCPXML, OTIO ou AAF des paires (AAF : fichiers relus par
+/// ffprobe, hors du fil de l'interface).
 #[tauri::command]
-pub fn sync_timeline(
+pub async fn sync_timeline(
     kind: String,
     title: String,
     items: Vec<ExportItem>,
     path: PathBuf,
 ) -> CmdResult<()> {
-    let list: Vec<Item> = items
-        .iter()
-        .map(|it| Item {
-            video: &it.video,
-            audio: it.audio.as_ref().map(|a| (a, it.offset)),
-        })
-        .collect();
-    let content = match kind.as_str() {
-        "otio" => export::to_otio(&title, &list),
-        _ => export::to_fcpxml(&title, &list),
-    };
-    std::fs::write(path, content).map_err(text)
+    tauri::async_runtime::spawn_blocking(move || {
+        let list: Vec<Item> = items
+            .iter()
+            .map(|it| Item {
+                video: &it.video,
+                audio: it.audio.as_ref().map(|a| (a, it.offset)),
+            })
+            .collect();
+        match kind.as_str() {
+            "aaf" => export::write_aaf(&path, &title, &list).map_err(text),
+            "otio" => std::fs::write(&path, export::to_otio(&title, &list)).map_err(text),
+            _ => std::fs::write(&path, export::to_fcpxml(&title, &list)).map_err(text),
+        }
+    })
+    .await
+    .map_err(text)?
 }
