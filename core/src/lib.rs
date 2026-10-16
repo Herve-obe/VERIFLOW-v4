@@ -3,6 +3,7 @@
 //! Ce crate ne dépend d'aucune interface graphique : il peut être testé seul
 //! et réutilisé par une autre interface (charte §5.5).
 
+pub mod aaf;
 pub mod error;
 pub mod explorer;
 pub mod media;

@@ -369,6 +369,27 @@ fn rewrap_and_timelines() {
         video,
         audio: Some((audio, p.offset)),
     }];
+    // AAF : en-tête, gabarit et sept mobs (3 par fichier lié + la séquence).
+    let aaf = dir.path().join("essai.aaf");
+    export::write_aaf(&aaf, "Essai", &items).unwrap();
+    let mut cf = cfb::open(&aaf).unwrap();
+    assert_eq!(
+        cf.root_entry().clsid().to_string(),
+        "b3b398a5-1c90-11d4-8053-080036210804"
+    );
+    let mut index = Vec::new();
+    std::io::Read::read_to_end(
+        &mut cf
+            .open_stream("/Header-2/Content-3b03/Mobs-1901 index")
+            .unwrap(),
+        &mut index,
+    )
+    .unwrap();
+    assert_eq!(index[..4], 7u32.to_le_bytes());
+    assert!(cf.is_stream("/MetaDictionary-1/properties"));
+    if let Some(keep) = std::env::var_os("VERIFLOW_AAF_KEEP") {
+        std::fs::copy(&aaf, keep).unwrap();
+    }
     let xml = export::to_fcpxml("Essai", &items);
     assert!(
         xml.contains("lane=\"-1\"") && xml.contains("SON.WAV"),
