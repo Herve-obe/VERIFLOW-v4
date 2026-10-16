@@ -3,7 +3,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { videoFrame } from "./lib/player";
-  import { closeMonitor, onFrame, type MonitorFrame } from "./lib/monitor";
+  import { closeMonitor, onFrame, sendReady, type MonitorFrame } from "./lib/monitor";
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let busy = false;
@@ -42,6 +42,8 @@
   }
 
   const stop = onFrame(show);
+  // Prête à recevoir : le lecteur envoie alors l'image en cours.
+  stop.then(() => sendReady());
   onDestroy(() => stop.then((u) => u()));
 </script>
 
@@ -52,15 +54,12 @@
 </div>
 
 <style>
-  :global(body) {
-    background: var(--vf-video-bg);
-    margin: 0;
-    overflow: hidden;
-    cursor: none;
-  }
+  /* Curseur caché sur cette fenêtre seulement (et pas via body : la
+     feuille de style pourrait se retrouver dans la fenêtre principale). */
   .monitor {
     position: fixed;
     inset: 0;
+    cursor: none;
     display: flex;
     align-items: center;
     justify-content: center;
