@@ -6,7 +6,7 @@
   import MarkersPanel from "./MarkersPanel.svelte";
   import ReportPopup from "./ReportPopup.svelte";
   import SoundTracks from "./SoundTracks.svelte";
-  import { closeMonitor, onClosed, openMonitor, screens, sendFrame, type Screen } from "../../lib/monitor";
+  import { closeMonitor, onClosed, onReady, openMonitor, screens, sendFrame, type Screen } from "../../lib/monitor";
   import Scopes from "./Scopes.svelte";
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
@@ -69,6 +69,8 @@
   let monitorScreen = $state(-1);
   let screenList = $state<Screen[]>([]);
   const stopClosed = onClosed(() => (monitorScreen = -1));
+  // La fenêtre moniteur, une fois chargée, reçoit l'image en cours.
+  const stopReady = onReady(() => sendFrame({ slot, index: shown }));
   loadScreens();
   let scopes = $state(readPref(PREF_SCOPES) === "1");
 
@@ -488,8 +490,8 @@
       if (v < 0) await closeMonitor();
       else {
         await openMonitor(v);
-        // Laisse la fenêtre se charger, puis lui envoie l'image en cours.
-        window.setTimeout(() => sendFrame({ slot, index: shown }), 800);
+        // Fenêtre déjà ouverte (changement d'écran) : image renvoyée tout de suite.
+        sendFrame({ slot, index: shown });
       }
       monitorScreen = v;
     } catch (err) {
@@ -551,6 +553,7 @@
   onDestroy(() => {
     if (monitorScreen >= 0) sendFrame({ slot, index: null });
     stopClosed.then((u) => u());
+    stopReady.then((u) => u());
     pause();
     window.clearTimeout(primeTimer);
     videoClose(slot).catch(() => {});
