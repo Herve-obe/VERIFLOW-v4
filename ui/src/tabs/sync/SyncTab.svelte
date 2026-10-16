@@ -192,7 +192,7 @@
             <button class="tc-btn" onclick={() => ((sync.videos = []), (sync.audios = []), (sync.analysis = null))}>{t("transcode.clear")}</button>
           {/if}
         </div>
-        <div class="lists">
+        <div class="lists" class:compact={a}>
           <ul>
             {#each sync.videos as v (v)}
               <li title={v}><span>{name(v)}</span><button class="x" onclick={() => (sync.videos = sync.videos.filter((x) => x !== v))} aria-label={t("transcode.remove")}>×</button></li>
@@ -435,10 +435,15 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    max-height: 150px;
+    /* Avant l'analyse, les listes profitent de la hauteur de la fenêtre ;
+       après, elles se réduisent pour laisser la place aux résultats. */
+    max-height: max(150px, 50vh);
     overflow-y: auto;
     border: 1px solid var(--vf-border);
     border-radius: var(--vf-radius-sm);
+  }
+  .lists.compact ul {
+    max-height: max(150px, 25vh);
   }
   .lists li {
     display: flex;
@@ -462,7 +467,7 @@
   .table {
     flex-shrink: 0;
     min-height: 120px;
-    max-height: 320px;
+    max-height: max(320px, 55vh);
     overflow: auto;
     border: 1px solid var(--vf-border);
     border-radius: var(--vf-radius-sm);
