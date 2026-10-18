@@ -6321,6 +6321,7 @@ dependencies = [
  "typst-layout",
  "typst-pdf",
  "walkdir",
+ "windows-sys 0.60.2",
  "xxhash-rust",
 ]
 

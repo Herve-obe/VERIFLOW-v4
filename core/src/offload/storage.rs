@@ -78,7 +78,7 @@ pub fn volumes() -> Vec<Volume> {
             file_system: d.file_system().to_string_lossy().into_owned(),
             total: d.total_space(),
             available: d.available_space(),
-            removable: d.is_removable(),
+            removable: d.is_removable() || external_bus(d.mount_point()),
             kind: kind_str(d.kind()),
         })
         .collect();
@@ -90,9 +90,21 @@ pub fn volumes() -> Vec<Volume> {
     out
 }
 
+/// Retire le préfixe `\\?\` que `canonicalize` ajoute sous Windows
+/// (`\\?\E:\A001` devient `E:\A001`) : sinon le chemin ne commence pas par
+/// le point de montage `E:\` et son volume n'est pas trouvé.
+fn without_verbatim(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path.to_path_buf(),
+    }
+}
+
 /// Volume contenant un chemin (point de montage le plus long qui le précède).
 pub fn volume_of(path: &Path) -> Option<Volume> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = without_verbatim(&path);
     volumes()
         .into_iter()
         .filter(|v| path.starts_with(&v.mount_point))
@@ -104,18 +116,130 @@ pub fn is_hdd(path: &Path) -> bool {
     volume_of(path).is_some_and(|v| v.kind == "hdd")
 }
 
+/// Disque externe branché en USB, FireWire ou lecteur de cartes (Windows).
+/// Windows ne déclare « amovibles » que les clés et les cartes : un disque dur
+/// ou un SSD USB est un disque « fixe », que l'Explorateur sait pourtant
+/// éjecter. Le résultat est gardé en mémoire : la liste des volumes est relue
+/// toutes les 2 s et chaque lecture ouvre le volume, ce qui gênerait une
+/// éjection en cours.
+#[cfg(windows)]
+fn external_bus(mount: &Path) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        BusType1394, BusTypeMmc, BusTypeSd, BusTypeUsb, CreateFileW, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Ioctl::{
+        PropertyStandardQuery, StorageDeviceProperty, IOCTL_STORAGE_QUERY_PROPERTY,
+        STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
+    };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Mutex::default);
+    if let Some(known) = cache.lock().ok().and_then(|c| c.get(mount).copied()) {
+        return known;
+    }
+    let letter = mount.display().to_string();
+    let letter = letter.trim_end_matches(['\\', '/']);
+    // Le disque du système n'est jamais éjecté, même installé sur un disque USB.
+    let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    let external = !letter.eq_ignore_ascii_case(&system) && {
+        let device: Vec<u16> = format!(r"\\.\{letter}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        // SAFETY : appels Win32 documentés ; tampons et tailles cohérents,
+        // descripteur relu sans hypothèse d'alignement, handle refermé.
+        unsafe {
+            let h = CreateFileW(
+                device.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            );
+            if h == INVALID_HANDLE_VALUE {
+                false
+            } else {
+                let query = STORAGE_PROPERTY_QUERY {
+                    PropertyId: StorageDeviceProperty,
+                    QueryType: PropertyStandardQuery,
+                    AdditionalParameters: [0],
+                };
+                let mut buf = [0u8; 1024];
+                let mut len = 0u32;
+                let ok = DeviceIoControl(
+                    h,
+                    IOCTL_STORAGE_QUERY_PROPERTY,
+                    (&query as *const STORAGE_PROPERTY_QUERY).cast(),
+                    std::mem::size_of::<STORAGE_PROPERTY_QUERY>() as u32,
+                    buf.as_mut_ptr().cast(),
+                    buf.len() as u32,
+                    &mut len,
+                    std::ptr::null_mut(),
+                );
+                CloseHandle(h);
+                if ok == 0 || (len as usize) < std::mem::size_of::<STORAGE_DEVICE_DESCRIPTOR>() {
+                    false
+                } else {
+                    let d: STORAGE_DEVICE_DESCRIPTOR =
+                        std::ptr::read_unaligned(buf.as_ptr().cast());
+                    d.RemovableMedia
+                        || [BusTypeUsb, BusType1394, BusTypeSd, BusTypeMmc].contains(&d.BusType)
+                }
+            }
+        }
+    };
+    if let Ok(mut c) = cache.lock() {
+        c.insert(mount.to_path_buf(), external);
+    }
+    external
+}
+
+/// Ailleurs, le système déclare lui-même les disques externes amovibles.
+#[cfg(not(windows))]
+fn external_bus(_mount: &Path) -> bool {
+    false
+}
+
 /// Éjecte proprement un volume amovible (après la copie).
+///
+/// Les dossiers suivis par l'explorateur sur ce volume doivent être libérés
+/// avant (sous Windows, chaque dossier surveillé garde le volume ouvert).
 pub fn eject(mount_point: &Path) -> Result<()> {
     let mp = mount_point.display().to_string();
     let output = if cfg!(target_os = "macos") {
         Command::new("diskutil").args(["eject", &mp]).output()
     } else if cfg!(windows) {
+        // Même commande que « Éjecter » dans l'Explorateur (retrait sécurisé,
+        // disques USB compris). Elle rend la main tout de suite sans dire si
+        // l'éjection a réussi : on attend que la lettre disparaisse (15 s).
+        // GetLogicalDrives n'ouvre pas le volume, contrairement à Test-Path.
         let letter = mp.trim_end_matches(['\\', '/']).to_owned();
         let script = format!(
-            "(New-Object -ComObject Shell.Application).Namespace(17).ParseName('{letter}').InvokeVerb('Eject')"
+            "$d='{letter}'; \
+             $i=(New-Object -ComObject Shell.Application).Namespace(17).ParseName($d); \
+             if ($null -eq $i) {{ exit 2 }}; \
+             $i.InvokeVerb('Eject'); \
+             for ($n=0; $n -lt 30; $n++) {{ \
+               if (-not ([IO.Directory]::GetLogicalDrives() -contains ($d + '\\'))) {{ exit 0 }}; \
+               Start-Sleep -Milliseconds 500 }}; \
+             exit 1"
         );
-        Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
+        #[allow(unused_mut)]
+        let mut cmd = Command::new("powershell");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
     } else {
         // Linux : démontage utilisateur (GNOME, KDE), sinon umount.
@@ -131,8 +255,23 @@ pub fn eject(mount_point: &Path) -> Result<()> {
                 }
             })
     };
+    // Windows : messages écrits ici (la console PowerShell abîme les accents).
+    let windows_message = |code: Option<i32>| match code {
+        Some(1) => Some(
+            "le disque est encore utilisé par un autre programme \
+             (Explorateur, antivirus, lecteur vidéo...)",
+        ),
+        Some(2) => Some("volume introuvable"),
+        _ => None,
+    };
     match output {
         Ok(o) if o.status.success() => Ok(()),
+        Ok(o) if cfg!(windows) && windows_message(o.status.code()).is_some() => Err(Error::Tool {
+            tool: "éjection".into(),
+            message: windows_message(o.status.code())
+                .unwrap_or_default()
+                .to_owned(),
+        }),
         Ok(o) => Err(Error::Tool {
             tool: "éjection".into(),
             message: String::from_utf8_lossy(&o.stderr).trim().to_owned(),
@@ -144,6 +283,21 @@ pub fn eject(mount_point: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strips_windows_verbatim_prefix() {
+        assert_eq!(
+            without_verbatim(Path::new(r"\\?\E:\A001")),
+            PathBuf::from(r"E:\A001")
+        );
+        // Partage réseau en chemin étendu : laissé tel quel.
+        let unc = Path::new(r"\\?\UNC\serveur\rushes");
+        assert_eq!(without_verbatim(unc), unc.to_path_buf());
+        assert_eq!(
+            without_verbatim(Path::new("/Volumes/A001")),
+            PathBuf::from("/Volumes/A001")
+        );
+    }
 
     #[test]
     fn lists_volumes_and_finds_the_one_of_a_path() {

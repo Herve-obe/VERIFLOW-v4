@@ -20,7 +20,7 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 | Contrôles avant copie | Chemins finaux, espace libre de chaque destination, disque dur mécanique (avertissement de lenteur), carte déjà copiée (dans la destination et dans l'historique du projet) avec confirmation |
 | File d'attente | Plusieurs cartes à la suite, traitées l'une après l'autre en arrière-plan |
 | Suivi | Progression, débit, temps restant, fichier en cours, tableau fichier par fichier, fichiers en échec avec la cause |
-| Éjection | Option « éjecter la source après une copie conforme » (macOS diskutil, Windows, Linux gio/umount) |
+| Éjection | Option « éjecter la source après une copie conforme » (macOS diskutil, Windows, Linux gio/umount). Avant l'éjection, l'explorateur cesse de surveiller les dossiers du volume (sous Windows, un dossier surveillé garde le disque ouvert). Windows : disques durs et SSD USB, FireWire et cartes reconnus comme éjectables (le système ne déclare « amovibles » que les clés et les cartes), éjection vérifiée (la lettre doit disparaître dans les 15 s, sinon message « encore utilisé par un autre programme »). Corrigé le 18/10/2026 après le test d'Hervé : la source restait occupée jusqu'à la fermeture de VERIFLOW |
 | Arborescence | Modèle `{date}/{carte}` par défaut ; variables `{projet}`, `{jour}`, `{camera}`, `{carte}`, `{date}` |
 | Historique | Chaque offload est enregistré dans le fichier projet (détection des cartes déjà copiées) |
 
