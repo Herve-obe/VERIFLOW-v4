@@ -96,6 +96,11 @@
 
   /* Dimensions de la mise en page */
   --vf-topbar-height: 48px;
+  /* Barre de titre (Windows : dessinée par VERIFLOW, avec les menus) et
+     barre des onglets en dessous. */
+  --vf-titlebar-height: 34px;
+  --vf-tabbar-height: 44px;
+  --vf-window-close-hover: #c42b1c;
   --vf-statusbar-height: 26px;
 
   /* Animations */

@@ -5,7 +5,7 @@
   import Modal from "../../components/Modal.svelte";
   import { app } from "../../stores/app.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
-  import { createProject, openProject } from "../../lib/project";
+  import { createProject, openProject } from "../../lib/project.svelte";
   import {
     reportList,
     reportGet,

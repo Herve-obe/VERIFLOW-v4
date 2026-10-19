@@ -5,6 +5,8 @@
   import StatusBar from "./layout/StatusBar.svelte";
   import DragGhost from "./components/DragGhost.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import MenuDialogs from "./menu/MenuDialogs.svelte";
+  import { handleMenuKey } from "./menu/commands.svelte";
   import OffloadTab from "./tabs/offload/OffloadTab.svelte";
   import MediaTab from "./tabs/media/MediaTab.svelte";
   import PlayerTab from "./tabs/player/PlayerTab.svelte";
@@ -32,6 +34,7 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
+    if (handleMenuKey(e)) return;
     const action = resolveAction(e);
     if (!action) return;
     e.preventDefault();
@@ -55,6 +58,7 @@
 </div>
 <DragGhost />
 <ConfirmDialog />
+<MenuDialogs />
 
 <style>
   .shell {

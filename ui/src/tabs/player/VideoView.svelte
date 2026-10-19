@@ -1,6 +1,6 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
@@ -11,7 +11,8 @@
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
-  import { resolvePlayerAction } from "../../shortcuts";
+  import { resolvePlayerAction, PLAYER_ACTION_EVENT } from "../../shortcuts";
+  import type { PlayerAction } from "../../shortcuts/defaults";
   import { framesToTc, fps, type FrameRate } from "../../lib/timecode";
   import { markerCss, type Marker } from "../../lib/logs";
   import {
@@ -515,6 +516,20 @@
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
+    runAction(action);
+  }
+
+  // Mêmes actions depuis le menu Lecture (voir menu/commands.svelte.ts).
+  function onMenuAction(e: Event) {
+    if (!clip || !active()) return;
+    runAction((e as CustomEvent<PlayerAction>).detail);
+  }
+  onMount(() => {
+    window.addEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+    return () => window.removeEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+  });
+
+  function runAction(action: PlayerAction) {
     switch (action) {
       case "play.toggle": toggle(); break;
       case "play.stop": stop(); break;

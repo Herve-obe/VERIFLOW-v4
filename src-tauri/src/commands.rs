@@ -50,6 +50,29 @@ pub fn project_open(path: PathBuf, state: State<'_, AppState>) -> CmdResult<Proj
 }
 
 #[tauri::command]
+pub fn project_save(state: State<'_, AppState>) -> CmdResult<()> {
+    let guard = state.project.lock().map_err(to_string)?;
+    guard
+        .as_ref()
+        .ok_or_else(|| "aucun projet ouvert".to_owned())?
+        .save()
+        .map_err(to_string)
+}
+
+/// Copie le projet ouvert sous un autre nom ; la copie devient le projet ouvert.
+#[tauri::command]
+pub fn project_save_as(path: PathBuf, state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
+    let mut guard = state.project.lock().map_err(to_string)?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| "aucun projet ouvert".to_owned())?;
+    let copy = current.save_as(&path).map_err(to_string)?;
+    let info = copy.info().map_err(to_string)?;
+    *guard = Some(copy);
+    Ok(info)
+}
+
+#[tauri::command]
 pub fn project_close(state: State<'_, AppState>) -> CmdResult<()> {
     *state.project.lock().map_err(to_string)? = None;
     Ok(())

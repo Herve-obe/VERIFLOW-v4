@@ -1,7 +1,7 @@
-<!-- Barre d'état : mode, message courant, langue, version. -->
+<!-- Barre d'état : mode, message courant, version (la langue est dans les Préférences). -->
 <script lang="ts">
   import { app } from "../stores/app.svelte";
-  import { i18n, setLanguage, t, LANGUAGES, type Language } from "../i18n/index.svelte";
+  import { t } from "../i18n/index.svelte";
 
   let { version = "" }: { version?: string } = $props();
 </script>
@@ -9,14 +9,6 @@
 <footer>
   <span class="mode">{t("mode." + app.mode)}</span>
   <span class="msg">{app.status || t("status.ready")}</span>
-  <label>
-    {t("settings.language")}
-    <select value={i18n.lang} onchange={(e) => setLanguage(e.currentTarget.value as Language)}>
-      {#each Object.keys(LANGUAGES) as lang (lang)}
-        <option value={lang}>{lang.toUpperCase()}</option>
-      {/each}
-    </select>
-  </label>
   <span class="mono">v{version}</span>
 </footer>
 
@@ -42,13 +34,5 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  select {
-    background: var(--vf-surface-high);
-    color: var(--vf-text);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-sm);
-    font-size: var(--vf-text-xs);
-    margin-left: var(--vf-space-1);
   }
 </style>

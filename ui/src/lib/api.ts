@@ -33,3 +33,11 @@ export async function pickProjectToOpen(): Promise<string | null> {
 export const projectCreate = (path: string) => invoke<ProjectInfo>("project_create", { path });
 export const projectOpen = (path: string) => invoke<ProjectInfo>("project_open", { path });
 export const projectClose = () => invoke<void>("project_close");
+export const projectSave = () => invoke<void>("project_save");
+export const projectSaveAs = (path: string) => invoke<ProjectInfo>("project_save_as", { path });
+
+/** Boîte « Enregistrer sous », ouverte dans le dossier du projet (« Nom copie »). */
+export async function pickProjectToSaveAs(current: string): Promise<string | null> {
+  const base = current.replace(/\.veriflow$/i, "");
+  return save({ filters: PROJECT_FILTER(), defaultPath: `${base} copie.veriflow` });
+}

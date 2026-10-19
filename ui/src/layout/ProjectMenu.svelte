@@ -1,46 +1,38 @@
-<!-- Création, ouverture et fermeture du fichier projet .veriflow (charte §5.3). -->
+<!-- Projet ouvert : nom et dossier (chemin complet en info-bulle). Création,
+     ouverture et enregistrement : menu Fichier (charte §5.3). -->
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { t } from "../i18n/index.svelte";
-  import { createProject, openProject, closeProject } from "../lib/project";
 
-  const create = () => createProject();
-  const open = () => openProject();
-  const close = () => closeProject();
+  const folder = $derived.by(() => {
+    const p = app.project?.path ?? "";
+    const parts = p.split(/[\\/]/).filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 2] : "";
+  });
 </script>
 
-<div class="project">
-  <span class="name" title={app.project?.path ?? ""}>{app.project?.name ?? t("project.none")}</span>
-  <button onclick={create}>{t("project.new")}</button>
-  <button onclick={open}>{t("project.open")}</button>
+<span class="name" class:none={!app.project} title={app.project?.path ?? ""}>
   {#if app.project}
-    <button onclick={close}>{t("project.close")}</button>
+    <b>{app.project.name}</b>{#if folder}<span class="folder">·&nbsp;{folder}</span>{/if}
+  {:else}
+    {t("project.none")}
   {/if}
-</div>
+</span>
 
 <style>
-  .project {
-    display: flex;
-    align-items: center;
-    gap: var(--vf-space-2);
-  }
   .name {
-    max-width: 220px;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--vf-text-muted);
-    margin-right: var(--vf-space-2);
-  }
-  button {
-    background: var(--vf-surface-high);
-    border: 1px solid var(--vf-border);
-    border-radius: var(--vf-radius-sm);
-    padding: var(--vf-space-1) var(--vf-space-3);
     font-size: var(--vf-text-sm);
-    cursor: pointer;
+    color: var(--vf-text-muted);
   }
-  button:hover {
-    background: var(--vf-surface-hover);
+  b {
+    color: var(--vf-text);
+    font-weight: 500;
+  }
+  .folder {
+    margin-left: var(--vf-space-1);
   }
 </style>

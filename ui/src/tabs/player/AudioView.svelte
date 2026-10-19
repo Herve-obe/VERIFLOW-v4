@@ -1,6 +1,6 @@
 <!-- PLAYER AUDIO : multipiste jusqu'à 32 pistes, SOLO / MUTE / niveau / panoramique, crêtes et LUFS. -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
@@ -12,7 +12,8 @@
   import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
-  import { resolvePlayerAction } from "../../shortcuts";
+  import { resolvePlayerAction, PLAYER_ACTION_EVENT } from "../../shortcuts";
+  import type { PlayerAction } from "../../shortcuts/defaults";
   import { secondsToClock, framesToTc } from "../../lib/timecode";
   import {
     pickAudio,
@@ -203,6 +204,20 @@
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
+    runAction(action);
+  }
+
+  // Mêmes actions depuis le menu Lecture (voir menu/commands.svelte.ts).
+  function onMenuAction(e: Event) {
+    if (!session || !active()) return;
+    runAction((e as CustomEvent<PlayerAction>).detail);
+  }
+  onMount(() => {
+    window.addEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+    return () => window.removeEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+  });
+
+  function runAction(action: PlayerAction) {
     switch (action) {
       case "play.toggle": toggle(); break;
       case "play.stop": stop(); break;
