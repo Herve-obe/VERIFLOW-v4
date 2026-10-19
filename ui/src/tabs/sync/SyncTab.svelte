@@ -3,7 +3,7 @@
      Vue VIDEO : une ligne par plan. Vue AUDIO : une ligne par son. -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { open, save } from "@tauri-apps/plugin-dialog";
+  import { open } from "@tauri-apps/plugin-dialog";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import ProgressBar from "../../components/ProgressBar.svelte";
   import PairDetail from "./PairDetail.svelte";
@@ -22,7 +22,6 @@
     onProgress,
     rewrap,
     timecodeAt,
-    timeline,
     type ExportItem,
     type ExportResult,
     type Options,
@@ -138,6 +137,19 @@
     }
   }
 
+  // « Dans un dossier » sans dossier choisi : ouvre le choix ; annulé, on
+  // revient à « À côté de chaque vidéo ».
+  async function chooseFolder(e: Event) {
+    const radio = e.currentTarget as HTMLInputElement;
+    if (!cfg.rewrap.dest) await pickDest();
+    if (cfg.rewrap.dest) cfg.nextToVideo = false;
+    else {
+      radio.checked = false;
+      const first = radio.form?.querySelector<HTMLInputElement>('input[name="sync-dest"]') ?? document.querySelector<HTMLInputElement>('input[name="sync-dest"]');
+      if (first) first.checked = true;
+    }
+  }
+
   async function doRewrap() {
     exporting = true;
     results = [];
@@ -150,17 +162,6 @@
     } finally {
       exporting = false;
       exportStep = "";
-    }
-  }
-
-  async function doTimeline(kind: "fcpxml" | "otio") {
-    const path = await save({ defaultPath: `VERIFLOW_SYNC.${kind}`, filters: [{ name: kind.toUpperCase(), extensions: [kind] }] });
-    if (!path) return;
-    try {
-      await timeline(kind, app.project?.name ?? "VERIFLOW SYNC", items(), path);
-      results = [{ video: "", output: path, error: null }];
-    } catch (e) {
-      error = String(e);
     }
   }
 
@@ -317,13 +318,18 @@
           <h3>{t("sync.export")} ({exportCount})</h3>
           <label class="tc-check"><input type="checkbox" bind:checked={cfg.validatedOnly} /> {t("sync.validated.only")}</label>
           <p class="tc-sub">{t("sync.rewrap")}</p>
-          <label class="tc-check"><input type="checkbox" bind:checked={cfg.nextToVideo} /> {t("sync.next.to.video")}</label>
-          {#if !cfg.nextToVideo}
-            <div class="tc-row">
-              <span class="tc-path" title={cfg.rewrap.dest ?? ""}>{cfg.rewrap.dest ?? t("transcode.dest.none")}</span>
-              <button class="tc-btn" onclick={pickDest}>{t("offload.browse")}</button>
-            </div>
-          {/if}
+          <!-- Destination : deux choix visibles (retour d'Hervé du 19/10/2026 :
+               le dossier n'apparaissait qu'en décochant une case). -->
+          <p class="muted small">{t("sync.dest")}</p>
+          <label class="tc-check"><input type="radio" name="sync-dest" checked={cfg.nextToVideo} onchange={() => (cfg.nextToVideo = true)} /> {t("sync.next.to.video")}</label>
+          <label class="tc-check">
+            <input type="radio" name="sync-dest" checked={!cfg.nextToVideo} onchange={chooseFolder} />
+            {t("sync.dest.folder")}
+          </label>
+          <div class="tc-row">
+            <span class="tc-path" class:muted={cfg.nextToVideo} title={cfg.rewrap.dest ?? ""}>{cfg.rewrap.dest ?? t("transcode.dest.none")}</span>
+            <button class="tc-btn" onclick={pickDest}>{t("offload.browse")}</button>
+          </div>
           <div class="tc-grid">
             <label class="tc-field">
               {t("sync.container")}
@@ -346,11 +352,6 @@
           {:else}
             <button class="start" disabled={!exportCount || (!cfg.nextToVideo && !cfg.rewrap.dest)} onclick={doRewrap}>{t("sync.rewrap.run")}</button>
           {/if}
-          <p class="tc-sub">{t("sync.timelines")}</p>
-          <div class="tc-row">
-            <button class="tc-btn" disabled={!exportCount} onclick={() => doTimeline("fcpxml")}>FCPXML</button>
-            <button class="tc-btn" disabled={!exportCount} onclick={() => doTimeline("otio")}>OTIO</button>
-          </div>
           {#each results as r, i (i)}
             <p class="small" class:error={!!r.error}>
               {#if r.output}<button class="link" onclick={() => r.output && reveal(r.output)}>{name(r.output)}</button>{/if}
