@@ -120,6 +120,8 @@ Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_
 
 - Menu « Moniteur » du lecteur vidéo (PLAYER et lecteur rapide de MEDIA) : liste des écrans branchés (nom, définition, écran principal signalé). Le choix d'un écran ouvre une fenêtre sans bordure, plein écran, fond noir, image propre (sans TC incrusté ni interface), LUT d'affichage comprise. Échap sur cet écran, ou « Moniteur » dans le menu, la ferme ; fermer VERIFLOW la ferme aussi.
 - Aucun second décodage : la fenêtre moniteur relit chaque image affichée dans le cache du lecteur.
+- Placement (corrigé le 19/10/2026 après le test d'Hervé sous Windows, où l'image s'ouvrait toujours sur l'écran principal) : la fenêtre est placée et dimensionnée en pixels physiques de l'écran choisi, puis affichée. Sous Windows et Linux, elle couvre exactement l'écran, au premier plan, sans passer par le plein écran du système (qui s'appliquait à l'écran où se trouvait la fenêtre, pas à celui choisi) ; macOS garde son plein écran.
+- Le lecteur rapide de MEDIA est une fenêtre interne à VERIFLOW : il se déplace dans la fenêtre principale, pas sur un autre écran. Son menu « Moniteur » envoie l'image sur le second écran.
 - Sortie SDI (Blackmagic DeckLink, AJA) : non prévue. Le SDK DeckLink est propriétaire ; un FFmpeg compilé avec lui n'est plus redistribuable (voir le remplacement du FFmpeg Linux). Un moniteur de contrôle se branche en HDMI ou DisplayPort comme second écran, ou via un convertisseur HDMI vers SDI.
 - Essai (Linux, Xvfb, un écran) : fenêtre plein écran en 16:9 avec bandes noires ; après 3 s de lecture lancée dans la fenêtre principale, image 77 (10:00:03:02) affichée sur les deux ; Échap ferme la fenêtre et remet le menu à zéro. Pas d'essai sur deux écrans réels ici.
 
