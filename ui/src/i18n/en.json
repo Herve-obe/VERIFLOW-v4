@@ -677,7 +677,9 @@
   "sync.export": "Export",
   "sync.validated.only": "Validated pairs only",
   "sync.rewrap": "Re-wrap (picture copied, sound aligned)",
+  "sync.dest": "Destination of synced files",
   "sync.next.to.video": "Next to each video",
+  "sync.dest.folder": "In a folder",
   "sync.container": "Container",
   "sync.mxf": "MXF (mono tracks)",
   "sync.keep.camera": "Keep camera sound as extra tracks",
@@ -761,7 +763,5 @@
   "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)",
   "player.tracks.count": "Tracks",
   "player.samplerate": "Sample rate",
-  "player.bitdepth": "Bit depth",
-  "sync.dest": "Destination of synced files",
-  "sync.dest.folder": "In a folder"
+  "player.bitdepth": "Bit depth"
 }

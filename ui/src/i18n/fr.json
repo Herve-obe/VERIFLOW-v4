@@ -677,7 +677,9 @@
   "sync.export": "Export",
   "sync.validated.only": "Paires validées seulement",
   "sync.rewrap": "Re-wrap (image copiée, son calé)",
+  "sync.dest": "Destination des fichiers synchronisés",
   "sync.next.to.video": "À côté de chaque vidéo",
+  "sync.dest.folder": "Dans un dossier",
   "sync.container": "Conteneur",
   "sync.mxf": "MXF (pistes mono)",
   "sync.keep.camera": "Garder le son caméra en pistes supplémentaires",
@@ -761,7 +763,5 @@
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)",
   "player.tracks.count": "Pistes",
   "player.samplerate": "Fréquence",
-  "player.bitdepth": "Résolution",
-  "sync.dest": "Destination des fichiers synchronisés",
-  "sync.dest.folder": "Dans un dossier"
+  "player.bitdepth": "Résolution"
 }
