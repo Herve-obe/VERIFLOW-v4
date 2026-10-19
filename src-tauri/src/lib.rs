@@ -122,7 +122,6 @@ pub fn run() {
             sync::sync_refine,
             sync::sync_waveforms,
             sync::sync_rewrap,
-            sync::sync_timeline,
             transcode::transcode_presets,
             transcode::transcode_encoder,
             transcode::transcode_preset_write,
