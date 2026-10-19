@@ -416,6 +416,9 @@
     min-height: 0;
     min-width: 0;
   }
+  /* Chaque colonne défile pour son compte (détail d'une paire ouvert sous
+     les résultats) : sinon toute la fenêtre défilerait, explorateur compris. */
+  .main,
   .aside {
     overflow-y: auto;
   }
