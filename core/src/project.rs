@@ -551,6 +551,48 @@ impl Project {
         Ok(out)
     }
 
+    /// « Enregistrer » : chaque modification est déjà écrite dans le fichier
+    /// (transactions SQLite, sans cache à vider). L'action est notée dans le
+    /// journal du projet, pour confirmer à l'utilisateur que tout est sur disque.
+    pub fn save(&self) -> Result<()> {
+        self.log("project", "Projet enregistré")
+    }
+
+    /// « Enregistrer sous » : copie complète et compacte du projet (VACUUM INTO)
+    /// vers `path`, qui devient le projet ouvert. Le nom du projet prend celui
+    /// du nouveau fichier ; l'original reste tel quel. Un fichier existant à
+    /// cet emplacement est remplacé (l'écrasement a été confirmé dans la
+    /// boîte d'enregistrement du système), sauf s'il s'agit du projet ouvert.
+    pub fn save_as(&self, path: &Path) -> Result<Self> {
+        let path = with_extension(path);
+        let same_file = path == self.path
+            || matches!(
+                (std::fs::canonicalize(&path), std::fs::canonicalize(&self.path)),
+                (Ok(a), Ok(b)) if a == b
+            );
+        if same_file {
+            self.save()?;
+            return Self::open(&path);
+        }
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        self.conn
+            .execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])?;
+        let copy = Self::open(&path)?;
+        if let Some(stem) = path.file_stem() {
+            copy.set_meta("name", &stem.to_string_lossy())?;
+        }
+        copy.log(
+            "project",
+            &format!(
+                "Projet enregistré sous ce nom (copie de {})",
+                self.path.display()
+            ),
+        )?;
+        Ok(copy)
+    }
+
     pub fn info(&self) -> Result<ProjectInfo> {
         Ok(ProjectInfo {
             path: self.path.display().to_string(),
@@ -564,6 +606,29 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_as_copies_everything_and_switches_to_the_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Project::create(&dir.path().join("Tournage"), None).unwrap();
+        let r = p.save_report(&Report::new(ReportKind::Image)).unwrap();
+        p.save().unwrap();
+
+        let copy = p.save_as(&dir.path().join("Tournage J2")).unwrap();
+        assert_eq!(copy.path(), dir.path().join("Tournage J2.veriflow"));
+        assert_eq!(copy.info().unwrap().name, "Tournage J2");
+        assert_eq!(copy.report(r.id).unwrap().number, 1);
+        // L'original n'est pas modifié.
+        assert_eq!(p.info().unwrap().name, "Tournage");
+        assert_eq!(Project::open(p.path()).unwrap().reports().unwrap().len(), 1);
+
+        // Remplacer un fichier existant (écrasement confirmé par le système).
+        let again = p.save_as(&dir.path().join("Tournage J2.veriflow")).unwrap();
+        assert_eq!(again.reports().unwrap().len(), 1);
+        // Sous le nom du projet ouvert : rien n'est supprimé.
+        let same = p.save_as(p.path()).unwrap();
+        assert_eq!(same.reports().unwrap().len(), 1);
+    }
 
     #[test]
     fn reports_are_numbered_per_kind_and_saved() {

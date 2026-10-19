@@ -7,6 +7,7 @@ mod logs;
 #[cfg(target_os = "macos")]
 mod macos;
 mod media;
+mod menu;
 mod monitor;
 mod offload;
 mod player;
@@ -29,6 +30,7 @@ pub struct AppState {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::default())
         .manage(player::PlayerState::default())
         .manage(media::MediaState::default())
@@ -38,6 +40,7 @@ pub fn run() {
             app.manage(offload::OffloadState::new(app.handle().clone()));
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
+            menu::listen(app.handle());
             // Fermer la fenêtre principale ferme aussi la sortie moniteur.
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
@@ -63,6 +66,9 @@ pub fn run() {
             commands::project_create,
             commands::project_open,
             commands::project_close,
+            commands::project_save,
+            commands::project_save_as,
+            menu::menu_set,
             player::video_open,
             player::video_frame,
             player::video_close,

@@ -3,7 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import TreeNode from "./TreeNode.svelte";
-  import { explorer, startExplorer, toggleFavorite, toggleExpanded, originOf } from "../../stores/explorer.svelte";
+  import { explorer, startExplorer, toggleFavorite, toggleExpanded, originOf, setExplorerCollapsed } from "../../stores/explorer.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
@@ -27,7 +27,6 @@
   } = $props();
 
   const WIDTH_KEY = "veriflow.explorer.width";
-  const COLLAPSED_KEY = "veriflow.explorer.collapsed";
   const read = (k: string, d: string) => {
     try {
       return localStorage.getItem(k) ?? d;
@@ -36,7 +35,7 @@
     }
   };
   let width = $state(Number(read(WIDTH_KEY, "250")));
-  let collapsed = $state(read(COLLAPSED_KEY, "false") === "true");
+  const collapsed = $derived(explorer.collapsed);
   // État déplié partagé entre les onglets (voir stores/explorer.svelte.ts).
   const expanded = $derived(explorer.expanded);
   let roots = $state<string[]>([]);
@@ -45,7 +44,6 @@
   $effect(() => {
     try {
       localStorage.setItem(WIDTH_KEY, String(width));
-      localStorage.setItem(COLLAPSED_KEY, String(collapsed));
     } catch {
       /* stockage indisponible */
     }
@@ -80,30 +78,23 @@
     window.addEventListener("pointerup", up);
   }
 
-  function onKeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b" && app.tab === owner.split("-")[0]) {
-      e.preventDefault();
-      collapsed = !collapsed;
-    }
-  }
-
   const entry = (path: string) => ({ path, name: path.split(/[\\/]/).filter(Boolean).pop() ?? path, has_children: true });
   const openMenu = (e: MouseEvent, path: string) => (menu = { x: e.clientX, y: e.clientY, path });
 
   onMount(startExplorer);
 </script>
 
-<svelte:window onkeydown={onKeydown} onclick={() => (menu = null)} />
+<svelte:window onclick={() => (menu = null)} />
 
 {#if collapsed}
-  <button class="reopen" onclick={() => (collapsed = false)} title={t("explorer.show")} aria-label={t("explorer.show")}>
+  <button class="reopen" onclick={() => setExplorerCollapsed(false)} title={t("explorer.show")} aria-label={t("explorer.show")}>
     <svg viewBox="0 0 10 10"><path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
   </button>
 {:else}
   <aside class="explorer" style:width={`${width}px`} aria-label={t("explorer.title")}>
     <header>
       <span>{t("explorer.title")}</span>
-      <button onclick={() => (collapsed = true)} title={t("explorer.hide")} aria-label={t("explorer.hide")}>
+      <button onclick={() => setExplorerCollapsed(true)} title={t("explorer.hide")} aria-label={t("explorer.hide")}>
         <svg viewBox="0 0 10 10"><path d="M7 1.5 L3 5 L7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
       </button>
     </header>

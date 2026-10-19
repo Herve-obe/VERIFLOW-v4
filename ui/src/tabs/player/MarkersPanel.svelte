@@ -5,7 +5,7 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import { app } from "../../stores/app.svelte";
   import Modal from "../../components/Modal.svelte";
-  import { createProject, openProject } from "../../lib/project";
+  import { createProject, openProject } from "../../lib/project.svelte";
   import { t } from "../../i18n/index.svelte";
   import {
     MARKER_COLORS,

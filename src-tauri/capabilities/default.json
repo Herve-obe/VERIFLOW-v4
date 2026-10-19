@@ -3,5 +3,13 @@
   "identifier": "default",
   "description": "Permissions de la fenêtre principale et de la sortie moniteur",
   "windows": ["main", "monitor"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
+  ]
 }
