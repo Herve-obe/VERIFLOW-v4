@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use sysinfo::{DiskKind, Disks};
@@ -61,8 +63,40 @@ fn display_name(mount: &Path, label: &str) -> String {
     mount.display().to_string()
 }
 
+/// Éjection en cours : la liste des volumes n'est plus relue (sysinfo ouvre
+/// chaque volume pour en lire la taille et le type, ce qui peut faire
+/// refuser l'éjection par Windows), la dernière lecture est rendue.
+static EJECTING: AtomicUsize = AtomicUsize::new(0);
+static LAST_VOLUMES: Mutex<Vec<Volume>> = Mutex::new(Vec::new());
+
+struct Ejecting;
+impl Ejecting {
+    fn start() -> Self {
+        EJECTING.fetch_add(1, Ordering::SeqCst);
+        Ejecting
+    }
+}
+impl Drop for Ejecting {
+    fn drop(&mut self) {
+        EJECTING.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Volumes montés, hors volumes système virtuels.
 pub fn volumes() -> Vec<Volume> {
+    if EJECTING.load(Ordering::SeqCst) > 0 {
+        if let Ok(last) = LAST_VOLUMES.lock() {
+            return last.clone();
+        }
+    }
+    let list = read_volumes();
+    if let Ok(mut last) = LAST_VOLUMES.lock() {
+        *last = list.clone();
+    }
+    list
+}
+
+fn read_volumes() -> Vec<Volume> {
     let disks = Disks::new_with_refreshed_list();
     let mut out: Vec<Volume> = disks
         .list()
@@ -207,28 +241,133 @@ fn external_bus(_mount: &Path) -> bool {
     false
 }
 
+/// Programmes qui tiennent ouverts des fichiers de ce dossier (Windows,
+/// gestionnaire de redémarrage : le même service que l'installeur de
+/// Windows utilise pour dire « fermez tel programme »). 2 000 fichiers au
+/// plus ; vide ailleurs ou si rien n'est trouvé.
+#[cfg(windows)]
+pub fn processes_using(dir: &Path) -> Vec<String> {
+    use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
+    use windows_sys::Win32::System::RestartManager::{
+        RmEndSession, RmGetList, RmRegisterResources, RmStartSession, CCH_RM_SESSION_KEY,
+        RM_PROCESS_INFO,
+    };
+
+    let mut files: Vec<Vec<u16>> = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                stack.push(p);
+            } else if files.len() < 2000 {
+                use std::os::windows::ffi::OsStrExt;
+                files.push(p.as_os_str().encode_wide().chain(Some(0)).collect());
+            }
+        }
+        if files.len() >= 2000 {
+            break;
+        }
+    }
+    if files.is_empty() {
+        return Vec::new();
+    }
+    let ptrs: Vec<*const u16> = files.iter().map(|f| f.as_ptr()).collect();
+    let mut names: Vec<String> = Vec::new();
+    // SAFETY : appels documentés du gestionnaire de redémarrage ; les
+    // chaînes restent en vie pendant la session, refermée dans tous les cas.
+    unsafe {
+        let mut session = 0u32;
+        let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+        if RmStartSession(&mut session, 0, key.as_mut_ptr()) != ERROR_SUCCESS {
+            return Vec::new();
+        }
+        if RmRegisterResources(
+            session,
+            ptrs.len() as u32,
+            ptrs.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+        ) == ERROR_SUCCESS
+        {
+            let mut needed = 0u32;
+            let mut count = 0u32;
+            let mut reasons = 0u32;
+            let mut list: Vec<RM_PROCESS_INFO> = Vec::new();
+            let mut status = RmGetList(
+                session,
+                &mut needed,
+                &mut count,
+                std::ptr::null_mut(),
+                &mut reasons,
+            );
+            if status == ERROR_MORE_DATA && needed > 0 {
+                list = vec![RM_PROCESS_INFO::default(); needed as usize];
+                count = needed;
+                status = RmGetList(
+                    session,
+                    &mut needed,
+                    &mut count,
+                    list.as_mut_ptr(),
+                    &mut reasons,
+                );
+            }
+            if status == ERROR_SUCCESS {
+                for info in list.iter().take(count as usize) {
+                    let raw = &info.strAppName;
+                    let len = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+                    let name = String::from_utf16_lossy(&raw[..len]);
+                    let name = format!("{name} (PID {})", info.Process.dwProcessId);
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+        }
+        RmEndSession(session);
+    }
+    names
+}
+
+#[cfg(not(windows))]
+pub fn processes_using(_dir: &Path) -> Vec<String> {
+    Vec::new()
+}
+
 /// Éjecte proprement un volume amovible (après la copie).
 ///
 /// Les dossiers suivis par l'explorateur sur ce volume doivent être libérés
 /// avant (sous Windows, chaque dossier surveillé garde le volume ouvert).
-pub fn eject(mount_point: &Path) -> Result<()> {
+/// `hint` : dossier copié, dont les fichiers servent à nommer, en cas de
+/// refus, les programmes qui les tiennent ouverts (Windows).
+pub fn eject(mount_point: &Path, hint: Option<&Path>) -> Result<()> {
+    let _ejecting = Ejecting::start();
     let mp = mount_point.display().to_string();
     let output = if cfg!(target_os = "macos") {
         Command::new("diskutil").args(["eject", &mp]).output()
     } else if cfg!(windows) {
         // Même commande que « Éjecter » dans l'Explorateur (retrait sécurisé,
         // disques USB compris). Elle rend la main tout de suite sans dire si
-        // l'éjection a réussi : on attend que la lettre disparaisse (15 s).
-        // GetLogicalDrives n'ouvre pas le volume, contrairement à Test-Path.
+        // l'éjection a réussi : on attend que la lettre disparaisse (5 s),
+        // et on réessaie deux fois (un programme peut lâcher le disque
+        // entre-temps : indexation, antivirus). GetLogicalDrives n'ouvre pas
+        // le volume, contrairement à Test-Path.
         let letter = mp.trim_end_matches(['\\', '/']).to_owned();
         let script = format!(
             "$d='{letter}'; \
-             $i=(New-Object -ComObject Shell.Application).Namespace(17).ParseName($d); \
-             if ($null -eq $i) {{ exit 2 }}; \
-             $i.InvokeVerb('Eject'); \
-             for ($n=0; $n -lt 30; $n++) {{ \
-               if (-not ([IO.Directory]::GetLogicalDrives() -contains ($d + '\\'))) {{ exit 0 }}; \
-               Start-Sleep -Milliseconds 500 }}; \
+             $gone={{ -not ([IO.Directory]::GetLogicalDrives() -contains ($d + '\\')) }}; \
+             for ($a=0; $a -lt 3; $a++) {{ \
+               $i=(New-Object -ComObject Shell.Application).Namespace(17).ParseName($d); \
+               if ($null -eq $i) {{ if (& $gone) {{ exit 0 }} else {{ exit 2 }} }}; \
+               $i.InvokeVerb('Eject'); \
+               for ($n=0; $n -lt 10; $n++) {{ \
+                 if (& $gone) {{ exit 0 }}; \
+                 Start-Sleep -Milliseconds 500 }} }}; \
              exit 1"
         );
         #[allow(unused_mut)]
@@ -257,21 +396,27 @@ pub fn eject(mount_point: &Path) -> Result<()> {
     };
     // Windows : messages écrits ici (la console PowerShell abîme les accents).
     let windows_message = |code: Option<i32>| match code {
-        Some(1) => Some(
-            "le disque est encore utilisé par un autre programme \
-             (Explorateur, antivirus, lecteur vidéo...)",
-        ),
-        Some(2) => Some("volume introuvable"),
+        Some(1) => {
+            let users = processes_using(hint.unwrap_or(mount_point));
+            Some(if users.is_empty() {
+                "le disque est encore utilisé par un autre programme \
+                 (Explorateur, antivirus, indexation, lecteur vidéo...)"
+                    .to_owned()
+            } else {
+                format!("le disque est encore utilisé par : {}", users.join(", "))
+            })
+        }
+        Some(2) => Some("volume introuvable".to_owned()),
         _ => None,
     };
     match output {
         Ok(o) if o.status.success() => Ok(()),
-        Ok(o) if cfg!(windows) && windows_message(o.status.code()).is_some() => Err(Error::Tool {
-            tool: "éjection".into(),
-            message: windows_message(o.status.code())
-                .unwrap_or_default()
-                .to_owned(),
-        }),
+        Ok(o) if cfg!(windows) && matches!(o.status.code(), Some(1) | Some(2)) => {
+            Err(Error::Tool {
+                tool: "éjection".into(),
+                message: windows_message(o.status.code()).unwrap_or_default(),
+            })
+        }
         Ok(o) => Err(Error::Tool {
             tool: "éjection".into(),
             message: String::from_utf8_lossy(&o.stderr).trim().to_owned(),

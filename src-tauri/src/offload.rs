@@ -150,7 +150,13 @@ fn run_job(app: &AppHandle, job: Job) {
                 storage::volume_of(&job.request.source)
                     .filter(|v| v.removable)
                     .ok_or_else(|| "source non amovible : pas d'éjection".to_owned())
-                    .and_then(|v| crate::explorer::eject_volume(app, &v.mount_point))
+                    .and_then(|v| {
+                        crate::explorer::eject_volume(
+                            app,
+                            &v.mount_point,
+                            Some(&job.request.source),
+                        )
+                    })
             });
             send(Notice::Done {
                 job: job.id,
@@ -331,9 +337,11 @@ pub fn offload_cancel(job: u64, state: State<'_, OffloadState>) -> CmdResult<()>
 
 #[tauri::command]
 pub async fn offload_eject(app: AppHandle, mount_point: PathBuf) -> CmdResult<()> {
-    tauri::async_runtime::spawn_blocking(move || crate::explorer::eject_volume(&app, &mount_point))
-        .await
-        .map_err(text)?
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::explorer::eject_volume(&app, &mount_point, None)
+    })
+    .await
+    .map_err(text)?
 }
 
 /// Ouvre un fichier (rapport) ou un dossier avec l'application du système.

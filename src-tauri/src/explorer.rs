@@ -207,7 +207,11 @@ fn apply(inner: &mut Inner) {
 
 /// Éjecte un volume après avoir cessé d'y surveiller les dossiers ; si
 /// l'éjection échoue, la surveillance reprend.
-pub fn eject_volume(app: &AppHandle, mount_point: &Path) -> Result<(), String> {
+pub fn eject_volume(
+    app: &AppHandle,
+    mount_point: &Path,
+    hint: Option<&Path>,
+) -> Result<(), String> {
     let state = app.state::<ExplorerState>();
     if let Ok(mut inner) = state.inner.lock() {
         inner.released.push(mount_point.to_path_buf());
@@ -215,7 +219,7 @@ pub fn eject_volume(app: &AppHandle, mount_point: &Path) -> Result<(), String> {
     }
     // Le fil de notify ferme les dossiers peu après la demande.
     thread::sleep(Duration::from_millis(500));
-    let result = storage::eject(mount_point).map_err(|e| e.to_string());
+    let result = storage::eject(mount_point, hint).map_err(|e| e.to_string());
     if result.is_err() {
         if let Ok(mut inner) = state.inner.lock() {
             inner.released.retain(|m| m != mount_point);
