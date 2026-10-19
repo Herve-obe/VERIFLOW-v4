@@ -41,6 +41,12 @@ pub fn run() {
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
             menu::listen(app.handle());
+            // Windows : barre de titre dessinée par l'interface (menus,
+            // projet, boutons de la fenêtre), à la place de celle du système.
+            #[cfg(windows)]
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.set_decorations(false);
+            }
             // Fermer la fenêtre principale ferme aussi la sortie moniteur.
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();

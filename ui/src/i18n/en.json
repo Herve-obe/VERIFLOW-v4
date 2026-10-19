@@ -819,5 +819,9 @@
   "licenses.others": "Rust and JavaScript libraries under GPLv3-compatible licenses (MIT, Apache 2.0, BSD...): Tauri, Svelte, SQLite, cpal, realfft, sysinfo, notify and others. The Steinberg ASIO SDK (Windows) is used under the GPLv3. The Inter and JetBrains Mono fonts are under the SIL Open Font License 1.1.",
   "about.tagline": "Picture and sound dailies: verified copy, media, playback, sync, transcoding and reports.",
   "about.author": "Author: Hervé Obejero",
-  "about.license": "License GPL-3.0-or-later"
+  "about.license": "License GPL-3.0-or-later",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close"
 }

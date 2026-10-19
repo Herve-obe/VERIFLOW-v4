@@ -819,5 +819,9 @@
   "licenses.others": "Bibliothèques Rust et JavaScript sous licences compatibles avec la GPLv3 (MIT, Apache 2.0, BSD...) : Tauri, Svelte, SQLite, cpal, realfft, sysinfo, notify et d'autres. Le SDK ASIO de Steinberg (Windows) est utilisé sous licence GPLv3. Les polices Inter et JetBrains Mono sont sous licence SIL Open Font License 1.1.",
   "about.tagline": "Gestion des rushes image et son : copie vérifiée, médias, lecture, synchronisation, conversion et rapports.",
   "about.author": "Auteur : Hervé Obejero",
-  "about.license": "Licence GPL-3.0-or-later"
+  "about.license": "Licence GPL-3.0-or-later",
+  "window.minimize": "Réduire",
+  "window.maximize": "Agrandir",
+  "window.restore": "Restaurer",
+  "window.close": "Fermer"
 }

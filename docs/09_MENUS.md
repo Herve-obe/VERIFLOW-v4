@@ -13,17 +13,22 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 | Aide | Raccourcis clavier (F1), Licences, À propos de VERIFLOW |
 
 - **macOS** : menu natif en haut de l'écran, avec le menu VERIFLOW (À propos, Préférences ⌘,, Masquer, Quitter ⌘Q) et le menu Fenêtre (réduire, plein écran). Couper, copier, coller sont les entrées du système, indispensables pour les champs de texte. Les raccourcis d'une seule touche (Espace, J, K, L, Tab...) sont affichés dans la barre dessinée mais pas donnés au menu natif, qui les prendrait aux champs de texte.
-- **Windows et Linux** : barre dessinée dans le bandeau du haut, entre le logo et les onglets. Elle ne prend pas le focus : couper, copier, coller agissent sur le champ en cours (presse-papiers par le module officiel de Tauri, le moteur web refusant « coller » depuis un menu).
+- **En-tête en deux lignes** (option B de la maquette, onglets centrés, choix d'Hervé du 19/10/2026) :
+  1. barre de titre : logo, menus, projet ouvert (nom · dossier) au centre de l'espace libre. Sous Windows, elle remplace la barre du système : déplacement de la fenêtre en la tirant, double-clic pour agrandir, boutons réduire, agrandir/restaurer et fermer redessinés (fermer en rouge au survol). Sous Linux, la barre du système reste au-dessus (pas de boutons dessinés). Sous macOS, cette ligne n'existe pas : les menus sont dans la barre du système ;
+  2. onglets centrés, interrupteur VIDEO / AUDIO à droite (sous macOS, logo à gauche et projet à côté de l'interrupteur).
+- **Windows et Linux** : barre de menus dessinée dans la barre de titre. Elle ne prend pas le focus : couper, copier, coller agissent sur le champ en cours (presse-papiers par le module officiel de Tauri, le moteur web refusant « coller » depuis un menu).
 - **Enregistrer** : chaque modification du projet est déjà écrite dans le fichier `.veriflow` au moment où elle est faite (SQLite) ; Ctrl+S le confirme dans la barre d'état et le note dans le journal du projet.
 - **Enregistrer sous** : copie complète et compacte du projet (`VACUUM INTO`) sous un autre nom ; la copie devient le projet ouvert, son nom prend celui du fichier, l'original n'est pas modifié. Boîte proposée dans le dossier du projet, nom « … copie ».
 - **Préférences** : fenêtre à sections ; pour l'instant « Général » (langue, retirée de la barre d'état). Les sections Raccourcis (modifiables), OFFLOAD, PLAYER et TRANSCODE viennent dans la PR suivante.
 - **Raccourcis clavier** (Aide) : liste tirée des menus, toujours à jour.
-- Bandeau du haut : tient dans la largeur minimale de la fenêtre (1024 px) ; sous 1360 px, le logo seul.
+- En-tête : tient dans la largeur minimale de la fenêtre (1024 px).
+- Limite sous Windows 11 : la barre étant redessinée, le menu « Snap Layouts » au survol du bouton agrandir n'apparaît pas ; le Snap par glisser vers les bords et Win+flèches fonctionnent.
 
 ## Choix techniques
 
 - `ui/src/menu/commands.svelte.ts` : liste unique des commandes (libellé, raccourci, condition, action) et des menus. Sert à la barre dessinée, au menu natif et à la fenêtre des raccourcis.
 - `ui/src/menu/MenuBar.svelte` (barre dessinée), `MenuDialogs.svelte` (Préférences, Raccourcis, Licences, À propos).
+- `ui/src/layout/TopBar.svelte` (en-tête en deux lignes), `WindowControls.svelte` (boutons de la fenêtre) ; barre du système retirée sous Windows dans `src-tauri/src/lib.rs` (`set_decorations(false)`), zones de déplacement `data-tauri-drag-region`.
 - `src-tauri/src/menu.rs` : construit le menu natif de macOS à partir de la description envoyée par l'interface, relaie les clics (événement `menu`). Reconstruit à chaque changement de langue, de projet ou de récents.
 - Menu Lecture : événement `veriflow-player-action`, reçu par le lecteur actif (PLAYER ou lecteur rapide), qui exécute la même action que la touche.
 - Cœur : `Project::save` et `Project::save_as` (`core/src/project.rs`), test `save_as_copies_everything_and_switches_to_the_copy`.
@@ -41,6 +46,7 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 
 ## À tester sur poste réel
 
+0. Windows : barre de titre dessinée (déplacer la fenêtre, double-clic pour agrandir, réduire, agrandir/restaurer, fermer ; redimensionner par les bords ; Snap vers les bords, Win+flèches ; deux écrans).
 1. Windows : barre de menus, survol d'un menu à l'autre, raccourcis Ctrl+N, O, S, Maj+S, W, Q, F11, F1.
 2. Couper, copier, coller depuis le menu Édition dans un champ (OFFLOAD, REPORT).
 3. Enregistrer sous : copie ouverte, original intact, projets récents.
