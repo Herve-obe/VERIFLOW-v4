@@ -20,6 +20,12 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 - **Enregistrer** : chaque modification du projet est déjà écrite dans le fichier `.veriflow` au moment où elle est faite (SQLite) ; Ctrl+S le confirme dans la barre d'état et le note dans le journal du projet.
 - **Enregistrer sous** : copie complète et compacte du projet (`VACUUM INTO`) sous un autre nom ; la copie devient le projet ouvert, son nom prend celui du fichier, l'original n'est pas modifié. Boîte proposée dans le dossier du projet, nom « … copie ».
 - **Préférences** : fenêtre à sections ; pour l'instant « Général » (langue, retirée de la barre d'état). Les sections Raccourcis (modifiables), OFFLOAD, PLAYER et TRANSCODE viennent dans la PR suivante.
+- **Données de l'application** (demande d'Hervé du 20/10/2026, Préférences > Général) :
+  - « À l'ouverture de VERIFLOW » : *Reprendre où j'en étais* (par défaut) ou *Repartir à zéro*. À zéro, l'état de travail est effacé à chaque ouverture : destinations et options d'OFFLOAD, réglages de SYNC, dossiers dépliés de l'explorateur, affichages du PLAYER, sections ouvertes de TRANSCODE. Restent : langue, projets récents, favoris, préréglages TRANSCODE créés, sortie audio ;
+  - « Remettre à zéro maintenant » (même effacement) et « Effacer toutes les données » (tout, réglages compris), avec confirmation, puis rechargement ;
+  - les projets `.veriflow`, rapports et copies ne sont jamais touchés ;
+  - désinstallation sous Windows : seul l'installeur NSIS (`setup.exe`) est publié, en français et en anglais ; son désinstalleur propose « Supprimer les données de l'application » (dossiers `%APPDATA%` et `%LOCALAPPDATA%\com.veriflow.app`, où le moteur web garde les réglages). Le MSI, qui ne le propose pas, n'est plus publié. macOS et Linux n'ont pas de désinstalleur : « Effacer toutes les données » fait le même travail.
+- Code : `ui/src/lib/appdata.ts` (clés `veriflow.*` gardées ou effacées), appliqué dans `ui/src/main.ts` avant le chargement des vues.
 - **Raccourcis clavier** (Aide) : liste tirée des menus, toujours à jour.
 - En-tête : tient dans la largeur minimale de la fenêtre (1024 px).
 - Limite sous Windows 11 : la barre étant redessinée, le menu « Snap Layouts » au survol du bouton agrandir n'apparaît pas ; le Snap par glisser vers les bords et Win+flèches fonctionnent.
@@ -45,6 +51,8 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 - Menu natif de macOS : compilé (même API de Tauri sous Linux), pas affiché ici (pas de Mac).
 
 ## À tester sur poste réel
+
+- Données : désinstaller avec la case « Supprimer les données de l'application » cochée, réinstaller : plus aucune destination d'OFFLOAD. « Repartir à zéro » : fermer, rouvrir, l'état de travail est vide, la langue et les favoris restent.
 
 0. Windows : barre de titre dessinée (déplacer la fenêtre, double-clic pour agrandir, réduire, agrandir/restaurer, fermer ; redimensionner par les bords ; Snap vers les bords, Win+flèches ; deux écrans).
 1. Windows : barre de menus, survol d'un menu à l'autre, raccourcis Ctrl+N, O, S, Maj+S, W, Q, F11, F1.
