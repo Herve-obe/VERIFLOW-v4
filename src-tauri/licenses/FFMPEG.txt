@@ -1,25 +1,32 @@
 FFmpeg intégré à VERIFLOW
 =========================
 
-VERIFLOW est livré avec les programmes ffmpeg et ffprobe (version 9.0.2),
+VERIFLOW est livré avec les programmes ffmpeg et ffprobe (FFmpeg 9.0.2),
 installés à côté de l'exécutable VERIFLOW sous les noms veriflow-ffmpeg et
 veriflow-ffprobe. Ils sont exécutés comme des programmes séparés.
 
-FFmpeg est un logiciel libre distribué sous licence GNU General Public License
-version 3 (ces versions incluent x264, x265 et d'autres bibliothèques GPL).
-VERIFLOW est lui-même distribué sous licence GPL-3.0-or-later.
+FFmpeg est un logiciel libre (https://ffmpeg.org). Les binaires livrés sont
+compilés avec --enable-gpl --enable-version3, sans --enable-nonfree : ils sont
+distribués sous licence GNU General Public License version 3 (texte complet :
+LICENSE-GPL-3.0.txt, ou https://www.gnu.org/licenses/gpl-3.0.html). Chaque
+bibliothèque compilée dedans garde sa propre licence, compatible avec la
+GPLv3 (liste : COMPOSANTS_TIERS.md).
 
-Code source de FFmpeg 9.0.2 :
-  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
-  https://git.ffmpeg.org/ffmpeg.git (étiquette n9.0.2)
+Origine des binaires
+  Windows x64 : BtbN/FFmpeg-Builds, autobuild-2026-09-30-13-08,
+                ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-9.0.zip
+  Linux x64   : BtbN/FFmpeg-Builds, autobuild-2026-09-30-13-08,
+                ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz
+  macOS       : compilé par VERIFLOW (scripts/build-ffmpeg-macos.sh), FFmpeg
+                9.0.2 et chaque bibliothèque à un commit épinglé.
+La configuration exacte s'affiche dans VERIFLOW (Aide > Licences > FFmpeg)
+ou avec « veriflow-ffmpeg -buildconf ».
 
-Compilations utilisées (configuration et sources des bibliothèques sur ces pages) :
-  Windows        : https://www.gyan.dev/ffmpeg/builds/ (essentials build 9.0.2)
-                   https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2
-  macOS et Linux : https://ffmpeg.martin-riedl.de/ (release build 9.0.2)
-
-Texte de la licence GPL version 3 : https://www.gnu.org/licenses/gpl-3.0.txt
-(également fourni dans le fichier LICENSE de VERIFLOW).
-
-Sur demande écrite, l'éditeur de VERIFLOW fournit une copie du code source
-correspondant à ces binaires, pendant au moins trois ans après la distribution.
+Code source correspondant (GPLv3, article 6 d)
+  Le code source complet de ces binaires (FFmpeg, chaque bibliothèque, les
+  scripts et options de compilation) est joint à chaque version publiée de
+  VERIFLOW, au même endroit que les installeurs :
+    ffmpeg-sources-9.0.2-windows-linux.tar
+    ffmpeg-sources-9.0.2-macos.tar
+  Il reste disponible tant que la version correspondante est proposée au
+  téléchargement.

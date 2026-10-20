@@ -3,7 +3,12 @@
   "bundle": {
     "externalBin": ["binaries/veriflow-ffmpeg", "binaries/veriflow-ffprobe"],
     "resources": {
-      "licenses/FFMPEG.txt": "licenses/FFMPEG.txt"
+      "../LICENSE": "licenses/LICENSE-GPL-3.0.txt",
+      "../legal/CLUF.md": "licenses/CLUF.md",
+      "../legal/CGU.md": "licenses/CGU.md",
+      "../legal/COMPOSANTS_TIERS.md": "licenses/COMPOSANTS_TIERS.md",
+      "licenses/FFMPEG.txt": "licenses/FFMPEG.txt",
+      "licenses/THIRD_PARTY.txt": "licenses/THIRD_PARTY.txt"
     }
   }
 }

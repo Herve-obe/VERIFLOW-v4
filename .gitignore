@@ -7,3 +7,6 @@ src-tauri/gen/schemas/
 
 # FFmpeg téléchargé à la compilation (scripts/fetch-ffmpeg.sh)
 src-tauri/binaries/
+
+# Avis de licences tiers, générés au build (scripts/third-party.mjs)
+src-tauri/licenses/THIRD_PARTY.txt

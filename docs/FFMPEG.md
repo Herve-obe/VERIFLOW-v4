@@ -1,35 +1,74 @@
 # FFmpeg intégré à VERIFLOW
 
-VERIFLOW livre `ffmpeg` et `ffprobe` dans son installeur (charte §5.2) : il fonctionne sans Internet ni installation annexe. Ils sont téléchargés au moment du build par `scripts/fetch-ffmpeg.sh`, chacun épinglé par son empreinte SHA-256 : un build donne toujours le même FFmpeg.
+VERIFLOW livre `ffmpeg` et `ffprobe` dans son installeur (charte §5.2) : il fonctionne sans Internet ni installation annexe.
+
+Organisation décidée par Hervé le 20/10/2026, pour être au plus près de la GPLv3 :
+1. **Windows et Linux** : builds BtbN, dont le contenu est connu exactement.
+2. **macOS** : FFmpeg compilé par VERIFLOW.
+3. **Code source complet** joint à chaque Release.
 
 ## Builds utilisés (version 9.0.2)
 
-| Système | Source | Licence | Remarque |
-|---|---|---|---|
-| Windows x64 | gyan.dev, « essentials » | GPLv3 | Statique |
-| macOS Apple Silicon | martin-riedl.de | GPLv3 | Statique, sans `--enable-nonfree` (vérifié le 11/10/2026) |
-| macOS Intel | evermeet.cx | GPLv3 | Statique, macOS 10.13 et plus (Catalina) |
-| Linux x64 | BtbN/FFmpeg-Builds, variante `linux64-gpl`, branche 9.0, autobuild `autobuild-2026-09-30-13-08`, fichier `ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz` | GPLv3 | Statique. Remplace le 11/10/2026 le build de martin-riedl.de, compilé avec DeckLink (`--enable-nonfree`), donc non redistribuable |
+| Système | Origine | Licence |
+|---|---|---|
+| Windows x64 | BtbN/FFmpeg-Builds, variante `win64-gpl`, branche 9.0, autobuild `autobuild-2026-09-30-13-08`, `ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-9.0.zip` | GPLv3, statique |
+| Linux x64 | même autobuild, variante `linux64-gpl`, `ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz` | GPLv3, statique |
+| macOS Apple Silicon et Intel | compilé par `scripts/build-ffmpeg-macos.sh` (job `ffmpeg-macos` du build), assemblé en binaire universel | GPLv3, statique |
 
-**Copie de secours macOS Intel** : le miroir d'evermeet.cx est parfois injoignable. Les deux fichiers (`ffmpeg-9.0.2.zip`, `ffprobe-9.0.2.zip`) sont aussi conservés tels quels dans le dépôt, sur la branche de stockage `vendor/ffmpeg-evermeet` (jamais fusionnée) ; le script s'en sert si evermeet ne répond pas, avec la même empreinte SHA-256 exigée. Aucune copie n'est à garder ailleurs. À chaque mise à jour de FFmpeg, y déposer les nouveaux fichiers.
+**Windows et Linux** :
+- `scripts/fetch-ffmpeg.sh` télécharge chaque build BtbN et vérifie son empreinte SHA-256.
+- BtbN conserve durablement ses autobuilds de fin de mois : c'en est un qui est épinglé.
+- Ses scripts (`scripts.d`) fixent le commit de chaque bibliothèque.
 
-BtbN conserve durablement les autobuilds de fin de mois : c'en est un qui est épinglé.
+**macOS** :
+- FFmpeg 9.0.2 (archive officielle, empreinte vérifiée) et chacune de ses bibliothèques, au même commit que dans les builds BtbN.
+- Bibliothèques : x264, x265 (8, 10 et 12 bits), libvpx, SVT-AV1, Opus, LAME, libogg, libvorbis, FreeType, FriBidi, HarfBuzz, libass, libvmaf, snappy (HAP), libwebp.
+- Fonctions du système : VideoToolbox, AudioToolbox, CoreText.
+- Le job `ffmpeg-macos` tourne sur `macos-15` (arm64, macOS 11 et plus) et `macos-15-intel` (x86_64, macOS 10.15 et plus, pour Catalina).
+- Le résultat est gardé en cache tant que le script ne change pas.
+- Le script refuse un binaire qui dépend d'une bibliothèque hors du système (Homebrew, dossier de compilation).
+- Absents sur Mac, donc préréglages grisés : Xvid, Theora, H.266/VVC, JPEG XL.
+
+Les builds de gyan.dev (Windows), martin-riedl.de et evermeet.cx (macOS), utilisés jusqu'au 20/10/2026, sont abandonnés : il n'était pas certain qu'ils publient le code source complet de toutes leurs bibliothèques. La branche de stockage `vendor/ffmpeg-evermeet` n'est plus utilisée.
 
 ## Contrôle de licence
 
-Le build (`.github/workflows/build.yml`, étape « Contrôler FFmpeg ») lance le FFmpeg téléchargé avec `-buildconf` et **échoue s'il contient `--enable-nonfree`**. Un FFmpeg nonfree (fdk-aac, DeckLink, NDI, CUDA NPP...) ne peut pas être distribué avec un programme GPL.
+- **Build**, étape « Contrôler FFmpeg » : le FFmpeg de chaque système est lancé avec `-buildconf`, et le build **échoue s'il contient `--enable-nonfree`**.
+- **Script macOS** : il le vérifie aussi.
+- **Composants tiers** : l'étape « Avis de licences des composants tiers » (`scripts/third-party.mjs`) échoue si une crate Rust ou un paquet JavaScript a une licence incompatible avec la GPLv3.
 
-## Code source correspondant (GPL)
+## Code source correspondant (GPLv3 §6 d)
 
-La GPL impose de pouvoir fournir le code source des binaires distribués :
-- FFmpeg : dépôt officiel https://git.ffmpeg.org/ffmpeg.git (miroir https://github.com/FFmpeg/FFmpeg). Version Linux : commit `2a571b6068` de la branche `release/9.0` (n9.0.2 + 17 commits). Autres systèmes : version 9.0.2.
-- Scripts et bibliothèques du build Linux : https://github.com/BtbN/FFmpeg-Builds (au même autobuild).
-- Builds Windows et macOS : configuration lisible avec `ffmpeg -buildconf` ; la mise à disposition des sources par gyan.dev, evermeet.cx et martin-riedl.de reste à vérifier.
+Le job `sources` du build (`scripts/ffmpeg-sources.sh`) joint deux archives à chaque Release, au même endroit que les installeurs, avec leurs empreintes (`ffmpeg-sources-9.0.2.sha256`).
 
-**Décision à prendre avant toute diffusion (Hervé)** : la manière de fournir ces sources (archive jointe aux Releases, ou offre écrite), conformément à la GPLv3 §6.
+**`ffmpeg-sources-9.0.2-windows-linux.tar`** :
+- FFmpeg au commit des builds BtbN (`release/9.0`, `2a571b6068`) ;
+- les scripts BtbN de l'autobuild épinglé ;
+- la source de chaque bibliothèque, téléchargée par leur propre `download.sh` ;
+- un fichier LISEZMOI qui explique comment recompiler.
+
+**`ffmpeg-sources-9.0.2-macos.tar`** :
+- FFmpeg 9.0.2 et chaque bibliothèque au commit épinglé ;
+- le script de compilation.
+
+Lancement manuel du build avec l'option « sources » : les archives sont produites en artefact, pour vérification.
+
+## Textes juridiques
+
+- `legal/CLUF.md` : contrat de licence utilisateur final, fondé sur la GPLv3.
+- `legal/CGU.md` : conditions générales d'utilisation.
+- `legal/COMPOSANTS_TIERS.md` : FFmpeg et ses bibliothèques, polices, ASIO.
+- `src-tauri/licenses/FFMPEG.txt` : avis FFmpeg livré avec l'application.
+- `src-tauri/licenses/THIRD_PARTY.txt` : généré au build ; textes de licence des crates Rust et paquets JavaScript.
+
+Ils sont copiés dans l'installeur (`licenses/`), avec le texte de la GPLv3. On les lit dans VERIFLOW : Aide > Licences, ou bouton « Licences, CLUF et CGU » d'À propos. La rubrique FFmpeg affiche la version et la configuration du FFmpeg réellement installé. L'installeur affiche le CLUF.
+
+CLUF et CGU sont des **projets à faire relire par un juriste** avant toute diffusion commerciale. Points à compléter : adresse de contact, droit applicable.
 
 ## Mettre à jour FFmpeg
 
-1. Changer la version, les URL et les empreintes dans `scripts/fetch-ffmpeg.sh`. Pour Linux, une empreinte ou un nom de fichier laissé vide est affiché par le build (annotation « à épingler »), à recopier ensuite.
-2. Lancer le workflow « Build » sur la branche, vérifier les trois installeurs.
-3. Relancer les tests du cœur avec le nouveau FFmpeg (`VERIFLOW_FFMPEG_DIR=... cargo test -p veriflow-core`).
+1. **Windows et Linux** : choisir un nouvel autobuild BtbN de fin de mois. Changer `BTBN_TAG`, les noms de fichiers et les empreintes dans `scripts/fetch-ffmpeg.sh`, et les mêmes valeurs dans `scripts/ffmpeg-sources.sh`.
+2. **macOS** : reprendre les commits de `scripts.d` de ce même autobuild dans `scripts/build-ffmpeg-macos.sh`, ainsi que la version et l'empreinte de l'archive FFmpeg.
+3. Mettre à jour `legal/COMPOSANTS_TIERS.md` et `src-tauri/licenses/FFMPEG.txt`.
+4. Lancer le workflow « Build » sur la branche, avec l'option « sources ». Vérifier les trois installeurs et les archives de sources.
+5. Relancer les tests du cœur avec le nouveau FFmpeg : `VERIFLOW_FFMPEG_DIR=... cargo test -p veriflow-core`.
