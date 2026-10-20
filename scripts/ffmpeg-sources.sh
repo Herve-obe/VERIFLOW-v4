@@ -50,7 +50,9 @@ btbn_commit="$(git -C "$WORK/btbn" rev-parse HEAD)"
 git -C "$WORK/btbn" archive --format=tar --prefix="FFmpeg-Builds-$BTBN_TAG/" HEAD | xz -T0 >"$WL/FFmpeg-Builds-$BTBN_TAG.tar.xz"
 
 log "Sources des bibliothèques (download.sh de BtbN, Docker)"
-(cd "$WORK/btbn" && ./download.sh)
+# Image Docker de BtbN (outils de téléchargement seulement) : sans cela,
+# download.sh prend le nom du dépôt courant (GITHUB_REPOSITORY) dans la CI.
+(cd "$WORK/btbn" && GITHUB_REPOSITORY=BtbN/FFmpeg-Builds ./download.sh)
 mkdir -p "$WL/bibliotheques"
 # Les liens symboliques <nom>.tar.xz pointent vers <nom>_<empreinte>.tar.xz.
 for f in "$WORK/btbn/.cache/downloads"/*.tar.xz; do
