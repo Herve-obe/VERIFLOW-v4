@@ -11,3 +11,4 @@ pub mod pictures;
 pub mod report;
 pub mod scan;
 pub mod storage;
+pub mod timestamp;

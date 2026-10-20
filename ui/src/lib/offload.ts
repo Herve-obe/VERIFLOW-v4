@@ -41,7 +41,12 @@ export interface OffloadRequest {
   /** Logo de la production et vignettes des vidéos dans le rapport PDF. */
   logo?: string | null;
   thumbnails?: boolean;
+  /** Autorité d'horodatage RFC 3161 du PDF (absente : aucun horodatage). */
+  timestamp?: string | null;
 }
+
+/** Autorité d'horodatage proposée (DigiCert, gratuite, reconnue par Acrobat). */
+export const DEFAULT_TSA = "http://timestamp.digicert.com";
 
 export type ExistingMode = "verify" | "complete" | "replace";
 
@@ -111,7 +116,16 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
-  reports: { csv: string; html: string; pdf: string; pdf_sha256: string }[];
+  reports: {
+    csv: string;
+    html: string;
+    pdf: string;
+    pdf_sha256: string;
+    /** Horodatage RFC 3161 du PDF : jeton, date certifiée ou échec. */
+    tsr: string | null;
+    timestamp: string | null;
+    timestamp_error: string | null;
+  }[];
   source_name: string;
   fingerprint: string;
 }

@@ -16,6 +16,7 @@ use super::hash::{hash_data, HashAlgo};
 use super::mhl::REPORTS_DIR;
 use super::pictures::{self, Jpeg};
 use super::scan::SourceInventory;
+use super::timestamp;
 use crate::{Result, VERSION};
 
 /// Informations de contexte saisies par l'utilisateur.
@@ -28,6 +29,8 @@ pub struct ReportInfo {
     pub logo: Option<PathBuf>,
     /// Vignettes des vidéos dans le PDF.
     pub thumbnails: bool,
+    /// Autorité d'horodatage RFC 3161 (adresse) ; absente : pas d'horodatage.
+    pub timestamp: Option<String>,
 }
 
 /// Vignettes au plus dans le PDF (une image extraite par vidéo).
@@ -40,6 +43,12 @@ pub struct ReportFiles {
     pub html: PathBuf,
     pub pdf: PathBuf,
     pub pdf_sha256: String,
+    /// Jeton d'horodatage RFC 3161 du PDF (`.pdf.tsr`), s'il a été obtenu.
+    pub tsr: Option<PathBuf>,
+    /// Date certifiée par l'autorité (« 2026-10-20 18:46:52 UTC »).
+    pub timestamp: Option<String>,
+    /// Échec de l'horodatage demandé (poste hors ligne, autorité injoignable).
+    pub timestamp_error: Option<String>,
 }
 
 /// Tout ce qu'un rapport affiche.
@@ -433,6 +442,16 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
     let html = data.html(&csv_sha);
     let pdf = data.pdf(&csv_sha);
     let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
+    // Horodatage certifié du PDF (une seule demande pour toutes les
+    // destinations : même fichier, même empreinte). Un échec n'empêche pas
+    // l'écriture des rapports ; il est signalé.
+    let token = data.info.timestamp.as_deref().map(|url| {
+        let mut digest = [0u8; 32];
+        for (i, b) in digest.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&pdf_sha[2 * i..2 * i + 2], 16).unwrap_or(0);
+        }
+        timestamp::stamp(url, &digest)
+    });
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
     let base = format!("{}_offload_{stamp}", data.inv.name);
     let mut out = Vec::new();
@@ -447,14 +466,29 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
             fs::write(p("html"), &html)?;
             fs::write(p("pdf"), &pdf)?;
             fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
+            if let Some(Ok(t)) = &token {
+                fs::write(p("pdf.tsr"), &t.der)?;
+            }
             Ok(())
         };
         if write().is_ok() {
+            let (tsr, timestamp, timestamp_error) = match &token {
+                Some(Ok(t)) => (
+                    Some(p("pdf.tsr")),
+                    Some(timestamp::display_time(&t.time)),
+                    None,
+                ),
+                Some(Err(e)) => (None, None, Some(e.clone())),
+                None => (None, None, None),
+            };
             out.push(ReportFiles {
                 csv: p("csv"),
                 html: p("html"),
                 pdf: p("pdf"),
                 pdf_sha256: pdf_sha.clone(),
+                tsr,
+                timestamp,
+                timestamp_error,
             });
         }
     }
@@ -1003,6 +1037,72 @@ mod tests {
             ..data
         };
         assert!(!String::from_utf8_lossy(&data.pdf("0")).contains("/Subtype /Image"));
+    }
+
+    /// Petit offload d'un fichier, rapports écrits avec horodatage vers `url`.
+    fn stamped_reports(url: &str) -> (tempfile::TempDir, Vec<ReportFiles>) {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("C0001.MP4"), b"video").unwrap();
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dir.path().join("SSD1"), dir.path().join("SSD2")],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+        };
+        let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let info = ReportInfo {
+            timestamp: Some(url.into()),
+            ..Default::default()
+        };
+        let files = write_reports(&ReportData {
+            inv: &inv,
+            summary: &summary,
+            spec: &spec,
+            info: &info,
+            mhl: &[None, None],
+        })
+        .unwrap();
+        (dir, files)
+    }
+
+    #[test]
+    fn timestamp_failure_keeps_the_reports() {
+        // Port fermé : l'horodatage échoue, les rapports sont quand même écrits.
+        let (_dir, files) = stamped_reports("http://127.0.0.1:9/");
+        assert_eq!(files.len(), 2);
+        for f in &files {
+            assert!(f.pdf.exists() && f.tsr.is_none() && f.timestamp.is_none());
+            assert!(f
+                .timestamp_error
+                .as_deref()
+                .unwrap()
+                .contains("injoignable"));
+        }
+    }
+
+    /// Autorité réelle (réseau) : seulement si VERIFLOW_TSA_TEST est défini.
+    #[test]
+    fn timestamp_written_next_to_each_pdf() {
+        if std::env::var_os("VERIFLOW_TSA_TEST").is_none() {
+            return;
+        }
+        let (_dir, files) = stamped_reports(timestamp::DEFAULT_TSA);
+        for f in &files {
+            let tsr = f.tsr.as_ref().expect("jeton écrit");
+            assert_eq!(tsr, &f.pdf.with_extension("pdf.tsr"));
+            assert!(f.timestamp.as_deref().unwrap().ends_with("UTC"));
+            if let Ok(dir) = std::env::var("VERIFLOW_TSA_KEEP") {
+                for p in [&f.pdf, tsr] {
+                    fs::copy(p, std::path::Path::new(&dir).join(p.file_name().unwrap())).unwrap();
+                }
+            }
+        }
+        assert_eq!(
+            fs::read(files[0].tsr.as_ref().unwrap()).unwrap(),
+            fs::read(files[1].tsr.as_ref().unwrap()).unwrap()
+        );
     }
 
     #[test]

@@ -81,6 +81,9 @@ pub struct OffloadRequest {
     /// Vignettes des vidéos dans le rapport PDF.
     #[serde(default)]
     pub thumbnails: bool,
+    /// Horodatage RFC 3161 du PDF : adresse de l'autorité (absente : aucun).
+    #[serde(default)]
+    pub timestamp: Option<String>,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -278,6 +281,7 @@ pub fn execute(
         notes: req.notes.clone(),
         logo: req.logo.clone(),
         thumbnails: req.thumbnails,
+        timestamp: req.timestamp.clone().filter(|u| !u.trim().is_empty()),
     };
     let reports = write_reports(&ReportData {
         inv: &inv,
@@ -383,6 +387,7 @@ mod tests {
             roots: None,
             logo: None,
             thumbnails: false,
+            timestamp: None,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);
