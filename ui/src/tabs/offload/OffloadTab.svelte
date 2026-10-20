@@ -12,7 +12,7 @@
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -87,6 +87,19 @@
     rootsOverride = { key: formKey(), roots: pre.roots.map((r, i) => pre!.elsewhere[i][0]?.root ?? r) };
   }
 
+  // Carte reconnue (type, bobine, caméra), affichée sous la source.
+  let found = $state<CardInfo | null>(null);
+  $effect(() => {
+    const s = source;
+    found = null;
+    if (!s) return;
+    cardInfo(s)
+      .then((c) => {
+        if (source === s) found = c;
+      })
+      .catch(() => {});
+  });
+
   // Aperçu du chemin produit par le modèle, sous le champ.
   let preview = $state("");
   let previewTimer = 0;
@@ -99,7 +112,7 @@
     const date = source && source === resumeSource ? resumeDate : null;
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
-      templatePreview(tpl, vars, card, date)
+      templatePreview(tpl, vars, card, source || null, date)
         .then((rel) => {
           const relNative = rel.split(/[\\/]/).join(sep);
           preview = base ? `${base.replace(/[\\/]+$/, "")}${sep}${relNative}` : relNative;
@@ -286,6 +299,13 @@
         <input class="path" readonly value={source} placeholder={t("offload.source.none")} />
         <button onclick={pickSource}>{t("offload.browse")}</button>
       </div>
+      {#if found && (found.kind || found.reel)}
+        <p class="small detected">
+          {t("offload.card.detected")}
+          {#if found.kind}<strong>{found.kind}</strong>{/if}
+          {#if found.reel}{found.kind ? ", " : ""}{t("offload.card.reel")} <span class="mono">{found.reel}</span>{/if}
+        </p>
+      {/if}
       <p class="muted small">{t("offload.drop.source")}</p>
     </div>
 
@@ -315,7 +335,7 @@
         <p class="wide preview small">{t("offload.template.example")} <span class="mono">{request().roots?.[0] ?? preview}</span></p>
       {/if}
       <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" /></label>
-      <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" /></label>
+      <label>{t("offload.camera")}<input bind:value={camera} placeholder={found?.camera ?? "A"} /></label>
       <label>{t("offload.operator")}<input bind:value={operator} /></label>
       <label class="wide">{t("offload.notes")}<input bind:value={notes} /></label>
     </div>
@@ -559,6 +579,13 @@
   .muted {
     color: var(--vf-text-muted);
     margin: 0;
+  }
+  .detected {
+    margin: 4px 0 0;
+    color: var(--vf-text-muted);
+  }
+  .detected strong {
+    color: var(--vf-text);
   }
   .preview {
     margin: -2px 0 0;
