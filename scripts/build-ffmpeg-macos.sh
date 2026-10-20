@@ -128,6 +128,19 @@ fetch_git() { # nom dépôt commit
   [ "$(git -C "$dir" rev-parse HEAD)" = "$3" ] || fail "$1 : commit $3 introuvable"
 }
 
+# LAME vient du Subversion de SourceForge, parfois injoignable : délai court
+# et quatre tentatives.
+svn_get() { # checkout|export dossier
+  local i
+  for i in 1 2 3 4; do
+    rm -rf "$2"
+    svn "$1" -q --config-option servers:global:http-timeout=60 "$LAME_REPO@$LAME_REV" "$2" && return 0
+    echo "svn $1 : tentative $i échouée" >&2
+    sleep $((i * 15))
+  done
+  fail "LAME r$LAME_REV : Subversion injoignable ($LAME_REPO)"
+}
+
 fetch_all() {
   local name repo commit
   # Recompilation depuis l'archive des sources d'une Release :
@@ -150,7 +163,7 @@ fetch_all() {
   done
   if [ ! -d "$SRC/lame" ]; then
     log "source lame (r$LAME_REV)"
-    svn checkout -q "$LAME_REPO@$LAME_REV" "$SRC/lame"
+    svn_get checkout "$SRC/lame"
   fi
   if [ ! -d "$SRC/ffmpeg" ]; then
     log "source ffmpeg $FFMPEG_VERSION"
@@ -337,7 +350,7 @@ case "$MODE" in
     done
     log "archive lame"
     rm -rf "$WORK/lame-export"
-    svn export -q "$LAME_REPO@$LAME_REV" "$WORK/lame-export/lame-r$LAME_REV"
+    svn_get export "$WORK/lame-export/lame-r$LAME_REV"
     tar -C "$WORK/lame-export" -cJf "$OUT/lame-r$LAME_REV.tar.xz" "lame-r$LAME_REV"
     [ -f "$WORK/ffmpeg.tar.xz" ] || curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
     [ "$(sha256 "$WORK/ffmpeg.tar.xz")" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte incorrecte"
