@@ -1,6 +1,7 @@
 <!-- Logs du PLAYER : marqueurs (point ou plage), couleur, commentaire, scène,
      prise ; exports EDL, ALE, CSV, FCPXML, OTIO. Enregistrés dans le projet. -->
 <script lang="ts">
+  import { prefs } from "../../stores/prefs.svelte";
   import { tick } from "svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import { app } from "../../stores/app.svelte";
@@ -61,7 +62,7 @@
   };
 
   let markers = $state<Marker[]>([]);
-  let color = $state<MarkerColor>(read(COLOR_KEY, "red") as MarkerColor);
+  let color = $state<MarkerColor>(read(COLOR_KEY, prefs.player.markerColor) as MarkerColor);
   let format = $state<LogFormat>(read(FORMAT_KEY, "edl") as LogFormat);
   let allClips = $state(false);
   let error = $state("");

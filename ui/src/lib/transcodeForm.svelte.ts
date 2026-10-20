@@ -1,6 +1,7 @@
 // Formulaire de l'onglet TRANSCODE : réglages, destination et nommage,
 // mémorisés sur le poste pour chaque mode (VIDEO, AUDIO).
 import { completeSettings, defaultSettings, LOUDNESS_TARGETS, type Existing, type PresetView, type Settings, type Trim, type TranscodeRequest } from "./transcode";
+import { prefs } from "../stores/prefs.svelte";
 
 export interface Form {
   settings: Settings;
@@ -28,8 +29,9 @@ export function defaultForm(mode: string): Form {
     loudness: "none",
     customI: -23,
     customTp: -1,
-    dest: "",
-    nextToSource: false,
+    // Destination proposée : Préférences > TRANSCODE.
+    dest: prefs.transcode.dest,
+    nextToSource: prefs.transcode.nextToSource,
     prefix: "",
     suffix: "",
     replaceFrom: "",

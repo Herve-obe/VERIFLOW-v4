@@ -1,4 +1,4 @@
-// Raccourcis clavier par défaut (charte §7.3). Reconfigurables plus tard via les réglages.
+// Raccourcis clavier par défaut (charte §7.3), modifiables dans Préférences > Raccourcis.
 export type ShortcutAction =
   | "mode.toggle"
   | "mode.toggle.force"
