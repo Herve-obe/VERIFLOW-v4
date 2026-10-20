@@ -107,8 +107,8 @@ Contenu : une archive .tar.xz par composant (ffmpeg, et chaque bibliothèque
 au commit indiqué dans le script), le script de compilation, et SHA256SUMS.
 
 Recompiler : sur un Mac avec les outils de compilation (Xcode, Homebrew :
-nasm meson ninja cmake pkg-config autoconf automake libtool subversion),
-lancer « build-ffmpeg-macos.sh build <dossier> ».
+nasm meson ninja cmake pkg-config autoconf automake libtool), depuis ce
+dossier : « FFBUILD_SOURCES=\$PWD bash build-ffmpeg-macos.sh build sortie ».
 
 Licence : FFmpeg et ces binaires sont sous GNU GPL version 3 ; chaque
 bibliothèque garde sa propre licence (fichiers COPYING ou LICENSE dans sa

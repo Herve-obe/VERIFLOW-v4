@@ -13,6 +13,8 @@
 #   scripts/build-ffmpeg-macos.sh sources <dossier de sortie>
 #       télécharge seulement les sources et les range en archives .tar.xz
 #       (archive des sources jointe aux Releases).
+#   FFBUILD_SOURCES=<dossier de ces archives> ... build <dossier>
+#       recompile à partir de ces archives, sans rien télécharger.
 #
 # Sous Linux, « build » compile la même chose sans VideoToolbox ni CoreText :
 # sert à vérifier le script hors d'un Mac.
@@ -102,6 +104,10 @@ step() {
     tail -n 60 "$WORK/$name.log" >&2
     if [ -n "${GITHUB_ACTIONS:-}" ]; then
       echo "::error title=FFmpeg macOS : $name::$(tail -n 25 "$WORK/$name.log" | tr '\n' ' ' | cut -c1-3000)"
+      # Configuration de FFmpeg : la cause est dans config.log.
+      if [ "$name" = "ffmpeg" ] && [ -f "$SRC/ffmpeg/ffbuild/config.log" ]; then
+        echo "::error title=FFmpeg macOS : config.log::$(tail -n 50 "$SRC/ffmpeg/ffbuild/config.log" | tr '\n' ' ' | cut -c1-3500)"
+      fi
     fi
     exit 1
   fi
@@ -124,6 +130,19 @@ fetch_git() { # nom dépôt commit
 
 fetch_all() {
   local name repo commit
+  # Recompilation depuis l'archive des sources d'une Release :
+  # FFBUILD_SOURCES=<dossier des .tar.xz>, aucun téléchargement.
+  if [ -n "${FFBUILD_SOURCES:-}" ]; then
+    for line in $GIT_SOURCES; do
+      IFS='|' read -r name repo commit <<<"$line"
+      [ -d "$SRC/$name" ] && continue
+      mkdir -p "$SRC/$name"
+      tar -xJf "$FFBUILD_SOURCES/$name-$commit.tar.xz" -C "$SRC/$name" --strip-components 1
+    done
+    [ -d "$SRC/lame" ] || { mkdir -p "$SRC/lame" && tar -xJf "$FFBUILD_SOURCES/lame-r$LAME_REV.tar.xz" -C "$SRC/lame" --strip-components 1; }
+    [ -d "$SRC/ffmpeg" ] || { mkdir -p "$SRC/ffmpeg" && tar -xJf "$FFBUILD_SOURCES/ffmpeg-$FFMPEG_VERSION.tar.xz" -C "$SRC/ffmpeg" --strip-components 1; }
+    return 0
+  fi
   for line in $GIT_SOURCES; do
     IFS='|' read -r name repo commit <<<"$line"
     log "source $name ($commit)"
@@ -168,7 +187,7 @@ meson_build() { # dossier source, options...
 
 b_freetype() {
   cmake_build "$SRC/freetype" -DFT_DISABLE_BZIP2=ON -DFT_DISABLE_PNG=ON \
-    -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_ZLIB=ON
+    -DFT_DISABLE_HARFBUZZ=ON -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_ZLIB=ON -DFT_DISABLE_HVF=ON
 }
 b_fribidi() { meson_build "$SRC/fribidi" -Ddocs=false -Dbin=false -Dtests=false; }
 b_harfbuzz() {
@@ -304,11 +323,22 @@ check_deps() {
 
 case "$MODE" in
   sources)
+    # Sources telles que publiées, sans aucun fichier de compilation :
+    # dépôts git au commit épinglé (git archive), archive officielle de
+    # FFmpeg, export Subversion de LAME.
     fetch_all
-    for d in "$SRC"/*; do
-      log "archive $(basename "$d")"
-      tar -C "$SRC" --exclude-vcs -cJf "$OUT/$(basename "$d").tar.xz" "$(basename "$d")"
+    for line in $GIT_SOURCES; do
+      IFS='|' read -r name repo commit <<<"$line"
+      log "archive $name"
+      git -C "$SRC/$name" archive --format=tar --prefix="$name-$commit/" "$commit" | xz -T0 >"$OUT/$name-$commit.tar.xz"
     done
+    log "archive lame"
+    rm -rf "$WORK/lame-export"
+    svn export -q "$LAME_REPO@$LAME_REV" "$WORK/lame-export/lame-r$LAME_REV"
+    tar -C "$WORK/lame-export" -cJf "$OUT/lame-r$LAME_REV.tar.xz" "lame-r$LAME_REV"
+    [ -f "$WORK/ffmpeg.tar.xz" ] || curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
+    [ "$(sha256 "$WORK/ffmpeg.tar.xz")" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte incorrecte"
+    cp "$WORK/ffmpeg.tar.xz" "$OUT/ffmpeg-$FFMPEG_VERSION.tar.xz"
     cp "$SCRIPT" "$OUT/"
     ;;
   build)
