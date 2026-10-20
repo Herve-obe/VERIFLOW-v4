@@ -763,3 +763,54 @@ fn dnxhd_in_mxf_op_atom_for_avid() {
         );
     }
 }
+
+#[test]
+fn alpha_channel_is_kept() {
+    if !ffmpeg_available() {
+        eprintln!("FFmpeg absent : test ignoré");
+        return;
+    }
+    assert!(build::has_alpha("yuva444p12le") && build::has_alpha("rgba64be"));
+    assert!(!build::has_alpha("yuv422p10le") && !build::has_alpha("rgb24"));
+    let dir = tempfile::tempdir().unwrap();
+    // Source QuickTime Animation avec alpha (argb).
+    let src = dir.path().join("ALPHA.mov");
+    ffmpeg(&[
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=320x240:rate=25:duration=1,format=rgba",
+        "-c:v",
+        "qtrle",
+        "-pix_fmt",
+        "argb",
+        src.to_str().unwrap(),
+    ]);
+    let out = dir.path().join("out");
+    let cases = [
+        ("prores_4444", "yuva444p"),
+        ("prores_proxy", "yuv422p"),
+        ("animation", "argb"),
+    ];
+    for (preset, pix) in cases {
+        let s = run(&request(vec![src.clone()], preset, &out));
+        let f = s.files[0].output.clone().unwrap();
+        let got = ffprobe(&f, "stream=pix_fmt");
+        assert!(got[0].starts_with(pix), "{preset} : {got:?}");
+    }
+    let mut req = request(vec![src.clone()], "image_png", &out);
+    req.settings.sequence = SequenceOptions {
+        single: true,
+        ..Default::default()
+    };
+    let s = run(&req);
+    let f = s.files[0].output.clone().unwrap();
+    assert_eq!(ffprobe(&f, "stream=pix_fmt"), vec!["rgba".to_string()]);
+    // Source sans alpha : ProRes 4444 sans couche alpha.
+    let plain = clip(dir.path());
+    let s = run(&request(vec![plain], "prores_4444", &out));
+    let f = s.files[0].output.clone().unwrap();
+    // Le décodeur ProRes annonce yuv444p12le (yuva444p12le avec alpha).
+    let got = ffprobe(&f, "stream=pix_fmt");
+    assert!(got[0].starts_with("yuv444p"), "{got:?}");
+}
