@@ -6,7 +6,7 @@
 //! l'empreinte du PDF est écrite à côté, dans `<rapport>.pdf.sha256`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use serde::Serialize;
@@ -14,6 +14,7 @@ use serde::Serialize;
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
 use super::mhl::REPORTS_DIR;
+use super::pictures::{self, Jpeg};
 use super::scan::SourceInventory;
 use crate::{Result, VERSION};
 
@@ -23,7 +24,14 @@ pub struct ReportInfo {
     pub project: Option<String>,
     pub operator: Option<String>,
     pub notes: Option<String>,
+    /// Logo de la production, imprimé en haut à droite du PDF.
+    pub logo: Option<PathBuf>,
+    /// Vignettes des vidéos dans le PDF.
+    pub thumbnails: bool,
 }
+
+/// Vignettes au plus dans le PDF (une image extraite par vidéo).
+const MAX_THUMBS: usize = 60;
 
 /// Fichiers de rapport produits pour une destination.
 #[derive(Debug, Clone, Serialize)]
@@ -288,6 +296,13 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
     /// PDF A4, polices standard (aucune police à embarquer).
     pub fn pdf(&self, csv_sha: &str) -> Vec<u8> {
         let mut doc = PdfDoc::new();
+        if let Some(l) = self.info.logo.as_deref().and_then(pictures::logo) {
+            // Logo en haut à droite, dans un cadre de 150 × 50 points.
+            let scale = (150.0 / l.width as f32).min(50.0 / l.height as f32);
+            let (w, h) = (l.width as f32 * scale, l.height as f32 * scale);
+            let i = doc.add_image(l);
+            doc.draw_image(i, PAGE_W - MARGIN - w, PAGE_H - MARGIN - h, w, h);
+        }
         doc.text(&Font::Bold, 18.0, "Rapport de transfert (OFFLOAD)");
         doc.gap(4.0);
         doc.text(&Font::Regular, 9.0, &format!("VERIFLOW {VERSION}"));
@@ -296,6 +311,9 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
         doc.gap(8.0);
         for (k, v) in self.header_rows(csv_sha) {
             doc.key_value(&k, &v);
+        }
+        if self.info.thumbnails {
+            self.thumbnails(&mut doc);
         }
         doc.gap(10.0);
         let n_dest = self.spec.destinations.len();
@@ -336,6 +354,75 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
             "Rapport de transfert {} - {}",
             self.inv.name, self.summary.finished_at
         ))
+    }
+
+    /// Vignettes des vidéos, tirées de la copie vérifiée (jamais de la
+    /// source, qui peut déjà être éjectée), 5 par ligne.
+    fn thumbnails(&self, doc: &mut PdfDoc) {
+        let videos: Vec<_> = self
+            .summary
+            .files
+            .iter()
+            .filter(|f| {
+                crate::media::catalog::kind_of(Path::new(&f.rel))
+                    == Some(crate::media::catalog::MediaKind::Video)
+            })
+            .collect();
+        let mut shots = Vec::new();
+        for f in videos.iter().take(MAX_THUMBS) {
+            let copy = f
+                .destinations
+                .iter()
+                .zip(&self.spec.destinations)
+                .find(|(s, _)| !matches!(s, DestStatus::Failed(_)))
+                .map(|(_, d)| d.join(&f.rel));
+            if let Some(j) = copy.as_deref().and_then(pictures::thumbnail) {
+                let name = f
+                    .rel
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(&f.rel)
+                    .to_owned();
+                shots.push((name, j));
+            }
+        }
+        if shots.is_empty() {
+            return;
+        }
+        doc.gap(10.0);
+        let mut title = format!("Vignettes ({} vidéo(s))", videos.len());
+        if videos.len() > MAX_THUMBS {
+            title = format!(
+                "Vignettes ({MAX_THUMBS} premières vidéos sur {})",
+                videos.len()
+            );
+        }
+        doc.text(&Font::Bold, 10.0, &title);
+        const PER_ROW: usize = 5;
+        let cell = (PAGE_W - 2.0 * MARGIN) / PER_ROW as f32;
+        let img_w = cell - 6.0;
+        for row in shots.chunks(PER_ROW) {
+            let img_h = row
+                .iter()
+                .map(|(_, j)| img_w * j.height as f32 / j.width as f32)
+                .fold(0.0, f32::max);
+            doc.ensure(img_h + 16.0);
+            let top = doc.y - 2.0;
+            for (k, (name, j)) in row.iter().enumerate() {
+                let h = img_w * j.height as f32 / j.width as f32;
+                let x = MARGIN + k as f32 * cell;
+                let label = PdfDoc::fit(&Font::Regular, 6.5, name, img_w);
+                let i = doc.add_image(Jpeg {
+                    data: j.data.clone(),
+                    width: j.width,
+                    height: j.height,
+                    components: j.components,
+                });
+                doc.draw_image(i, x, top - h, img_w, h);
+                doc.put(&Font::Regular, 6.5, x, top - img_h - 8.0, &label);
+            }
+            doc.y = top - img_h - 12.0;
+        }
     }
 }
 
@@ -471,6 +558,14 @@ fn win_ansi(s: &str) -> Vec<u8> {
 struct PdfDoc {
     pages: Vec<Content>,
     y: f32,
+    /// Images JPEG du document, et celles utilisées par chaque page.
+    images: Vec<Jpeg>,
+    page_images: Vec<Vec<usize>>,
+}
+
+/// Nom de ressource de l'image `i` dans les pages.
+fn image_name(i: usize) -> String {
+    format!("Im{i}")
 }
 
 impl PdfDoc {
@@ -478,7 +573,28 @@ impl PdfDoc {
         Self {
             pages: vec![Content::new()],
             y: PAGE_H - MARGIN,
+            images: Vec::new(),
+            page_images: vec![Vec::new()],
         }
+    }
+
+    fn add_image(&mut self, j: Jpeg) -> usize {
+        self.images.push(j);
+        self.images.len() - 1
+    }
+
+    /// Place l'image `i` sur la page en cours (coin bas gauche en `x`, `y`).
+    fn draw_image(&mut self, i: usize, x: f32, y: f32, w: f32, h: f32) {
+        self.page_images
+            .last_mut()
+            .expect("au moins une page")
+            .push(i);
+        let name = image_name(i);
+        let c = self.page();
+        c.save_state();
+        c.transform([w, 0.0, 0.0, h, x, y]);
+        c.x_object(Name(name.as_bytes()));
+        c.restore_state();
     }
 
     fn page(&mut self) -> &mut Content {
@@ -488,6 +604,7 @@ impl PdfDoc {
     fn ensure(&mut self, height: f32) {
         if self.y - height < MARGIN + 20.0 {
             self.pages.push(Content::new());
+            self.page_images.push(Vec::new());
             self.y = PAGE_H - MARGIN;
         }
     }
@@ -690,6 +807,22 @@ impl PdfDoc {
                 .base_font(Name(base))
                 .encoding_predefined(Name(b"WinAnsiEncoding"));
         }
+        // Images après les pages : JPEG inséré tel quel (filtre DCTDecode).
+        let image_ids: Vec<Ref> = (0..self.images.len())
+            .map(|i| Ref::new(first_page + 2 * total as i32 + i as i32))
+            .collect();
+        for (j, id) in self.images.iter().zip(&image_ids) {
+            let mut x = pdf.image_xobject(*id, &j.data);
+            x.filter(pdf_writer::Filter::DctDecode);
+            x.width(j.width as i32);
+            x.height(j.height as i32);
+            if j.components == 1 {
+                x.color_space().device_gray();
+            } else {
+                x.color_space().device_rgb();
+            }
+            x.bits_per_component(8);
+        }
         for (i, content) in self.pages.into_iter().enumerate() {
             let page_id = page_ids[i];
             let content_id = Ref::new(page_id.get() + 1);
@@ -703,6 +836,13 @@ impl PdfDoc {
             f.pair(Name(b"F2"), fonts[1]);
             f.pair(Name(b"F3"), fonts[2]);
             f.finish();
+            if !self.page_images[i].is_empty() {
+                let mut xo = res.x_objects();
+                for &k in &self.page_images[i] {
+                    xo.pair(Name(image_name(k).as_bytes()), image_ids[k]);
+                }
+                xo.finish();
+            }
             res.finish();
             page.finish();
             pdf.stream(content_id, &content.finish());
@@ -745,6 +885,7 @@ mod tests {
             project: Some("Court métrage « Été »".into()),
             operator: Some("Hervé".into()),
             notes: None,
+            ..Default::default()
         };
         let data = ReportData {
             inv: &inv,
@@ -780,6 +921,88 @@ mod tests {
         );
         assert!(f.pdf.with_extension("pdf.sha256").exists());
         assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
+    }
+
+    #[test]
+    fn pdf_with_logo_and_thumbnails() {
+        if crate::tools::locate("ffmpeg").is_none() || crate::tools::locate("ffprobe").is_none() {
+            eprintln!("FFmpeg absent : test ignoré");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(src.join("CLIP")).unwrap();
+        let ffmpeg = |args: &[&str]| {
+            let out = crate::tools::command("ffmpeg")
+                .unwrap()
+                .args(["-v", "error", "-y"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        // 7 vidéos (deux lignes de vignettes), un fichier son, un logo PNG.
+        for i in 1..=7 {
+            let clip = src.join(format!("CLIP/A001C00{i}.mov"));
+            ffmpeg(&[
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=640x360:rate=25:duration=1",
+                "-c:v",
+                "mjpeg",
+                clip.to_str().unwrap(),
+            ]);
+        }
+        fs::write(src.join("CLIP/son.wav"), b"RIFF").unwrap();
+        let logo = dir.path().join("logo.png");
+        ffmpeg(&[
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=navy:s=600x200",
+            "-frames:v",
+            "1",
+            logo.to_str().unwrap(),
+        ]);
+        let dest = dir.path().join("SSD1/A001");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dest.clone()],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+        };
+        let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let info = ReportInfo {
+            logo: Some(logo),
+            thumbnails: true,
+            ..Default::default()
+        };
+        let data = ReportData {
+            inv: &inv,
+            summary: &summary,
+            spec: &spec,
+            info: &info,
+            mhl: &[None],
+        };
+        let pdf = data.pdf("0");
+        let text = String::from_utf8_lossy(&pdf);
+        // Logo + 7 vignettes (le WAV n'en a pas), en JPEG.
+        assert_eq!(text.matches("/Subtype /Image").count(), 8);
+        assert_eq!(text.matches("/DCTDecode").count(), 8);
+        // Chaque image est placée sur une page (opérateur Do).
+        assert!((0..8).all(|i| text.contains(&format!("/Im{i} Do"))));
+        // Sans les options : aucune image.
+        let plain = ReportInfo::default();
+        let data = ReportData {
+            info: &plain,
+            ..data
+        };
+        assert!(!String::from_utf8_lossy(&data.pdf("0")).contains("/Subtype /Image"));
     }
 
     #[test]

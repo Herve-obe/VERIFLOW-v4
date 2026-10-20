@@ -54,7 +54,7 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 - Essai réel depuis l'interface (Linux) : fausse carte Sony (13 fichiers, 240 Mo, dont un dossier vide) vers deux destinations. Résultat : 5 s, 52 Mo/s sur disque mécanique, CONFORME, contenu identique, MHL validé par l'outil de référence. Captures : `docs/captures/phase1_offload_en_cours.png`, `phase1_offload_termine.png`, `phase1_rapport_pdf.png`.
 
 ## Reste à faire (prévu, hors de cette PR)
-1. Logo de la production et vignettes vidéo dans le rapport PDF.
+1. Logo de la production et vignettes vidéo dans le rapport PDF : fait le 20/10/2026. Bloc « Rapport PDF » d'OFFLOAD : logo (PNG, JPEG, TIFF, BMP, WebP ; transparence sur fond blanc ; en haut à droite, 150 × 50 points au plus) et case « Vignettes des vidéos » (cochée par défaut). Une image par vidéo, à 10 % de sa durée, tirée de la copie vérifiée (jamais de la carte), 5 par ligne avec le nom du fichier, 60 au plus. Images insérées en JPEG par FFmpeg, sans bibliothèque supplémentaire. Le HTML n'a ni logo ni vignettes.
 2. Horodatage certifié RFC 3161 optionnel quand le poste est connecté.
 3. Modèles de dossiers propres à chaque caméra : fait le 20/10/2026 (variables `{bobine}` et `{support}`, voir plus haut). Reste la lecture des métadonnées de carte (XML Sony, P2, Canon), avec des cartes exemples.
 4. Éjection et détection HDD à vérifier sur de vrais supports Windows et macOS.
