@@ -12,7 +12,7 @@
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, DEFAULT_TSA, volumes, preflight, start, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -25,10 +25,13 @@
     /** Logo de la production et vignettes des vidéos dans le rapport PDF. */
     logo: string;
     thumbnails: boolean;
+    /** Horodatage RFC 3161 du PDF et adresse de l'autorité. */
+    tsa: boolean;
+    tsaUrl: string;
   }
 
   function loadSettings(): Settings {
-    const defaults: Settings = { destinations: [], template: "{date}/{carte}", algorithms: ["xxh128"], operator: "", eject: false, logo: "", thumbnails: true };
+    const defaults: Settings = { destinations: [], template: "{date}/{carte}", algorithms: ["xxh128"], operator: "", eject: false, logo: "", thumbnails: true, tsa: false, tsaUrl: DEFAULT_TSA };
     try {
       return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") };
     } catch {
@@ -45,6 +48,8 @@
   let eject = $state(saved.eject);
   let logo = $state(saved.logo);
   let thumbnails = $state(saved.thumbnails);
+  let tsa = $state(saved.tsa);
+  let tsaUrl = $state(saved.tsaUrl);
   let jour = $state("");
   let camera = $state("");
   let notes = $state("");
@@ -66,7 +71,7 @@
   let revealSummary = false;
 
   $effect(() => {
-    const s: Settings = { destinations, template, algorithms, operator, eject, logo, thumbnails };
+    const s: Settings = { destinations, template, algorithms, operator, eject, logo, thumbnails, tsa, tsaUrl };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {
@@ -86,6 +91,7 @@
     roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
     logo: logo || null,
     thumbnails,
+    timestamp: tsa ? tsaUrl.trim() || DEFAULT_TSA : null,
   });
 
   async function pickLogo() {
@@ -380,6 +386,13 @@
         {/if}
       </div>
       <label class="check"><input type="checkbox" bind:checked={thumbnails} /> {t("offload.thumbnails")}</label>
+      <label class="check"><input type="checkbox" bind:checked={tsa} /> {t("offload.tsa")}</label>
+      {#if tsa}
+        <div class="row">
+          <input class="path mono" bind:value={tsaUrl} placeholder={DEFAULT_TSA} aria-label={t("offload.tsa.url")} title={t("offload.tsa.url")} />
+        </div>
+        <p class="muted small">{t("offload.tsa.hint")}</p>
+      {/if}
     </div>
 
     <div class="block summary" bind:this={summaryEl}>
