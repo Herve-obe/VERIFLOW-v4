@@ -7,6 +7,7 @@ pub mod hash;
 mod io;
 pub mod job;
 pub mod mhl;
+pub mod pictures;
 pub mod report;
 pub mod scan;
 pub mod storage;

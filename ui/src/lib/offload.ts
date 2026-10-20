@@ -38,6 +38,9 @@ export interface OffloadRequest {
   date?: string | null;
   /** Dossiers finals imposés (reprise d'une copie trouvée dans un autre dossier). */
   roots?: string[] | null;
+  /** Logo de la production et vignettes des vidéos dans le rapport PDF. */
+  logo?: string | null;
+  thumbnails?: boolean;
 }
 
 export type ExistingMode = "verify" | "complete" | "replace";

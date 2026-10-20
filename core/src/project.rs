@@ -766,6 +766,8 @@ mod tests {
             existing: Default::default(),
             date: None,
             roots: None,
+            logo: None,
+            thumbnails: false,
         };
         let p = Project::create(&dir.path().join("p.veriflow"), None).unwrap();
         let pre = preflight(&req).unwrap();

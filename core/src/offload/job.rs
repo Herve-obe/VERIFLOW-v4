@@ -75,6 +75,12 @@ pub struct OffloadRequest {
     /// reprise d'une copie trouvée dans un autre dossier.
     #[serde(default)]
     pub roots: Option<Vec<PathBuf>>,
+    /// Logo de la production dans le rapport PDF.
+    #[serde(default)]
+    pub logo: Option<PathBuf>,
+    /// Vignettes des vidéos dans le rapport PDF.
+    #[serde(default)]
+    pub thumbnails: bool,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -270,6 +276,8 @@ pub fn execute(
             .or_else(|| req.vars.projet.clone()),
         operator: req.operator.clone(),
         notes: req.notes.clone(),
+        logo: req.logo.clone(),
+        thumbnails: req.thumbnails,
     };
     let reports = write_reports(&ReportData {
         inv: &inv,
@@ -373,6 +381,8 @@ mod tests {
             existing: ExistingMode::Verify,
             date: None,
             roots: None,
+            logo: None,
+            thumbnails: false,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);

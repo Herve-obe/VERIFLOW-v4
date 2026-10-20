@@ -22,10 +22,13 @@
     algorithms: HashAlgo[];
     operator: string;
     eject: boolean;
+    /** Logo de la production et vignettes des vidéos dans le rapport PDF. */
+    logo: string;
+    thumbnails: boolean;
   }
 
   function loadSettings(): Settings {
-    const defaults: Settings = { destinations: [], template: "{date}/{carte}", algorithms: ["xxh128"], operator: "", eject: false };
+    const defaults: Settings = { destinations: [], template: "{date}/{carte}", algorithms: ["xxh128"], operator: "", eject: false, logo: "", thumbnails: true };
     try {
       return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") };
     } catch {
@@ -40,6 +43,8 @@
   let algorithms = $state<HashAlgo[]>(saved.algorithms);
   let operator = $state(saved.operator);
   let eject = $state(saved.eject);
+  let logo = $state(saved.logo);
+  let thumbnails = $state(saved.thumbnails);
   let jour = $state("");
   let camera = $state("");
   let notes = $state("");
@@ -61,7 +66,7 @@
   let revealSummary = false;
 
   $effect(() => {
-    const s: Settings = { destinations, template, algorithms, operator, eject };
+    const s: Settings = { destinations, template, algorithms, operator, eject, logo, thumbnails };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {
@@ -79,7 +84,18 @@
     notes: notes || null,
     date: source && source === resumeSource ? resumeDate : null,
     roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
+    logo: logo || null,
+    thumbnails,
   });
+
+  async function pickLogo() {
+    const picked = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: t("offload.logo"), extensions: ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"] }],
+    });
+    if (typeof picked === "string") logo = picked;
+  }
 
   /** Reprend la copie dans les dossiers où elle a été trouvée. */
   function useElsewhere() {
@@ -352,6 +368,18 @@
       </div>
       <p class="muted small">{t("offload.algo.hint")}</p>
       <label class="check"><input type="checkbox" bind:checked={eject} /> {t("offload.eject.after")}</label>
+    </div>
+
+    <div class="block">
+      <h3>{t("offload.pdf")}</h3>
+      <div class="row">
+        <input class="path" readonly value={logo} placeholder={t("offload.logo.none")} />
+        <button onclick={pickLogo}>{t("offload.logo")}</button>
+        {#if logo}
+          <button class="ghost small" onclick={() => (logo = "")} aria-label={t("offload.remove")}>✕</button>
+        {/if}
+      </div>
+      <label class="check"><input type="checkbox" bind:checked={thumbnails} /> {t("offload.thumbnails")}</label>
     </div>
 
     <div class="block summary" bind:this={summaryEl}>
