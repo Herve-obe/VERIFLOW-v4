@@ -96,7 +96,7 @@
     <div class="tc-row">
       <span class="tc-path" title={subs.file}>{name(subs.file)}</span>
       <button class="tc-btn" onclick={pickSubs}>{t("offload.browse")}</button>
-      {#if /\.(srt|vtt)$/i.test(subs.file)}
+      {#if /\.(srt|vtt|ass|ssa)$/i.test(subs.file)}
         <button class="tc-btn" onclick={() => (editing = subs.file)}>{t("sub.edit")}</button>
       {/if}
       <button class="tc-btn" onclick={() => (form.settings.subtitles.file = null)}>{t("transcode.remove.short")}</button>

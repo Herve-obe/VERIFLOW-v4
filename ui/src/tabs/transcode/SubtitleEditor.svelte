@@ -15,6 +15,9 @@
 
   // Fichier en cours : celui reçu à l'ouverture, puis celui d'« Enregistrer sous ».
   let file = $state<string | null>(untrack(() => path));
+  // Fichier ASS d'origine : en-tête, styles et polices recopiés à l'enregistrement.
+  const isAss = (p: string | null) => !!p && /\.(ass|ssa)$/i.test(p);
+  const template = untrack(() => (isAss(path) ? path : null));
   let cues = $state<Cue[]>([]);
   let issues = $state<Issue[][]>([]);
   let fps = $state(25);
@@ -93,7 +96,8 @@
     const total = Math.max(1, a.length + b.length);
     const cut = c.start + ((c.end - c.start) * a.length) / total;
     const gap = 2 / fps;
-    cues.splice(i, 1, { start: c.start, end: cut, text: a }, { start: Math.min(c.end, cut + gap), end: c.end, text: b });
+    // Les deux moitiés gardent les champs ASS (style, marges...).
+    cues.splice(i, 1, { ...c, start: c.start, end: cut, text: a }, { ...c, start: Math.min(c.end, cut + gap), end: c.end, text: b });
     touch();
   }
 
@@ -124,12 +128,15 @@
   async function write(target: string | null) {
     let p = target;
     if (!p) {
-      const r = await saveDialog({ title: t("sub.save.as"), defaultPath: file ?? "sous-titres.srt", filters: [{ name: "SRT", extensions: ["srt"] }, { name: "WebVTT", extensions: ["vtt"] }] });
+      const formats = [{ name: "SRT", extensions: ["srt"] }, { name: "WebVTT", extensions: ["vtt"] }, { name: "ASS", extensions: ["ass"] }];
+      // Fichier ASS ouvert : ASS proposé en premier (styles conservés).
+      if (template) formats.unshift(formats.pop()!);
+      const r = await saveDialog({ title: t("sub.save.as"), defaultPath: file ?? "sous-titres.srt", filters: formats });
       if (!r) return;
       p = r;
     }
     try {
-      await saveSubtitles(p, $state.snapshot(cues));
+      await saveSubtitles(p, $state.snapshot(cues), template);
       file = p;
       dirty = false;
       error = "";

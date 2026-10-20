@@ -5,6 +5,8 @@ export interface Cue {
   start: number;
   end: number;
   text: string;
+  /** ASS : autres champs de la ligne Dialogue (style, calque, marges...). */
+  ass?: Record<string, string>;
 }
 
 export type Issue =
@@ -26,7 +28,9 @@ export interface Rules {
 }
 
 export const loadSubtitles = (path: string) => invoke<Cue[]>("subtitles_load", { path });
-export const saveSubtitles = (path: string, cues: Cue[]) => invoke<void>("subtitles_save", { path, cues });
+/** `template` : fichier ASS ouvert, dont l'en-tête et les styles sont recopiés. */
+export const saveSubtitles = (path: string, cues: Cue[], template: string | null) =>
+  invoke<void>("subtitles_save", { path, cues, template });
 export const checkSubtitles = (cues: Cue[], rules: Rules) => invoke<Issue[][]>("subtitles_check", { cues, rules });
 
 /** « HH:MM:SS,mmm ». */
