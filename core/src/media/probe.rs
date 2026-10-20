@@ -42,6 +42,9 @@ pub struct MediaInfo {
     pub path: String,
     pub format: String,
     pub duration: f64,
+    /// Début du conteneur (s) : le plus tôt des flux. Référence des sauts
+    /// `-ss` de FFmpeg.
+    pub start_time: f64,
     pub size: u64,
     pub video: Option<VideoStream>,
     pub audio: Vec<AudioStream>,
@@ -109,6 +112,7 @@ struct RawDisposition {
 struct RawFormat {
     format_name: Option<String>,
     duration: Option<String>,
+    start_time: Option<String>,
     size: Option<String>,
     #[serde(default)]
     tags: RawTags,
@@ -186,6 +190,7 @@ pub fn parse_ffprobe_json(path: &str, json: &[u8]) -> Result<MediaInfo> {
         path: path.to_owned(),
         format: format.format_name.unwrap_or_default(),
         duration,
+        start_time: num(&format.start_time).unwrap_or(0.0),
         size: num(&format.size).unwrap_or(0),
         video,
         audio,

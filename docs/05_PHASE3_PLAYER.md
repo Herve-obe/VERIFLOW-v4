@@ -84,7 +84,7 @@ Captures : `docs/captures/phase3_logs_tc_incruste.png`, `phase3_lut_affichage.pn
   - si la fréquence du fichier n'est pas acceptée, VERIFLOW rééchantillonne à la volée, comme pour les autres pilotes ;
   - en ASIO, un seul logiciel à la fois peut généralement utiliser la carte.
 - **Décalage son/image à la mise en lecture** : il peut atteindre une cinquantaine de millisecondes (tampon de la carte), puis il est rattrapé dès la première relève de position (10 fois par seconde).
-- **Pistes son vidéo** : leur décalage éventuel de départ par rapport à l'image (start time différent dans le conteneur) n'est pas encore compensé.
+- **Pistes son vidéo** : leur décalage de départ par rapport à l'image (start time différent dans le conteneur, fréquent en MP4 et après un montage) est compensé depuis le 20/10/2026. Le son est lu sur la ligne de temps de l'image : silence ajouté si la piste commence après l'image, début coupé si elle commence avant. Test automatique : son décalé de +0,5 s et de -0,3 s, une piste et trois pistes, lecture depuis le début et après un saut, calage à 2 ms près (FFmpeg 9.0.2, 6.1 et 4.4).
 
 ## Compatibilité macOS Catalina (ajout du 07/10/2026)
 - **FFmpeg Intel** : il vient désormais d'evermeet.cx (9.0.2, GPL, statique). Vérifié par la génération des installeurs : il exige macOS 10.13 et n'utilise que des bibliothèques du système. Le script refuse tout binaire Intel exigeant plus que 10.15.
@@ -132,4 +132,3 @@ Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_
 ## Reste à faire (hors de cette PR)
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).
-- Compensation du décalage de départ entre pistes son et image.

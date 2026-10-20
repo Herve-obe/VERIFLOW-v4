@@ -18,6 +18,9 @@ pub struct DecodedReader {
     info: WavInfo,
     /// Nombre de canaux de chaque piste son du média (réunies en un seul flux).
     streams: Vec<u32>,
+    /// Début de l'image après le début du conteneur (s) : l'image 0 du
+    /// lecteur vidéo tombe à cet instant, le son est lu à partir de là.
+    lead: f64,
     child: Option<Child>,
     stdout: Option<ChildStdout>,
     /// Image source que délivrera le prochain octet du flux.
@@ -57,6 +60,11 @@ impl DecodedReader {
         let mut reader = Self {
             info,
             streams: p.audio.iter().map(|a| a.channels.max(1)).collect(),
+            lead: p
+                .video
+                .as_ref()
+                .map(|v| (v.start_time - p.start_time).max(0.0))
+                .unwrap_or(0.0),
             child: None,
             stdout: None,
             next: 0,
@@ -87,19 +95,27 @@ impl DecodedReader {
         let sr = self.info.sample_rate;
         let mut cmd = tools::command("ffmpeg")?;
         cmd.args(["-v", "error", "-nostdin"]);
-        if start > 0 {
-            cmd.args(["-ss", &format!("{:.6}", start as f64 / sr as f64)]);
+        // Calage sur l'image : le saut part du début de l'image, et
+        // `first_pts=0` complète par du silence un son qui commence après
+        // (ou coupe celui qui commence avant). Sans cela, une piste son
+        // décalée dans le conteneur serait lue en avance ou en retard.
+        let seek = start as f64 / sr as f64 + self.lead;
+        if seek > 0.0 {
+            cmd.args(["-ss", &format!("{seek:.6}")]);
         }
         cmd.arg("-i").arg(&self.info.path);
         if self.streams.len() == 1 {
             cmd.args(["-map", "0:a:0", "-ac", &self.info.channels.to_string()]);
+            cmd.args(["-af", "aresample=first_pts=0"]);
         } else {
             // Pistes réunies côte à côte (amerge, dans l'ordre des pistes),
             // chacune ramenée à la même fréquence et à une disposition de
             // canaux explicite (sans quoi amerge refuse les pistes mono).
             let mut graph = String::new();
             for (i, ch) in self.streams.iter().enumerate() {
-                graph += &format!("[0:a:{i}]aresample={sr},aformat=channel_layouts={ch}c[a{i}];");
+                graph += &format!(
+                    "[0:a:{i}]aresample={sr}:first_pts=0,aformat=channel_layouts={ch}c[a{i}];"
+                );
             }
             for i in 0..self.streams.len() {
                 graph += &format!("[a{i}]");
@@ -279,6 +295,116 @@ mod tests {
         let mut block = Vec::new();
         assert!(p.next(&mut block).unwrap() > 0);
         assert!(peak(&block) > 0.05, "son mixé audible");
+    }
+
+    /// Clic de son placé à 1 s du début de sa piste ; la piste est décalée de
+    /// `offset` s par rapport à l'image dans le conteneur (`tracks` pistes).
+    fn offset_clip(dir: &Path, name: &str, offset: f64, tracks: usize) -> std::path::PathBuf {
+        let ff = |args: &[&str]| {
+            let out = tools::command("ffmpeg")
+                .unwrap()
+                .args(["-v", "error", "-y"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let base = dir.join(format!("{name}_base.mov"));
+        let mut args = vec![
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=160x120:rate=25:duration=4",
+        ];
+        for _ in 0..tracks {
+            args.extend([
+                "-f",
+                "lavfi",
+                "-i",
+                "aevalsrc=if(between(t\\,1\\,1.01)\\,0.9\\,0):s=48000:d=3.5",
+            ]);
+        }
+        let maps: Vec<String> = (0..=tracks).map(|i| format!("{i}")).collect();
+        for m in &maps {
+            args.extend(["-map", m.as_str()]);
+        }
+        args.extend(["-c:v", "mjpeg", "-c:a", "pcm_s16le", base.to_str().unwrap()]);
+        ff(&args);
+        // Image et son tirés du même fichier, l'un des deux décalé.
+        let out = dir.join(format!("{name}.mov"));
+        let (v_off, a_off) = if offset >= 0.0 {
+            (0.0, offset)
+        } else {
+            (-offset, 0.0)
+        };
+        let (v_off, a_off) = (format!("{v_off}"), format!("{a_off}"));
+        let b = base.to_str().unwrap();
+        ff(&[
+            "-itsoffset",
+            &v_off,
+            "-i",
+            b,
+            "-itsoffset",
+            &a_off,
+            "-i",
+            b,
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-c",
+            "copy",
+            out.to_str().unwrap(),
+        ]);
+        out
+    }
+
+    /// Instant (s, sur la ligne de temps de l'image) du premier clic lu à
+    /// partir de `from` s.
+    fn click_at(r: &mut DecodedReader, from: f64) -> f64 {
+        let ch = r.info().channels as usize;
+        let start = (from * 48_000.0) as u64;
+        let mut buf = Vec::new();
+        let n = r.read(start, 48_000 * 3, &mut buf).unwrap();
+        let i = buf[..n * ch]
+            .chunks(ch)
+            .position(|f| f.iter().all(|s| s.abs() > 0.5))
+            .expect("clic trouvé sur toutes les pistes");
+        from + i as f64 / 48_000.0
+    }
+
+    #[test]
+    fn sound_offset_in_container_follows_the_picture() {
+        if !ffmpeg_available() {
+            eprintln!("FFmpeg absent : test ignoré");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // Son en retard de 0,5 s : clic à 1,5 s de l'image ; en avance de
+        // 0,3 s : clic à 0,7 s. Une piste, puis trois (réunies par amerge).
+        for (offset, expected) in [(0.5, 1.5), (-0.3, 0.7)] {
+            for tracks in [1, 3] {
+                let clip = offset_clip(
+                    dir.path(),
+                    &format!("o{tracks}_{}", offset * 10.0),
+                    offset,
+                    tracks,
+                );
+                let mut r = DecodedReader::open_all(&clip).unwrap().remove(0);
+                assert_eq!(r.info().channels as usize, tracks);
+                for from in [0.0, 0.2] {
+                    let got = click_at(&mut r, from);
+                    assert!(
+                        (got - expected).abs() < 0.002,
+                        "décalage {offset} s, {tracks} piste(s), lu à {from} s : clic à {got} s"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
