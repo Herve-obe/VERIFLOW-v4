@@ -1,6 +1,6 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
   import MarkersPanel from "./MarkersPanel.svelte";
@@ -11,7 +11,8 @@
   import { app } from "../../stores/app.svelte";
   import { output, currentOutput } from "../../stores/output.svelte";
   import { t } from "../../i18n/index.svelte";
-  import { resolvePlayerAction } from "../../shortcuts";
+  import { resolvePlayerAction, PLAYER_ACTION_EVENT } from "../../shortcuts";
+  import type { PlayerAction } from "../../shortcuts/defaults";
   import { framesToTc, fps, type FrameRate } from "../../lib/timecode";
   import { markerCss, type Marker } from "../../lib/logs";
   import {
@@ -515,6 +516,20 @@
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
+    runAction(action);
+  }
+
+  // Mêmes actions depuis le menu Lecture (voir menu/commands.svelte.ts).
+  function onMenuAction(e: Event) {
+    if (!clip || !active()) return;
+    runAction((e as CustomEvent<PlayerAction>).detail);
+  }
+  onMount(() => {
+    window.addEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+    return () => window.removeEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+  });
+
+  function runAction(action: PlayerAction) {
     switch (action) {
       case "play.toggle": toggle(); break;
       case "play.stop": stop(); break;
@@ -581,9 +596,35 @@
         <canvas bind:this={canvas} width={clip.display_width} height={clip.display_height}></canvas>
         {#if tcOverlay}<div class="tcover mono">{tc(shown)}</div>{/if}
       </div>
-      {#if avReady}
-        <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
-      {/if}
+      <!-- Colonne de droite : infos du clip en haut, console son alignée
+           sur le bas de l'image. -->
+      <div class="side">
+        <div class="about">
+          <dl class="info">
+            <dt>{t("player.codec")}</dt><dd>{clip.info.video?.codec} ({clip.info.video?.pix_fmt})</dd>
+            <dt>{t("player.resolution")}</dt><dd>{clip.info.video?.width} x {clip.info.video?.height}</dd>
+            <dt>{t("player.rate")}</dt><dd>{fps(rate).toFixed(3)} i/s{dropFrame ? " DF" : ""}</dd>
+            <dt>{t("player.tc.start")}</dt><dd class="mono">{clip.info.start_timecode ?? tc(0)}</dd>
+            <dt>{t("player.display.fps")}</dt>
+            <dd class="mono" title="transfert / décodage et dessin">
+              {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
+            </dd>
+            <dt>{t("player.timing")}</dt>
+            <dd class="mono wide" title={t("player.timing.hint")}>
+              {ms(timing.open)} / {ms(timing.image)} / {ms(timing.sound)} / {ms(timing.start)}
+            </dd>
+          </dl>
+          {#if hasSound}
+            <div class="sound">
+              <OutputPicker />
+              {#if avError}<span class="err">{avError}</span>{/if}
+            </div>
+          {/if}
+        </div>
+        {#if avReady}
+          <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
+        {/if}
+      </div>
       {#if scopes}
         <Scopes source={canvas} tick={shown} />
       {/if}
@@ -614,7 +655,7 @@
           {/if}
         {/each}
       </div>
-      <span class="mono small">{t("player.frame")} {shown} / {last}</span>
+      <span class="mono small pos">{t("player.frame")} {shown} / {last}</span>
     </div>
 
     <div class="controls">
@@ -662,27 +703,6 @@
       </div>
       <button class="change" onclick={open}>{t("player.change")}</button>
     </div>
-    {#if hasSound}
-      <div class="sound">
-        <OutputPicker />
-        {#if avError}<span class="err">{avError}</span>{/if}
-      </div>
-    {/if}
-
-    <dl class="info">
-      <dt>{t("player.codec")}</dt><dd>{clip.info.video?.codec} ({clip.info.video?.pix_fmt})</dd>
-      <dt>{t("player.resolution")}</dt><dd>{clip.info.video?.width} x {clip.info.video?.height}</dd>
-      <dt>{t("player.rate")}</dt><dd>{fps(rate).toFixed(3)} i/s{dropFrame ? " DF" : ""}</dd>
-      <dt>{t("player.tc.start")}</dt><dd class="mono">{clip.info.start_timecode ?? tc(0)}</dd>
-      <dt>{t("player.display.fps")}</dt>
-      <dd class="mono" title="transfert / décodage et dessin">
-        {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
-      </dd>
-      <dt>{t("player.timing")}</dt>
-      <dd class="mono wide" title={t("player.timing.hint")}>
-        {ms(timing.open)} / {ms(timing.image)} / {ms(timing.sound)} / {ms(timing.start)}
-      </dd>
-    </dl>
   </div>
   {#if logs}
     <MarkersPanel
@@ -790,10 +810,18 @@
     align-items: center;
     gap: var(--vf-space-4);
   }
+  /* Largeurs fixes, identiques dans les lecteurs vidéo et audio : la barre
+     de défilement commence et finit au même endroit. */
   .tc {
+    flex: none;
+    width: 12ch;
     font-size: var(--vf-text-timecode);
     color: var(--vf-accent);
-    min-width: 11ch;
+  }
+  .pos {
+    flex: none;
+    min-width: 27ch;
+    text-align: right;
   }
   .scrubwrap {
     position: relative;
@@ -867,10 +895,16 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .about {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-3);
+  }
   .sound {
     display: flex;
-    align-items: center;
-    gap: var(--vf-space-3);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--vf-space-1);
   }
   .err {
     color: var(--vf-error);
@@ -886,9 +920,35 @@
     font-size: var(--vf-text-sm);
     color: var(--vf-mark);
   }
+  /* Largeur : celle des tranches son, au moins celle des infos. */
+  .side {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: var(--vf-space-3);
+    max-width: 45%;
+    min-height: 0;
+    overflow: hidden auto;
+  }
+  .about {
+    width: 250px;
+    align-self: center;
+  }
+  .side :global(.picker) {
+    flex-wrap: wrap;
+  }
+  .side :global(.picker select) {
+    width: 100%;
+    max-width: 100%;
+  }
+  .side :global(.picker label) {
+    flex: 1;
+    min-width: 0;
+  }
   .info {
     display: grid;
-    grid-template-columns: repeat(5, auto 1fr);
+    grid-template-columns: auto 1fr;
     gap: var(--vf-space-1) var(--vf-space-2);
     margin: 0;
     font-size: var(--vf-text-sm);

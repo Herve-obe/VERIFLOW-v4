@@ -365,24 +365,6 @@ fn rewrap_and_timelines() {
             "{offset} {conf}"
         );
     }
-    let items = [export::Item {
-        video,
-        audio: Some((audio, p.offset)),
-    }];
-    let xml = export::to_fcpxml("Essai", &items);
-    assert!(
-        xml.contains("lane=\"-1\"") && xml.contains("SON.WAV"),
-        "{xml}"
-    );
-    // Son de l'enregistreur commencé 10 s avant : entrée à 35 990 s + 10 s = 36 000 s.
-    assert!(xml.contains("start=\"36000s\""), "{xml}");
-    let otio: serde_json::Value = serde_json::from_str(&export::to_otio("Essai", &items)).unwrap();
-    let a1 = &otio["tracks"]["children"][1]["children"];
-    assert_eq!(a1[0]["OTIO_SCHEMA"], "Clip.2");
-    assert_eq!(
-        a1[0]["source_range"]["start_time"]["value"],
-        36_000.0 * 48_000.0
-    );
 }
 
 fn analyze_with(videos: Vec<PathBuf>, audios: Vec<PathBuf>, opts: Options) -> Analysis {

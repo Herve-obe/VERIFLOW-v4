@@ -42,4 +42,15 @@
     color: var(--vf-text);
     border-bottom-color: var(--vf-accent);
   }
+  @media (max-width: 1360px) {
+    button {
+      padding: 0 var(--vf-space-3);
+    }
+  }
+  @media (max-width: 1150px) {
+    button {
+      padding: 0 var(--vf-space-2);
+      letter-spacing: 0.04em;
+    }
+  }
 </style>

@@ -5,7 +5,7 @@
   import ReportEditor from "./ReportEditor.svelte";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
-  import { createProject, openProject } from "../../lib/project";
+  import { createProject, openProject } from "../../lib/project.svelte";
   import {
     reportList,
     reportGet,

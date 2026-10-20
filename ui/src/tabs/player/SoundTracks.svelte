@@ -149,7 +149,9 @@
     --vf-meter-height: var(--vf-meter-height-compact);
     display: flex;
     gap: var(--vf-space-1);
+    /* En bas de la colonne, aligné sur le bas de l'image. */
     align-self: center;
+    margin-top: auto;
   }
   .strip {
     display: flex;

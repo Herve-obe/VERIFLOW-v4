@@ -1,6 +1,6 @@
 <!-- PLAYER AUDIO : multipiste jusqu'à 32 pistes, SOLO / MUTE / niveau / panoramique, crêtes et LUFS. -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import Meter from "../../components/Meter.svelte";
   import Fader from "../../components/Fader.svelte";
   import Transport from "../../components/Transport.svelte";
@@ -12,7 +12,8 @@
   import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
   import { app } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
-  import { resolvePlayerAction } from "../../shortcuts";
+  import { resolvePlayerAction, PLAYER_ACTION_EVENT } from "../../shortcuts";
+  import type { PlayerAction } from "../../shortcuts/defaults";
   import { secondsToClock, framesToTc } from "../../lib/timecode";
   import {
     pickAudio,
@@ -203,6 +204,20 @@
     const action = resolvePlayerAction(e);
     if (!action) return;
     e.preventDefault();
+    runAction(action);
+  }
+
+  // Mêmes actions depuis le menu Lecture (voir menu/commands.svelte.ts).
+  function onMenuAction(e: Event) {
+    if (!session || !active()) return;
+    runAction((e as CustomEvent<PlayerAction>).detail);
+  }
+  onMount(() => {
+    window.addEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+    return () => window.removeEventListener(PLAYER_ACTION_EVENT, onMenuAction);
+  });
+
+  function runAction(action: PlayerAction) {
     switch (action) {
       case "play.toggle": toggle(); break;
       case "play.stop": stop(); break;
@@ -271,105 +286,121 @@
 {:else}
   <div class="layout" class:withlogs={logs}>
   <div class="audio">
-    <div class="top">
     {#if ltcNotice}
-      <LtcNotice names={strips.map((st) => st.name)} {ltc} onChoice={setLtc} />
+      <div class="top">
+        <LtcNotice names={strips.map((st) => st.name)} {ltc} onChoice={setLtc} />
+      </div>
     {/if}
-    <header>
-      <div class="clock">
-        <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
-        <span class="small mono">{secondsToClock(position)} / {secondsToClock(duration)}</span>
-      </div>
-      <Transport {playing} onToggle={toggle} onStop={stop} />
-      <div class="meta">
-        {#if first?.ixml.scene}<span>{t("player.scene")} <b>{first.ixml.scene}</b></span>{/if}
-        {#if first?.ixml.take}<span>{t("player.take")} <b>{first.ixml.take}</b></span>{/if}
-        <span>{strips.length} {t("player.tracks")}, {session.session.sample_rate / 1000} kHz, {first?.bits} bits{first?.format === "Float" ? " float" : ""}</span>
-        <span class:warn={session.output.resampling}>
-          {t("player.output")} : {session.output.device}{session.output.first_channel > 0
-            ? ` (${session.output.first_channel + 1}-${session.output.first_channel + 2})`
-            : ""}, {session.output.sample_rate / 1000} kHz
-          ({session.output.resampling ? t("player.resampling") : t("player.native")})
-        </span>
-        <OutputPicker />
-        {#if markIn !== null || markOut !== null}
-          <span class="marks mono">
-            {t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)} · {t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}
-          </span>
-        {/if}
-      </div>
-      <button class="change" onclick={open}>{t("player.change")}</button>
-    </header>
-    </div>
 
-    <div class="scrubwrap">
-      <input
-        class="scrub"
-        type="range"
-        min="0"
-        max={duration}
-        step="0.01"
-        value={position}
-        oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
-      />
-      {#each markers as m (m.id)}
-        {#if m.in_frame !== null && m.out_frame !== null}
-          <span
-            class="span"
-            style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
-            style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
-            style:background={markerCss(m.color)}
-          ></span>
-        {:else}
-          <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
-        {/if}
-      {/each}
-    </div>
 
-    <div class="console">
-      <div class="strips">
-        {#each strips as s, i (i)}
-          <div class="strip" class:muted={s.mute} class:soloed={s.solo}>
-            <span class="name" title={s.name}>{#if ltc[i]}<b class="ltc" title={`LTC ${ltc[i]?.timecode}`}>LTC</b> {/if}{s.name}</span>
-            <div class="meter-fader">
-              <Meter db={s.level} hold={s.hold} />
-              <Fader bind:value={s.gain} label={s.name} onchange={() => send(i)} />
+    <!-- Même disposition que le lecteur vidéo : console à la place de
+         l'image, infos du fichier à droite, puis barre de défilement et
+         transport. -->
+    <div class="viewer">
+      <div class="console">
+        <div class="strips">
+          {#each strips as s, i (i)}
+            <div class="strip" class:muted={s.mute} class:soloed={s.solo}>
+              <span class="name" title={s.name}>{#if ltc[i]}<b class="ltc" title={`LTC ${ltc[i]?.timecode}`}>LTC</b> {/if}{s.name}</span>
+              <div class="meter-fader">
+                <Meter db={s.level} hold={s.hold} />
+                <Fader bind:value={s.gain} label={s.name} onchange={() => send(i)} />
+              </div>
+              <span class="db mono">{fmtDb(s.gain)}</span>
+              <input
+                class="pan"
+                type="range"
+                min="-1"
+                max="1"
+                step="0.05"
+                title={t("player.pan")}
+                bind:value={s.pan}
+                oninput={() => send(i)}
+                ondblclick={() => ((s.pan = 0), send(i))}
+              />
+              <div class="buttons">
+                <button class="solo" class:on={s.solo} onclick={() => ((s.solo = !s.solo), send(i))}>{t("player.solo")}</button>
+                <button class="mute" class:on={s.mute} onclick={() => ((s.mute = !s.mute), send(i))}>{t("player.mute")}</button>
+              </div>
+              <span class="num mono">{i + 1}</span>
             </div>
-            <span class="db mono">{fmtDb(s.gain)}</span>
-            <input
-              class="pan"
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              title={t("player.pan")}
-              bind:value={s.pan}
-              oninput={() => send(i)}
-              ondblclick={() => ((s.pan = 0), send(i))}
-            />
-            <div class="buttons">
-              <button class="solo" class:on={s.solo} onclick={() => ((s.solo = !s.solo), send(i))}>{t("player.solo")}</button>
-              <button class="mute" class:on={s.mute} onclick={() => ((s.mute = !s.mute), send(i))}>{t("player.mute")}</button>
-            </div>
-            <span class="num mono">{i + 1}</span>
+          {/each}
+        </div>
+
+        <div class="strip masterstrip">
+          <span class="name">{t("player.master")}</span>
+          <div class="meter-fader">
+            <Meter db={master.l} hold={master.holdL} />
+            <Meter db={master.r} hold={master.holdR} />
+            <Fader bind:value={master.gain} label={t("player.master")} onchange={sendMaster} />
           </div>
+          <span class="db mono">{fmtDb(master.gain)}</span>
+          <dl class="lufs mono">
+            <dt>{t("player.lufs.m")}</dt><dd>{fmt(lufs.m)}</dd>
+            <dt>{t("player.lufs.s")}</dt><dd>{fmt(lufs.s)}</dd>
+            <dt>{t("player.lufs.i")}</dt><dd>{fmt(lufs.i)}</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="side">
+        <dl class="info">
+          {#if first?.ixml.scene}<dt>{t("player.scene")}</dt><dd>{first.ixml.scene}</dd>{/if}
+          {#if first?.ixml.take}<dt>{t("player.take")}</dt><dd>{first.ixml.take}</dd>{/if}
+          <dt>{t("player.tracks.count")}</dt><dd>{strips.length}</dd>
+          <dt>{t("player.samplerate")}</dt><dd>{session.session.sample_rate / 1000} kHz</dd>
+          <dt>{t("player.bitdepth")}</dt><dd>{first?.bits} bits{first?.format === "Float" ? " float" : ""}</dd>
+          <dt>{t("player.tc.start")}</dt><dd class="mono">{tcStart === null ? "-" : secondsToClock(tcStart)}</dd>
+          <dt>{t("player.output")}</dt>
+          <dd class:warn={session.output.resampling} title={session.output.device}>
+            {session.output.device}{session.output.first_channel > 0
+              ? ` (${session.output.first_channel + 1}-${session.output.first_channel + 2})`
+              : ""}, {session.output.sample_rate / 1000} kHz ({session.output.resampling ? t("player.resampling") : t("player.native")})
+          </dd>
+        </dl>
+        <div class="sound"><OutputPicker /></div>
+      </div>
+    </div>
+
+    <div class="bar">
+      <span class="tc mono">{secondsToClock((tcStart ?? 0) + position)}</span>
+      <div class="scrubwrap">
+        <input
+          class="scrub"
+          type="range"
+          min="0"
+          max={duration}
+          step="0.01"
+          value={position}
+          oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
+        />
+        {#each markers as m (m.id)}
+          {#if m.in_frame !== null && m.out_frame !== null}
+            <span
+              class="span"
+              style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
+              style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
+              style:background={markerCss(m.color)}
+            ></span>
+          {:else}
+            <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
+          {/if}
         {/each}
       </div>
+      <span class="mono small pos">{secondsToClock(position)} / {secondsToClock(duration)}</span>
+    </div>
 
-      <div class="strip masterstrip">
-        <span class="name">{t("player.master")}</span>
-        <div class="meter-fader">
-          <Meter db={master.l} hold={master.holdL} />
-          <Meter db={master.r} hold={master.holdR} />
-          <Fader bind:value={master.gain} label={t("player.master")} onchange={sendMaster} />
+    <div class="controls">
+      <Transport {playing} onToggle={toggle} onStop={stop} onBack={() => seekBy(-5)} onForward={() => seekBy(5)} />
+      {#if logs}
+        <div class="marks mono">
+          <span>{t("player.in")} {markIn === null ? "--:--:--:--" : tc(markIn)}</span>
+          <span>{t("player.out")} {markOut === null ? "--:--:--:--" : tc(markOut)}</span>
+          {#if markIn !== null && markOut !== null && markOut >= markIn}
+            <span>{t("player.duration")} {framesToTc(markOut - markIn + 1, LOG_RATE, false)}</span>
+          {/if}
         </div>
-        <span class="db mono">{fmtDb(master.gain)}</span>
-        <dl class="lufs mono">
-          <dt>{t("player.lufs.m")}</dt><dd>{fmt(lufs.m)}</dd>
-          <dt>{t("player.lufs.s")}</dt><dd>{fmt(lufs.s)}</dd>
-          <dt>{t("player.lufs.i")}</dt><dd>{fmt(lufs.i)}</dd>
-        </dl>
-      </div>
+      {/if}
+      <button class="change" onclick={open}>{t("player.change")}</button>
     </div>
   </div>
   {#if logs}
@@ -439,6 +470,7 @@
   }
   .scrubwrap {
     position: relative;
+    flex: 1;
     display: flex;
     align-items: center;
   }
@@ -461,6 +493,9 @@
     opacity: 0.8;
   }
   .marks {
+    display: flex;
+    gap: var(--vf-space-4);
+    font-size: var(--vf-text-sm);
     color: var(--vf-mark);
   }
   .top {
@@ -475,43 +510,87 @@
     color: var(--vf-on-accent);
     font-size: var(--vf-text-xs);
   }
+  /* Comme le lecteur vidéo (mêmes marges et espacements) : console,
+     barre de défilement, transport ; le message LTC, s'il y en a un,
+     au-dessus. */
   .audio {
     position: relative;
     min-height: 0;
-    display: grid;
-    grid-template-rows: auto auto 1fr;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--vf-space-3);
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-2);
     height: 100%;
     padding: var(--vf-space-3);
   }
-  header {
+  .viewer {
+    flex: 1;
     display: flex;
-    align-items: center;
-    gap: var(--vf-space-6);
-    min-width: 0;
+    gap: var(--vf-space-2);
+    min-height: 0;
   }
-  .clock {
+  /* Colonne de droite : comme le lecteur vidéo. */
+  .side {
+    flex: 0 0 250px;
     display: flex;
     flex-direction: column;
+    gap: var(--vf-space-3);
+    min-height: 0;
+    overflow: hidden auto;
   }
+  .info {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--vf-space-1) var(--vf-space-2);
+    margin: 0;
+    font-size: var(--vf-text-sm);
+  }
+  .info dt {
+    color: var(--vf-text-muted);
+  }
+  .info dd {
+    margin: 0;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sound :global(.picker) {
+    flex-wrap: wrap;
+  }
+  .sound :global(.picker select) {
+    width: 100%;
+    max-width: 100%;
+  }
+  .sound :global(.picker label) {
+    flex: 1;
+    min-width: 0;
+  }
+  .bar,
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-4);
+  }
+  /* Largeurs fixes, identiques dans les lecteurs vidéo et audio : la barre
+     de défilement commence et finit au même endroit. */
   .tc {
+    flex: none;
+    width: 12ch;
     font-size: var(--vf-text-timecode);
     color: var(--vf-accent);
+  }
+  .pos {
+    flex: none;
+    min-width: 27ch;
+    text-align: right;
   }
   .small {
     font-size: var(--vf-text-sm);
     color: var(--vf-text-muted);
   }
-  .meta {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: var(--vf-text-sm);
-    color: var(--vf-text-muted);
-  }
-  .meta b {
-    color: var(--vf-text);
+  .controls .change {
+    margin-left: auto;
   }
   .warn {
     color: var(--vf-warning);
@@ -520,9 +599,14 @@
     width: 100%;
     accent-color: var(--vf-accent);
   }
+  /* Tranches centrées ; au-delà de la largeur, défilement horizontal. */
   .console {
+    flex: 1;
     display: flex;
-    align-items: flex-start;
+    justify-content: center;
+    align-items: flex-end;
+    /* Hauteur des tranches seulement, posée en bas de la zone. */
+    align-self: flex-end;
     gap: var(--vf-space-3);
     min-height: 0;
     min-width: 0;
@@ -532,7 +616,7 @@
     align-items: flex-start;
     gap: var(--vf-space-1);
     overflow-x: auto;
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     padding-bottom: var(--vf-space-2);
   }
@@ -598,8 +682,13 @@
     background: var(--vf-error);
     color: var(--vf-on-accent);
   }
+  /* Même hauteur que les pistes : nom, vumètres et fader sur les mêmes
+     lignes (marge du bas laissée à la barre de défilement des pistes). */
   .masterstrip {
     width: 120px;
+    align-self: stretch;
+    justify-content: flex-start;
+    margin-bottom: var(--vf-space-2);
   }
   .lufs {
     display: grid;

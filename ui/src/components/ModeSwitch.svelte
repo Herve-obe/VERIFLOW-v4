@@ -25,6 +25,14 @@
     padding: 2px;
     width: 164px;
   }
+  @media (max-width: 1150px) {
+    .switch {
+      width: 128px;
+    }
+    button {
+      letter-spacing: 0.04em;
+    }
+  }
   .thumb {
     position: absolute;
     top: 2px;

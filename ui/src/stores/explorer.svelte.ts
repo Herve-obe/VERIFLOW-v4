@@ -5,6 +5,15 @@ import type { Volume } from "../lib/offload";
 
 const FAV_KEY = "veriflow.explorer.favorites";
 const EXPANDED_KEY = "veriflow.explorer.expanded";
+const COLLAPSED_KEY = "veriflow.explorer.collapsed";
+
+function loadCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 function loadExpanded(): string[] {
   try {
@@ -33,7 +42,18 @@ export const explorer = $state({
   /** Incrémenté à chaque changement signalé (pour rafraîchir les vues). */
   revision: 0,
   lastChanged: [] as string[],
+  /** Explorateur replié : commun à tous les onglets (Ctrl+B, menu Affichage). */
+  collapsed: loadCollapsed(),
 });
+
+export function setExplorerCollapsed(collapsed: boolean) {
+  explorer.collapsed = collapsed;
+  try {
+    localStorage.setItem(COLLAPSED_KEY, String(collapsed));
+  } catch {
+    /* stockage indisponible */
+  }
+}
 
 function saveFavorites() {
   try {

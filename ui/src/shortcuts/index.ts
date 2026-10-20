@@ -45,3 +45,10 @@ export function resolvePlayerAction(e: KeyboardEvent): PlayerAction | null {
   }
   return null;
 }
+
+/** Événement de fenêtre portant une action de lecture choisie dans le menu Lecture. */
+export const PLAYER_ACTION_EVENT = "veriflow-player-action";
+
+export function dispatchPlayerAction(action: PlayerAction) {
+  window.dispatchEvent(new CustomEvent<PlayerAction>(PLAYER_ACTION_EVENT, { detail: action }));
+}

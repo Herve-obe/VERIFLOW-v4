@@ -13,9 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Windows : installeur NSIS seul (setup.exe). Son désinstalleur propose
+          # « Supprimer les données de l'application » ; le MSI ne le fait pas.
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            args: ""
+            args: "--bundles nsis"
           - platform: macos-latest
             target: universal-apple-darwin
             args: "--target universal-apple-darwin"
@@ -95,7 +97,6 @@ jobs:
           name: veriflow-${{ matrix.platform }}
           # Uniquement les installeurs (pas les dossiers de travail du bundler).
           path: |
-            target/release/bundle/msi/*.msi
             target/release/bundle/nsis/*.exe
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm

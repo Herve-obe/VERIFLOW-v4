@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 use veriflow_core::media::catalog::{self, MediaKind};
 use veriflow_core::media::probe::probe;
 use veriflow_core::sync::correlate::{decode_mono, envelope};
-use veriflow_core::sync::export::{self, Item, RewrapOptions};
+use veriflow_core::sync::export::{self, RewrapOptions};
 use veriflow_core::sync::{self, Analysis, Options, SyncFile};
 
 type CmdResult<T> = Result<T, String>;
@@ -266,26 +266,4 @@ pub async fn sync_rewrap(
     })
     .await
     .map_err(text)?
-}
-
-/// Timeline FCPXML ou OTIO des paires.
-#[tauri::command]
-pub fn sync_timeline(
-    kind: String,
-    title: String,
-    items: Vec<ExportItem>,
-    path: PathBuf,
-) -> CmdResult<()> {
-    let list: Vec<Item> = items
-        .iter()
-        .map(|it| Item {
-            video: &it.video,
-            audio: it.audio.as_ref().map(|a| (a, it.offset)),
-        })
-        .collect();
-    let content = match kind.as_str() {
-        "otio" => export::to_otio(&title, &list),
-        _ => export::to_fcpxml(&title, &list),
-    };
-    std::fs::write(path, content).map_err(text)
 }

@@ -14,5 +14,10 @@ const target = document.getElementById("app")!;
 if (monitor) {
   import("./Monitor.svelte").then(({ default: Monitor }) => mount(Monitor, { target }));
 } else {
-  import("./App.svelte").then(({ default: App }) => mount(App, { target }));
+  // « Repartir à zéro à chaque ouverture » (Préférences) : avant que les vues
+  // ne lisent leurs réglages.
+  import("./lib/appdata")
+    .then(({ applyStartupMode }) => applyStartupMode())
+    .then(() => import("./App.svelte"))
+    .then(({ default: App }) => mount(App, { target }));
 }

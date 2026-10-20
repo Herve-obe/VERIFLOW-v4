@@ -54,6 +54,10 @@ struct Inner {
     requests: HashMap<String, (Vec<PathBuf>, bool)>,
     /// Dossiers actuellement surveillés et leur mode.
     active: HashMap<PathBuf, bool>,
+    /// Volumes en cours d'éjection : plus aucun dossier n'y est surveillé
+    /// (sous Windows, chaque dossier surveillé garde le volume ouvert et
+    /// bloque l'éjection). Retirés quand le volume disparaît.
+    released: Vec<PathBuf>,
 }
 
 pub struct ExplorerState {
@@ -96,6 +100,7 @@ impl ExplorerState {
             watcher,
             requests: HashMap::new(),
             active: HashMap::new(),
+            released: Vec::new(),
         }));
 
         // Regroupement des événements (300 ms) pour ne pas inonder l'interface.
@@ -128,6 +133,10 @@ impl ExplorerState {
                         .map(|v| (v.mount_point.clone(), v.name.clone()))
                         .collect();
                     if key != last_volumes {
+                        if let Ok(mut i) = poll_inner.lock() {
+                            i.released
+                                .retain(|m| volumes.iter().any(|v| &v.mount_point == m));
+                        }
                         last_volumes = key;
                         let _ = app.emit("explorer", Notice::Volumes { volumes });
                     }
@@ -170,6 +179,7 @@ fn apply(inner: &mut Inner) {
     let Some(watcher) = inner.watcher.as_mut() else {
         return;
     };
+    wanted.retain(|p, _| !inner.released.iter().any(|m| p.starts_with(m)));
     let stale: Vec<PathBuf> = inner
         .active
         .iter()
@@ -193,6 +203,30 @@ fn apply(inner: &mut Inner) {
             inner.active.insert(p, recursive);
         }
     }
+}
+
+/// Éjecte un volume après avoir cessé d'y surveiller les dossiers ; si
+/// l'éjection échoue, la surveillance reprend.
+pub fn eject_volume(
+    app: &AppHandle,
+    mount_point: &Path,
+    hint: Option<&Path>,
+) -> Result<(), String> {
+    let state = app.state::<ExplorerState>();
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.released.push(mount_point.to_path_buf());
+        apply(&mut inner);
+    }
+    // Le fil de notify ferme les dossiers peu après la demande.
+    thread::sleep(Duration::from_millis(500));
+    let result = storage::eject(mount_point, hint).map_err(|e| e.to_string());
+    if result.is_err() {
+        if let Ok(mut inner) = state.inner.lock() {
+            inner.released.retain(|m| m != mount_point);
+            apply(&mut inner);
+        }
+    }
+    result
 }
 
 #[tauri::command]

@@ -94,6 +94,8 @@ Références d'ergonomie : logiciels de post-production et de DIT actuels (inter
 - Contraste conforme WCAG AA minimum.
 - Logo : à créer (monogramme "V" + coche de vérification + forme d'onde). Propositions en phase de maquettes.
 - Ergonomie : tout est au clavier, tous les raccourcis sont reconfigurables, pas d'action destructive sans confirmation.
+- **Barre de menus** (décision d'Hervé du 19/10/2026) : Fichier (nouveau, ouvrir, projets récents, enregistrer Ctrl+S, enregistrer sous Ctrl+Maj+S, fermer, quitter), Édition (annuler, rétablir, couper, copier, coller, tout sélectionner, Préférences Ctrl+,), Affichage (onglets, mode VIDEO/AUDIO, explorateur, plein écran), Lecture, Aide (raccourcis clavier, licences, à propos). macOS : menu natif du système (avec le menu VERIFLOW : À propos, Préférences, Quitter). Windows et Linux : barre dessinée aux couleurs de VERIFLOW, dans le bandeau du haut. Les deux viennent de la même liste de commandes. En-tête en deux lignes : barre de titre (logo, menus, projet ; sous Windows, elle remplace celle du système avec ses boutons), puis onglets centrés et interrupteur VIDEO / AUDIO.
+- **Préférences** : fenêtre aux couleurs de VERIFLOW, une section par onglet (Général, puis Raccourcis, OFFLOAD, PLAYER, TRANSCODE). La langue y est réglée.
 - **Modifiabilité (exigence d'Hervé)** : tout le visuel est isolé dans le dossier `ui/`. Couleurs, polices, tailles, espacements et arrondis sont définis **une seule fois** dans `ui/src/theme/tokens.css`. Changer une valeur à cet endroit change toute l'application. Aucune couleur n'est écrite en dur dans les composants.
 
 ---
@@ -328,7 +330,7 @@ Améliorations apportées par VERIFLOW (PROPOSÉ) :
 | Mode de travail | Par lot : appariement automatique vidéo/son, validation manuelle possible clip par clip |
 | Dérive d'horloge | Détection, alerte et correction au re-wrap en V1 (correction avancée de V2 en V1 le 11/10/2026) |
 | Cadences | 23.976, 24, 25, 29.97 DF et NDF, 30, 47.95, 48, 50, 59.94 DF et NDF, 60 (VALIDÉ) |
-| Exports | **Re-wrap sans réencodage** (vidéo + son synchronisé dans un nouveau fichier), **FCPXML** et **OTIO**. AAF en V2 (VALIDÉ) |
+| Exports | **Re-wrap sans réencodage** (vidéo + son synchronisé dans un nouveau fichier, un fichier par plan) (VALIDÉ). Timelines FCPXML, OTIO et AAF **abandonnées** (décision d'Hervé du 19/10/2026) : le re-wrap couvre le besoin, une séquence de tous les plans oblige le monteur à la vider. Code conservé hors de la version actuelle (branches `archive/sync-timelines` et `claude/sync-aaf`) |
 
 ### 7.6 TRANSCODE (priorité 6)
 
