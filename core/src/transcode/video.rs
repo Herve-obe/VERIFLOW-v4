@@ -52,8 +52,11 @@ pub fn hardware_candidates(codec: &str) -> &'static [&'static str] {
 
 const PRORES_VT: [&str; 6] = ["proxy", "lt", "standard", "hq", "4444", "xq"];
 
-fn prores_args(profile: u8, encoder: &str) -> Vec<String> {
-    if encoder == "prores_videotoolbox" {
+/// `alpha` : la source a une couche alpha. En 4444 et 4444 XQ, elle est
+/// transmise par prores_ks (16 bits), même si l'encodeur matériel était choisi.
+fn prores_args(profile: u8, encoder: &str, alpha: bool) -> Vec<String> {
+    let keep_alpha = alpha && profile >= 4;
+    if encoder == "prores_videotoolbox" && !keep_alpha {
         vec![
             s("-c:v"),
             s(encoder),
@@ -61,12 +64,14 @@ fn prores_args(profile: u8, encoder: &str) -> Vec<String> {
             s(PRORES_VT[profile as usize]),
         ]
     } else {
-        let pix = if profile >= 4 {
+        let pix = if keep_alpha {
+            "yuva444p10le"
+        } else if profile >= 4 {
             "yuv444p10le"
         } else {
             "yuv422p10le"
         };
-        vec![
+        let mut a = vec![
             s("-c:v"),
             s("prores_ks"),
             s("-profile:v"),
@@ -75,7 +80,11 @@ fn prores_args(profile: u8, encoder: &str) -> Vec<String> {
             s("apl0"),
             s("-pix_fmt"),
             s(pix),
-        ]
+        ];
+        if keep_alpha {
+            a.extend([s("-alpha_bits"), s("16")]);
+        }
+        a
     }
 }
 
@@ -166,7 +175,7 @@ pub fn video_encoder(preset: &Preset, software: bool) -> Option<EncoderChoice> {
         Kind::ProRes(profile) => {
             if !software {
                 for c in hardware_candidates("prores") {
-                    if encoders::works(&prores_args(profile, c), false) {
+                    if encoders::works(&prores_args(profile, c, false), false) {
                         return Some(EncoderChoice {
                             name: s(*c),
                             hardware: true,
@@ -275,6 +284,9 @@ pub struct Frame {
     pub height: u32,
     pub rate: FrameRate,
     pub ten_bit: bool,
+    /// La source a une couche alpha (transmise par ProRes 4444, Animation,
+    /// PNG et TIFF).
+    pub alpha: bool,
 }
 
 /// Arguments de l'encodeur vidéo.
@@ -286,7 +298,7 @@ pub fn codec_args(
 ) -> Result<Vec<String>> {
     let mut a = vec![];
     match kind {
-        Kind::ProRes(profile) => a = prores_args(profile, &encoder.name),
+        Kind::ProRes(profile) => a = prores_args(profile, &encoder.name, frame.alpha),
         Kind::DnxHr(profile, pix) => a.extend([
             s("-c:v"),
             s("dnxhd"),
@@ -313,7 +325,10 @@ pub fn codec_args(
             ]);
         }
         Kind::CineForm => a.extend([s("-c:v"), s("cfhd"), s("-pix_fmt"), s("yuv422p10le")]),
-        Kind::Animation => a.extend([s("-c:v"), s("qtrle"), s("-pix_fmt"), s("rgb24")]),
+        Kind::Animation => {
+            let pix = if frame.alpha { "argb" } else { "rgb24" };
+            a.extend([s("-c:v"), s("qtrle"), s("-pix_fmt"), s(pix)]);
+        }
         Kind::Uncompressed => a.extend([s("-c:v"), s("v210")]),
         Kind::Ffv1 => a.extend([
             s("-c:v"),
@@ -525,11 +540,21 @@ pub fn codec_args(
                 s("yuvj444p"),
             ]),
             ImageFormat::Png => {
-                let pix = if frame.ten_bit { "rgb48be" } else { "rgb24" };
+                let pix = match (frame.alpha, frame.ten_bit) {
+                    (true, true) => "rgba64be",
+                    (true, false) => "rgba",
+                    (false, true) => "rgb48be",
+                    (false, false) => "rgb24",
+                };
                 a.extend([s("-c:v"), s("png"), s("-pix_fmt"), s(pix)]);
             }
             ImageFormat::Tiff => {
-                let pix = if frame.ten_bit { "rgb48le" } else { "rgb24" };
+                let pix = match (frame.alpha, frame.ten_bit) {
+                    (true, true) => "rgba64le",
+                    (true, false) => "rgba",
+                    (false, true) => "rgb48le",
+                    (false, false) => "rgb24",
+                };
                 a.extend([
                     s("-c:v"),
                     s("tiff"),
