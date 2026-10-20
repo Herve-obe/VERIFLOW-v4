@@ -88,7 +88,17 @@ step() {
   local name="$1"
   shift
   log "$name"
-  if ! "$@" >"$WORK/$name.log" 2>&1; then
+  # Sous-shell avec -e : la moindre commande en échec arrête l'étape (dans un
+  # « if », -e serait ignoré).
+  local rc=0
+  set +e
+  (
+    set -e
+    "$@"
+  ) >"$WORK/$name.log" 2>&1
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
     tail -n 60 "$WORK/$name.log" >&2
     if [ -n "${GITHUB_ACTIONS:-}" ]; then
       echo "::error title=FFmpeg macOS : $name::$(tail -n 25 "$WORK/$name.log" | tr '\n' ' ' | cut -c1-3000)"
@@ -186,6 +196,10 @@ b_x265() {
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DENABLE_SHARED=OFF -DENABLE_CLI=OFF
     -DCMAKE_ASM_NASM_FLAGS=-w-macro-params-legacy)
   rm -rf "$b"
+  # Version lue dans x265Version.txt (fourni par x265) : le dossier .git,
+  # sans étiquettes ici, est masqué le temps de la configuration (sans
+  # version, x265 n'installe pas x265.pc).
+  [ -d "$SRC/x265/.git" ] && mv "$SRC/x265/.git" "$SRC/x265/.git-off"
   cmake "${common[@]}" -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF -DMAIN12=ON -S "$s" -B "$b/12"
   cmake "${common[@]}" -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF -S "$s" -B "$b/10"
   cmake --build "$b/12" -j "$JOBS"
@@ -194,6 +208,7 @@ b_x265() {
   cp "$b/10/libx265.a" "$b/libx265_main10.a"
   cmake "${common[@]}" -DEXTRA_LIB="x265_main10.a;x265_main12.a" -DEXTRA_LINK_FLAGS="-L$b" \
     -DLINKED_10BIT=ON -DLINKED_12BIT=ON -S "$s" -B "$b/8"
+  [ -d "$SRC/x265/.git-off" ] && mv "$SRC/x265/.git-off" "$SRC/x265/.git"
   cmake --build "$b/8" -j "$JOBS"
   mv "$b/8/libx265.a" "$b/libx265_main.a"
   if [ "$OS" = "Darwin" ]; then
@@ -236,9 +251,13 @@ b_vmaf() {
   echo >"$SRC/vmaf/libvmaf/tools/meson.build"
   meson_build "$SRC/vmaf/libvmaf" -Dbuilt_in_models=true -Denable_tests=false -Denable_docs=false \
     -Denable_float=true
-  sed -i.bak "s/Libs.private:/Libs.private: $CXXLIB/; t; \$ a\\
-Libs.private: $CXXLIB
-" "$PREFIX/lib/pkgconfig/libvmaf.pc"
+  # Bibliothèque C++ ajoutée à l'édition de liens (sed compatible BSD et GNU).
+  local pc="$PREFIX/lib/pkgconfig/libvmaf.pc"
+  if grep -q '^Libs.private:' "$pc"; then
+    sed -i.bak "s/^Libs.private:/Libs.private: $CXXLIB/" "$pc"
+  else
+    echo "Libs.private: $CXXLIB" >>"$pc"
+  fi
 }
 b_snappy() {
   cmake_build "$SRC/snappy" -DSNAPPY_BUILD_TESTS=OFF -DSNAPPY_BUILD_BENCHMARKS=OFF \
@@ -294,7 +313,8 @@ case "$MODE" in
     ;;
   build)
     fetch_all
-    for lib in freetype fribidi harfbuzz libass x264 x265 libvpx svtav1 opus lame ogg vorbis vmaf snappy libwebp ffmpeg; do
+    # FFBUILD_STEPS : étapes à refaire seulement (essais du script).
+    for lib in ${FFBUILD_STEPS:-freetype fribidi harfbuzz libass x264 x265 libvpx svtav1 opus lame ogg vorbis vmaf snappy libwebp ffmpeg}; do
       step "$lib" "b_$lib"
     done
     for tool in ffmpeg ffprobe; do
