@@ -36,7 +36,7 @@ export const platform: Platform = detect();
 export const isMac = platform === "macos";
 
 /** Fenêtre ouverte depuis les menus. */
-export type Dialog = "about" | "shortcuts" | "licenses" | "prefs";
+export type Dialog = "about" | "shortcuts" | "licenses" | "prefs" | "guide";
 export const menuState = $state({ dialog: null as Dialog | null });
 
 export interface Command {
@@ -193,7 +193,8 @@ const list: Command[] = [
   play("mark.add", "menu.play.marker"),
   play("report.edit", "menu.play.report"),
 
-  { id: "help.shortcuts", label: () => t("menu.help.shortcuts"), shortcut: { key: "F1" }, run: show("shortcuts") },
+  { id: "help.guide", label: () => t("menu.help.guide"), shortcut: { key: "F1" }, run: show("guide") },
+  { id: "help.shortcuts", label: () => t("menu.help.shortcuts"), run: show("shortcuts") },
   { id: "help.licenses", label: () => t("menu.help.licenses"), run: show("licenses") },
   { id: "help.about", label: () => t("menu.help.about"), run: show("about") },
 ];
@@ -317,7 +318,7 @@ export const MENUS: MenuDef[] = [
   {
     id: "help",
     label: () => t("menu.help"),
-    items: () => ["help.shortcuts", "help.licenses", ...(isMac ? [] : ["-", "help.about"])],
+    items: () => ["help.guide", "help.shortcuts", "help.licenses", ...(isMac ? [] : ["-", "help.about"])],
   },
 ];
 

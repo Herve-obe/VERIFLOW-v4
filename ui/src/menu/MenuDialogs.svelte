@@ -13,6 +13,7 @@
   import { MARKER_COLORS, markerCss } from "../lib/logs";
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import ShortcutsEditor from "./ShortcutsEditor.svelte";
+  import Guide from "./Guide.svelte";
 
   let info = $state<AppInfo | null>(null);
   onMount(() => {
@@ -178,6 +179,10 @@
         {/if}
       </section>
     </div>
+  </Modal>
+{:else if menuState.dialog === "guide"}
+  <Modal title={t("menu.help.guide")} onClose={close} width="min(1040px, 96vw)" height="min(760px, 92vh)">
+    <Guide />
   </Modal>
 {:else if menuState.dialog === "shortcuts"}
   <Modal title={t("menu.help.shortcuts")} onClose={close} width="min(720px, 94vw)" height="min(640px, 90vh)">
