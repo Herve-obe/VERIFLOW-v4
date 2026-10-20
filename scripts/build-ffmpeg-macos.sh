@@ -315,9 +315,10 @@ b_ffmpeg() {
   local extra=()
   if [ "$OS" = "Darwin" ]; then
     # Sur le runner Intel, /usr/local (Homebrew) est dans les chemins par
-    # défaut : FFmpeg y détecterait liblzma (TIFF compressé en LZMA, inutile
-    # ici) et en dépendrait.
-    extra+=(--enable-videotoolbox --enable-audiotoolbox --disable-lzma)
+    # défaut : FFmpeg y détecterait liblzma, X11, SDL2... et en dépendrait.
+    # Aucune détection automatique ; seules les fonctions du système voulues.
+    extra+=(--disable-autodetect --enable-zlib --enable-bzlib --enable-iconv
+      --enable-videotoolbox --enable-audiotoolbox)
   fi
   ./configure "${FFMPEG_CONF[@]}" "${extra[@]}" \
     --extra-cflags="$CFLAGS" --extra-ldflags="$LDFLAGS" --extra-libs="$CXXLIB -lpthread -lm"

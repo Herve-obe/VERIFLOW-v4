@@ -23,7 +23,7 @@ Organisation décidée par Hervé le 20/10/2026, pour être au plus près de la 
 **macOS** :
 - FFmpeg 9.0.2 (archive officielle, empreinte vérifiée) et chacune de ses bibliothèques, au même commit que dans les builds BtbN.
 - Bibliothèques : x264, x265 (8, 10 et 12 bits), libvpx, SVT-AV1, Opus, LAME, libogg, libvorbis, FreeType, FriBidi, HarfBuzz, libass, libvmaf, snappy (HAP), libwebp.
-- Fonctions du système : VideoToolbox, AudioToolbox, CoreText.
+- Fonctions du système : VideoToolbox, AudioToolbox, CoreText, zlib, bzip2, iconv. La détection automatique de FFmpeg est coupée (`--disable-autodetect`) : sinon, il lierait des bibliothèques de Homebrew présentes sur la machine de compilation (liblzma, X11).
 - Le job `ffmpeg-macos` tourne sur `macos-15` (arm64, macOS 11 et plus) et `macos-15-intel` (x86_64, macOS 10.15 et plus, pour Catalina).
 - Le résultat est gardé en cache tant que le script ne change pas.
 - Le script refuse un binaire qui dépend d'une bibliothèque hors du système (Homebrew, dossier de compilation).
