@@ -23,7 +23,7 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
   - **Général** : langue, ouverture (reprendre ou repartir à zéro), données de l'application ;
   - **Raccourcis** : toutes les actions des menus Fichier, Édition (Préférences), Affichage, Lecture et Aide, plus la bascule VIDEO / AUDIO forcée (Ctrl+Tab). « Modifier » puis la nouvelle combinaison (Échap annule) ; un raccourci déjà pris est retiré de l'autre action, avec un message ; « × » retire un raccourci ; « Par défaut » et « Tout rétablir ». Couper, copier, coller, annuler et tout sélectionner restent ceux du système. Les raccourcis modifiés valent partout : clavier, menus affichés, menu natif de macOS, fenêtre Aide > Raccourcis clavier (charte §4 : « tous les raccourcis sont reconfigurables ») ;
   - **OFFLOAD** : valeurs de départ (arborescence, opérateur, empreintes, éjection), utilisées à la première ouverture, après une remise à zéro ou en mode « Repartir à zéro » ;
-  - **PLAYER** : TC incrusté et scopes au premier lancement d'un lecteur, couleur des nouveaux marqueurs ;
+  - **PLAYER** : TC incrusté et scopes au premier lancement d'un lecteur, couleur des nouveaux marqueurs, ouverture de la saisie du rapport à chaque nouvelle prise ;
   - **TRANSCODE** : destination proposée à chaque ouverture (à côté de chaque source, ou un dossier).
   - Enregistrées sous `veriflow.prefs` (gardées par la remise à zéro), code `ui/src/stores/prefs.svelte.ts`, `ui/src/menu/ShortcutsEditor.svelte`.
 - **Données de l'application** (demande d'Hervé du 20/10/2026, Préférences > Général) :

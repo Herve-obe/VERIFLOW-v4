@@ -833,6 +833,8 @@
   "prefs.player.tc": "Burnt-in timecode",
   "prefs.player.scopes": "Scopes shown",
   "prefs.player.marker": "Colour of new markers",
+  "prefs.player.reportAuto": "Open the report entry on each new take",
+  "prefs.player.reportAuto.note": "When a project is open, the entry window (R key) opens as soon as another take is loaded in the PLAYER.",
   "prefs.transcode.note": "Destination offered by TRANSCODE at each opening.",
   "prefs.transcode.next": "Next to each source file",
   "prefs.transcode.dest": "Output folder",

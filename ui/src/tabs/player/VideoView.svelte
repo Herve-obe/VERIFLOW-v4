@@ -150,8 +150,10 @@
       await closeSound();
       clip = await videoOpen(p, slot);
       timing.open = performance.now() - loadAt;
+      const changed = clipPath !== p;
       clipPath = p;
       markIn = markOut = null;
+      if (changed && logs && prefs.player.reportAuto && app.project) reportOpen = true;
       if (lut) await videoLut(lut, slot).catch((e) => ((app.status = String(e)), (lut = null)));
       // Première image d'abord : le son (FFmpeg et carte son) s'ouvre ensuite,
       // sans lui disputer le processeur ni le disque.

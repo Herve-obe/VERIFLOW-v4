@@ -11,6 +11,7 @@
   import { output, currentOutput } from "../../stores/output.svelte";
   import { AUDIO_LOG_FPS, markerCss, type Marker } from "../../lib/logs";
   import { app } from "../../stores/app.svelte";
+  import { prefs } from "../../stores/prefs.svelte";
   import { t } from "../../i18n/index.svelte";
   import { resolvePlayerAction, PLAYER_ACTION_EVENT } from "../../shortcuts";
   import type { PlayerAction } from "../../shortcuts/defaults";
@@ -121,7 +122,9 @@
     try {
       await close();
       session = await audioOpen(paths, slot, currentOutput());
+      const changed = loaded[0] !== paths[0];
       loaded = paths;
+      if (changed && logs && prefs.player.reportAuto && app.project) reportOpen = true;
       markIn = markOut = null;
       strips = session.session.tracks.map((tr) => ({
         name: tr.name,

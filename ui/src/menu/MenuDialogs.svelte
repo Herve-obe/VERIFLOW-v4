@@ -162,6 +162,11 @@
               {/each}
             </div>
           </div>
+          <label class="row">
+            <span>{t("prefs.player.reportAuto")}</span>
+            <input type="checkbox" bind:checked={prefs.player.reportAuto} />
+          </label>
+          <p class="note">{t("prefs.player.reportAuto.note")}</p>
         {:else if prefTab === "transcode"}
           <h3>{t("prefs.transcode")}</h3>
           <p class="note">{t("prefs.transcode.note")}</p>
