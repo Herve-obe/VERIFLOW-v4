@@ -11,6 +11,7 @@ mod menu;
 mod monitor;
 mod offload;
 mod player;
+mod quick;
 mod report;
 mod subtitles;
 mod sync;
@@ -35,6 +36,7 @@ pub fn run() {
         .manage(player::PlayerState::default())
         .manage(media::MediaState::default())
         .manage(sync::SyncState::default())
+        .manage(quick::QuickState::default())
         .setup(|app| {
             use tauri::Manager;
             app.manage(offload::OffloadState::new(app.handle().clone()));
@@ -47,12 +49,14 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.set_decorations(false);
             }
-            // Fermer la fenêtre principale ferme aussi la sortie moniteur.
+            // Fermer la fenêtre principale ferme aussi la sortie moniteur et
+            // le lecteur rapide.
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 main.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
                         let _ = monitor::monitor_close(handle.clone());
+                        quick::close(&handle);
                     }
                 });
             }
@@ -126,6 +130,8 @@ pub fn run() {
             monitor::monitor_screens,
             monitor::monitor_open,
             monitor::monitor_close,
+            quick::quick_open,
+            quick::quick_pending,
             subtitles::subtitles_load,
             subtitles::subtitles_save,
             subtitles::subtitles_check,

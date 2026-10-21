@@ -76,11 +76,12 @@ pub async fn monitor_open(index: usize, app: AppHandle) -> CmdResult<()> {
                 .visible(false)
                 .build()
                 .inspect(|w| {
-                    // Fermée (Échap, ou par le système) : la fenêtre principale est prévenue.
+                    // Fermée (Échap, ou par le système) : les lecteurs (fenêtre
+                    // principale, lecteur rapide) sont prévenus.
                     let handle = app.clone();
                     w.on_window_event(move |e| {
                         if let WindowEvent::Destroyed = e {
-                            let _ = handle.emit_to("main", "monitor-closed", ());
+                            let _ = handle.emit("monitor-closed", ());
                         }
                     });
                 })

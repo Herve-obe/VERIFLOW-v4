@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions de la fenêtre principale et de la sortie moniteur",
-  "windows": ["main", "monitor"],
+  "description": "Permissions de la fenêtre principale, de la sortie moniteur et du lecteur rapide",
+  "windows": ["main", "monitor", "quick"],
   "permissions": [
     "core:default",
     "dialog:default",

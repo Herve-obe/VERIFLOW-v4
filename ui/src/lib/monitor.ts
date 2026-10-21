@@ -1,6 +1,6 @@
 // Sortie moniteur (voir src-tauri/src/monitor.rs).
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Slot } from "./player";
 
 export interface Screen {
@@ -24,6 +24,12 @@ export const sendFrame = (f: MonitorFrame) => emitTo("monitor", "monitor-frame",
 export const onFrame = (cb: (f: MonitorFrame) => void): Promise<UnlistenFn> =>
   listen<MonitorFrame>("monitor-frame", (e) => cb(e.payload));
 export const onClosed = (cb: () => void): Promise<UnlistenFn> => listen("monitor-closed", () => cb());
-/** Fenêtre moniteur chargée et à l'écoute : elle demande l'image en cours. */
-export const sendReady = () => emitTo("main", "monitor-ready").catch(() => {});
+/** Fenêtre moniteur chargée et à l'écoute : elle demande l'image en cours
+ *  (au lecteur qui l'alimente, dans la fenêtre principale ou le lecteur rapide). */
+export const sendReady = () => emit("monitor-ready").catch(() => {});
 export const onReady = (cb: () => void): Promise<UnlistenFn> => listen("monitor-ready", () => cb());
+/** Un lecteur prend la sortie moniteur : les autres cessent de l'alimenter
+ *  (un seul moniteur, plusieurs lecteurs possibles). */
+export const claimMonitor = (owner: string) => emit("monitor-claim", owner).catch(() => {});
+export const onClaim = (cb: (owner: string) => void): Promise<UnlistenFn> =>
+  listen<string>("monitor-claim", (e) => cb(e.payload));
