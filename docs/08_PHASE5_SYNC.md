@@ -28,7 +28,7 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 3. **Recherche sans timecode** (option) : corrélation du son témoin sur toute la durée de chaque son, à 2 kHz, puis affinage.
 4. **Confiance** : 1 moins le rapport du second pic au premier. En dessous de 25 %, le résultat est écarté ou signalé.
 5. **Dérive** (option) : décalage mesuré au début et à la fin du passage commun (extraits de 4 s, passage commun d'au moins 60 s). La dérive est donnée en images sur la durée du plan ; alerte au-delà d'une image.
-6. **Correction de la dérive** (re-wrap, case cochée par défaut ; décision d'Hervé du 11/10/2026, avancée de V2 en V1) : le son de l'enregistreur est rééchantillonné (comme un pull-up ou pull-down) pour suivre l'horloge de la caméra, et reste calé au milieu du plan. FCPXML et OTIO ne portent que le décalage.
+6. **Correction de la dérive** (re-wrap, case cochée par défaut ; décision d'Hervé du 11/10/2026, avancée de V2 en V1) : le son de l'enregistreur est rééchantillonné (comme un pull-up ou pull-down) pour suivre l'horloge de la caméra, et reste calé au milieu du plan.
 
 ### Interface
 
@@ -42,14 +42,12 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 | Export | Détail |
 |---|---|
 | Re-wrap | Nouveau fichier MOV ou MXF : image copiée sans réencodage, son de l'enregistreur calé (PCM 24 bits ; en MXF une piste mono par canal ; en MOV une piste polyphonique, ou une piste mono par canal avec l'option « Une piste mono par canal »), son caméra conservé en pistes supplémentaires (option), noms de pistes, timecode d'origine. À côté de chaque vidéo ou dans un dossier, suffixe `_sync` par défaut, jamais d'écrasement de l'original |
-| FCPXML 1.10 | Final Cut Pro et DaVinci Resolve : chaque plan avec son son attaché, calé à l'échantillon ; une seule ressource par fichier son |
-| OTIO | DaVinci Resolve, Premiere (via plugin), Avid : pistes V1 et A1 |
 
 La case « Paires validées seulement » limite l'export aux paires cochées (décochée par défaut).
 
 ## Choix techniques
 
-- Cœur `core/src/sync/` : `mod.rs` (lecture de l'heure, appariement, affinage, dérive), `correlate.rs` (décodage mono par FFmpeg avec passe-haut à 120 Hz, GCC-PHAT avec fenêtre de Hann, enveloppes), `export.rs` (re-wrap, FCPXML, OTIO).
+- Cœur `core/src/sync/` : `mod.rs` (lecture de l'heure, appariement, affinage, dérive), `correlate.rs` (décodage mono par FFmpeg avec passe-haut à 120 Hz, GCC-PHAT avec fenêtre de Hann, enveloppes), `export.rs` (re-wrap).
 - FFT : crate `realfft` 3.5 (MIT ou Apache 2.0, compatible GPLv3).
 - Convention : `décalage = début du son − début de la vidéo` (positif : le son commence après l'image).
 - Pont Tauri `src-tauri/src/sync.rs` : analyse et re-wrap annulables, avancement par événements.
@@ -65,14 +63,12 @@ La case « Paires validées seulement » limite l'export aux paires cochées (d�
 - re-wrap MOV et MXF : pistes, durée, timecode ;
 - méthodes : « timecode seul » garde le son à la même heure sans affinage, « forme d'onde seule » trouve le vrai son malgré un leurre à la même heure ;
 - MOV avec une piste mono par canal : enregistreur stéréo en 2 pistes mono, plus le son caméra ;
-- FCPXML et OTIO : temps attendus.
 
 ### Essai dans l'application (Linux, Xvfb)
 Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF couvrant les deux, horloge fausse de 0,3 s :
 - A001C001 : timecode puis forme d'onde, −10,000 s, confiance 98 %, remarque « timecode corrigé de -0,300 s par la forme d'onde » ;
 - A001C002 : trouvé par la forme d'onde à −50,000 s, confiance 98 % ;
 - re-wrap MOV des deux plans : décalage résiduel mesuré entre la piste de l'enregistreur et la piste caméra des fichiers produits : 0 échantillon ;
-- FCPXML : son attaché à 36 000,3 s dans le BWF pour le premier plan, soit 10 s après son début (valeur attendue).
 
 Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même heure, le vrai son (stéréo) daté de 08:00:00 :
 - méthode Automatique : leurre choisi, confiance 11 % signalée en orange, remarque « forme d'onde peu ressemblante » ;
@@ -80,8 +76,7 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 - re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
 ## Limites connues
-- Correction de la dérive : au re-wrap seulement, pas dans les timelines FCPXML et OTIO.
-- AAF : V2 (charte).
+- Timelines FCPXML, OTIO et AAF : retirées le 19/10/2026 (décision d'Hervé, charte §7.5). Le code est conservé sur les branches `archive/sync-timelines` (FCPXML, OTIO) et `claude/sync-aaf` (AAF), hors de la version actuelle.
 - Les remarques produites par le cœur (« timecode corrigé de … ») sont en français quelle que soit la langue de l'interface.
 - Son témoin très faible ou absent : seule la méthode par timecode est possible (message dans le détail de la paire).
 - Plusieurs plans dans un même son : bien gérés ; un plan à cheval sur deux sons : associé au son qui le recouvre le plus.
@@ -92,5 +87,4 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 3. LTC enregistré sur une piste caméra (Tentacle Sync, Deity TC-1) : badge LTC, canal exclu des fichiers produits.
 4. Rushes en 23,976 et 29,97 DF : timecodes affichés et décalages.
 5. Re-wrap MOV (polyphonique et une piste mono par canal) et MXF : import dans DaVinci Resolve, Premiere et Avid ; pistes nommées, timecode, son caméra en plus.
-6. FCPXML dans Final Cut Pro et Resolve, OTIO dans Resolve : son attaché et calé.
-7. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute, puis re-wrap avec correction : calage au début et à la fin.
+6. Long plan (plus de 10 min) : alerte de dérive cohérente avec l'écoute, puis re-wrap avec correction : calage au début et à la fin.
