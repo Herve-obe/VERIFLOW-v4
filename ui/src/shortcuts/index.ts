@@ -1,7 +1,9 @@
 // Gestion centralisée du clavier : associe les touches aux actions.
 import { DEFAULT_SHORTCUTS, PLAYER_SHORTCUTS, type PlayerAction, type Shortcut, type ShortcutAction } from "./defaults";
+import { effectiveShortcut } from "../stores/prefs.svelte";
 
-function matches(e: KeyboardEvent, s: Shortcut): boolean {
+export function matches(e: KeyboardEvent, s: Shortcut | undefined): boolean {
+  if (!s) return false;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   return (
     key === s.key &&
@@ -23,16 +25,21 @@ export function isTyping(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
 
+/** Raccourci en vigueur (préférences, sinon défaut) d'une action d'onglet ou de mode. */
+export const appShortcut = (a: ShortcutAction) => effectiveShortcut(a, DEFAULT_SHORTCUTS[a]);
+/** Raccourci en vigueur d'une action de lecture. */
+export const playerShortcut = (a: PlayerAction) => effectiveShortcut(a, PLAYER_SHORTCUTS[a]);
+
 /** Retourne l'action correspondant à l'événement, ou null. */
 export function resolveAction(e: KeyboardEvent): ShortcutAction | null {
   // Ordre important : la version forcée (Ctrl+Tab) est testée avant Tab seul.
-  if (matches(e, DEFAULT_SHORTCUTS["mode.toggle.force"])) return "mode.toggle.force";
-  if (matches(e, DEFAULT_SHORTCUTS["mode.toggle"])) {
+  if (matches(e, appShortcut("mode.toggle.force"))) return "mode.toggle.force";
+  if (matches(e, appShortcut("mode.toggle"))) {
     return isTyping(e.target) ? null : "mode.toggle";
   }
-  for (const [action, shortcut] of Object.entries(DEFAULT_SHORTCUTS)) {
+  for (const action of Object.keys(DEFAULT_SHORTCUTS) as ShortcutAction[]) {
     if (action.startsWith("mode.")) continue;
-    if (matches(e, shortcut)) return action as ShortcutAction;
+    if (matches(e, appShortcut(action))) return action;
   }
   return null;
 }
@@ -40,8 +47,8 @@ export function resolveAction(e: KeyboardEvent): ShortcutAction | null {
 /** Action de lecture correspondant à l'événement (hors saisie de texte), ou null. */
 export function resolvePlayerAction(e: KeyboardEvent): PlayerAction | null {
   if (isTyping(e.target)) return null;
-  for (const [action, shortcut] of Object.entries(PLAYER_SHORTCUTS)) {
-    if (matches(e, shortcut)) return action as PlayerAction;
+  for (const action of Object.keys(PLAYER_SHORTCUTS) as PlayerAction[]) {
+    if (matches(e, playerShortcut(action))) return action;
   }
   return null;
 }

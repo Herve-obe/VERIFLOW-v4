@@ -8,6 +8,11 @@
   import { appInfo, type AppInfo } from "../lib/api";
   import { clearAllData, resetSession, setStartupMode, startupMode, type StartupMode } from "../lib/appdata";
   import { ask } from "../stores/confirm.svelte";
+  import { prefs } from "../stores/prefs.svelte";
+  import { ALGORITHMS, type HashAlgo } from "../lib/offload";
+  import { MARKER_COLORS, markerCss } from "../lib/logs";
+  import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+  import ShortcutsEditor from "./ShortcutsEditor.svelte";
 
   let info = $state<AppInfo | null>(null);
   onMount(() => {
@@ -16,11 +21,22 @@
 
   const close = () => (menuState.dialog = null);
 
-  // Préférences : une section par onglet (d'autres viendront : raccourcis
-  // modifiables, OFFLOAD, PLAYER, TRANSCODE).
-  const PREF_TABS = ["general"] as const;
+  // Préférences : une section par onglet.
+  const PREF_TABS = ["general", "shortcuts", "offload", "player", "transcode"] as const;
   type PrefTab = (typeof PREF_TABS)[number];
   let prefTab = $state<PrefTab>("general");
+
+  function toggleAlgo(id: HashAlgo) {
+    const a = prefs.offload.algorithms;
+    prefs.offload.algorithms = a.includes(id) ? a.filter((x) => x !== id) : [...a, id];
+  }
+  async function chooseTranscodeDest() {
+    const r = await pickFolder({ directory: true, multiple: false });
+    if (typeof r === "string") {
+      prefs.transcode.dest = r;
+      prefs.transcode.nextToSource = false;
+    }
+  }
 
   // Données de l'application sur ce poste.
   let startup = $state<StartupMode>(startupMode());
@@ -94,7 +110,71 @@
             <button class="danger" onclick={() => wipe(true)}>{t("prefs.data.clear")}</button>
           </div>
           <p class="note">{t("prefs.data.note")}</p>
-          <p class="note">{t("prefs.more")}</p>
+        {:else if prefTab === "shortcuts"}
+          <h3>{t("prefs.shortcuts")}</h3>
+          <ShortcutsEditor />
+        {:else if prefTab === "offload"}
+          <h3>{t("prefs.offload")}</h3>
+          <p class="note">{t("prefs.defaults.note")}</p>
+          <label class="row">
+            <span>{t("prefs.offload.template")}</span>
+            <input class="text mono" bind:value={prefs.offload.template} spellcheck="false" />
+          </label>
+          <label class="row">
+            <span>{t("prefs.offload.operator")}</span>
+            <input class="text" bind:value={prefs.offload.operator} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.offload.algorithms")}</span>
+            <div class="checks">
+              {#each ALGORITHMS as a (a.id)}
+                <label><input type="checkbox" checked={prefs.offload.algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} /> {a.label}</label>
+              {/each}
+            </div>
+          </div>
+          <label class="row">
+            <span>{t("prefs.offload.eject")}</span>
+            <input type="checkbox" bind:checked={prefs.offload.eject} />
+          </label>
+        {:else if prefTab === "player"}
+          <h3>{t("prefs.player")}</h3>
+          <p class="note">{t("prefs.player.note")}</p>
+          <label class="row">
+            <span>{t("prefs.player.tc")}</span>
+            <input type="checkbox" bind:checked={prefs.player.tcOverlay} />
+          </label>
+          <label class="row">
+            <span>{t("prefs.player.scopes")}</span>
+            <input type="checkbox" bind:checked={prefs.player.scopes} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.player.marker")}</span>
+            <div class="colors">
+              {#each MARKER_COLORS as c (c)}
+                <button
+                  class="dot"
+                  class:on={prefs.player.markerColor === c}
+                  style:background={markerCss(c)}
+                  onclick={() => (prefs.player.markerColor = c)}
+                  aria-label={c}
+                  title={c}
+                ></button>
+              {/each}
+            </div>
+          </div>
+        {:else if prefTab === "transcode"}
+          <h3>{t("prefs.transcode")}</h3>
+          <p class="note">{t("prefs.transcode.note")}</p>
+          <label class="row">
+            <span>{t("prefs.transcode.next")}</span>
+            <input type="checkbox" bind:checked={prefs.transcode.nextToSource} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.transcode.dest")}</span>
+            <span class="path" title={prefs.transcode.dest}>{prefs.transcode.dest || t("transcode.dest.none")}</span>
+            <button class="ghost" onclick={chooseTranscodeDest}>{t("offload.browse")}</button>
+            {#if prefs.transcode.dest}<button class="ghost" onclick={() => (prefs.transcode.dest = "")}>×</button>{/if}
+          </div>
         {/if}
       </section>
     </div>
@@ -199,6 +279,53 @@
     gap: var(--vf-space-4);
     padding: var(--vf-space-2) 0;
     font-size: var(--vf-text-sm);
+  }
+  .text {
+    width: 260px;
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-2);
+    font-size: var(--vf-text-sm);
+  }
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vf-space-1) var(--vf-space-3);
+    justify-content: flex-end;
+    max-width: 300px;
+  }
+  .checks label {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-1);
+  }
+  .colors {
+    display: flex;
+    gap: var(--vf-space-1);
+  }
+  .colors .dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--vf-border);
+    cursor: pointer;
+    padding: 0;
+  }
+  .colors .dot.on {
+    border-color: var(--vf-text);
+  }
+  .path {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--vf-font-mono);
+    font-size: var(--vf-text-xs);
+    color: var(--vf-text-muted);
   }
   h3.spaced {
     margin-top: var(--vf-space-6);

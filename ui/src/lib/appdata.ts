@@ -18,6 +18,7 @@ const KEEP = new Set([
   "veriflow.explorer.favorites",
   "veriflow.transcode.user",
   "veriflow.audio.output",
+  "veriflow.prefs",
 ]);
 
 function keys(): string[] {

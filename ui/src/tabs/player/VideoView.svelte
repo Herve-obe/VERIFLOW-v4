@@ -1,5 +1,6 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
+  import { prefs } from "../../stores/prefs.svelte";
   import { onDestroy, onMount, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
@@ -65,7 +66,8 @@
   // Saisie du rapport (touche R).
   let reportOpen = $state(false);
   let lut = $state<string | null>(null);
-  let tcOverlay = $state(readPref(PREF_TC) === "1");
+  // Sans choix fait dans le lecteur : Préférences > PLAYER.
+  let tcOverlay = $state((readPref(PREF_TC) ?? (prefs.player.tcOverlay ? "1" : "0")) === "1");
   // Sortie moniteur : écran choisi (-1 : fermée).
   let monitorScreen = $state(-1);
   let screenList = $state<Screen[]>([]);
@@ -73,7 +75,7 @@
   // La fenêtre moniteur, une fois chargée, reçoit l'image en cours.
   const stopReady = onReady(() => sendFrame({ slot, index: shown }));
   loadScreens();
-  let scopes = $state(readPref(PREF_SCOPES) === "1");
+  let scopes = $state((readPref(PREF_SCOPES) ?? (prefs.player.scopes ? "1" : "0")) === "1");
 
   // Son de la vidéo : ouvert dans le moteur audio, il sert d'horloge en lecture normale.
   let avReady = $state(false);
