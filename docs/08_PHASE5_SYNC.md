@@ -77,7 +77,7 @@ Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même h
 
 ## Limites connues
 - Timelines FCPXML, OTIO et AAF : retirées le 19/10/2026 (décision d'Hervé, charte §7.5). Le code est conservé sur les branches `archive/sync-timelines` (FCPXML, OTIO) et `claude/sync-aaf` (AAF), hors de la version actuelle.
-- Les remarques produites par le cœur (« timecode corrigé de … ») sont en français quelle que soit la langue de l'interface.
+- Remarques des paires traduites dans la langue de l'interface depuis le 20/10/2026 (clé `note_key` et valeur `note_value` fournies par le cœur). Restent en français les messages d'erreur des outils (FFmpeg, lecture de fichiers).
 - Son témoin très faible ou absent : seule la méthode par timecode est possible (message dans le détail de la paire).
 - Plusieurs plans dans un même son : bien gérés ; un plan à cheval sur deux sons : associé au son qui le recouvre le plus.
 

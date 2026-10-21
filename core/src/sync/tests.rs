@@ -155,6 +155,13 @@ fn timecode_pairs_and_waveform_corrects_a_wrong_timecode() {
         "{:?}",
         p.note
     );
+    // Remarque traduisible dans l'interface : clé et décalage corrigé.
+    assert_eq!(p.note_key.as_deref(), Some("tc_corrected"));
+    assert!(
+        p.note_value.is_some_and(|v| v.abs() > 0.1),
+        "{:?}",
+        p.note_value
+    );
     assert_eq!(r.videos[0].timecode.as_deref(), Some("10:00:00:00"));
 }
 

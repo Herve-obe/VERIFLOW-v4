@@ -1,4 +1,5 @@
 // Accès aux commandes SYNC (voir src-tauri/src/sync.rs).
+import { i18n, t } from "../i18n/index.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { framesToTc, supportsDropFrame } from "./timecode";
@@ -40,6 +41,9 @@ export interface Pair {
   drift_frames: number | null;
   validated: boolean;
   note: string | null;
+  /** Remarque à traduire (voir noteText). */
+  note_key?: string | null;
+  note_value?: number | null;
 }
 
 export interface Analysis {
@@ -119,3 +123,13 @@ export const waveforms = (video: SyncFile, audio: SyncFile, offset: number, at: 
 export const rewrap = (items: ExportItem[], options: RewrapOptions) => invoke<ExportResult[]>("sync_rewrap", { items, options });
 export const onProgress = (cb: (e: SyncEvent) => void): Promise<UnlistenFn> => listen<SyncEvent>("sync", (e) => cb(e.payload));
 export const onExport = (cb: (e: ExportProgress) => void): Promise<UnlistenFn> => listen<ExportProgress>("sync-export", (e) => cb(e.payload));
+
+/** Remarque d'une paire dans la langue de l'interface (le texte du cœur,
+ *  en français, sert pour les erreurs, qui n'ont pas de clé). */
+export function noteText(p: { note: string | null; note_key?: string | null; note_value?: number | null }): string {
+  if (!p.note_key) return p.note ?? "";
+  const text = t(`sync.note.${p.note_key}`);
+  if (p.note_value === null || p.note_value === undefined) return text;
+  const v = p.note_value.toLocaleString(i18n.lang, { minimumFractionDigits: 3, maximumFractionDigits: 3, signDisplay: "always" });
+  return text.replace("{s}", v);
+}

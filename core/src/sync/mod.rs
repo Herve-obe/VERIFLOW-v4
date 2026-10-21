@@ -94,7 +94,24 @@ pub struct Pair {
     /// Dérive exprimée en images de la vidéo.
     pub drift_frames: Option<f64>,
     pub validated: bool,
+    /// Remarque en français (journaux, tests) ; l'interface affiche plutôt
+    /// `note_key`, traduite dans la langue choisie.
     pub note: Option<String>,
+    /// Remarque à traduire : clé (« no_match », « tc_corrected »...) et
+    /// valeur éventuelle (secondes).
+    #[serde(default)]
+    pub note_key: Option<String>,
+    #[serde(default)]
+    pub note_value: Option<f64>,
+}
+
+impl Pair {
+    /// Remarque traduisible (clé et valeur) et son texte en français.
+    fn set_note(&mut self, key: &str, value: Option<f64>, french: String) {
+        self.note = Some(french);
+        self.note_key = Some(key.to_owned());
+        self.note_value = value;
+    }
 }
 
 /// Méthode d'appariement choisie pour le lot.
@@ -307,6 +324,8 @@ pub fn match_by_time(videos: &[SyncFile], audios: &[SyncFile]) -> Vec<Pair> {
                 drift_frames: None,
                 validated: false,
                 note: None,
+                note_key: None,
+                note_value: None,
             }
         })
         .collect()
@@ -456,20 +475,24 @@ pub fn analyze(
                     pair.refined = true;
                     pair.confidence = Some(conf);
                 }
-                Ok(None) => pair.note = Some("aucun son correspondant".into()),
+                Ok(None) => pair.set_note("no_match", None, "aucun son correspondant".into()),
                 Err(Error::Cancelled) => return Err(Error::Cancelled),
                 Err(e) => pair.note = Some(e.to_string()),
             }
         }
         let Some(ai) = pair.audio else {
             if pair.note.is_none() {
-                pair.note = Some(if opts.mode == Mode::Waveform {
-                    "pas de son témoin".into()
+                if opts.mode == Mode::Waveform {
+                    pair.set_note("no_guide", None, "pas de son témoin".into());
                 } else if video.start.is_none() {
-                    "pas de timecode ni de son témoin".into()
+                    pair.set_note(
+                        "no_tc_no_guide",
+                        None,
+                        "pas de timecode ni de son témoin".into(),
+                    );
                 } else {
-                    "aucun son à la même heure".into()
-                });
+                    pair.set_note("no_same_time", None, "aucun son à la même heure".into());
+                }
             }
             continue;
         };
@@ -508,15 +531,21 @@ pub fn analyze(
                     if moved.abs() > 1.0 / video.rate.map(|r| r.as_f64()).unwrap_or(25.0)
                         && pair.method != Method::Waveform
                     {
-                        pair.note = Some(format!(
-                            "timecode corrigé de {} s par la forme d'onde",
-                            format!("{moved:+.3}").replace('.', ",")
-                        ));
+                        pair.set_note(
+                            "tc_corrected",
+                            Some(moved),
+                            format!(
+                                "timecode corrigé de {} s par la forme d'onde",
+                                format!("{moved:+.3}").replace('.', ",")
+                            ),
+                        );
                     }
                 }
                 Ok((_, conf)) => {
                     pair.confidence = Some(conf);
-                    pair.note = Some(
+                    pair.set_note(
+                        "weak_waveform",
+                        None,
                         "forme d'onde peu ressemblante : décalage du timecode conservé".into(),
                     );
                 }
