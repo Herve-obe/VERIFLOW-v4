@@ -43,6 +43,8 @@ tempfile = "3"
 # (charte §6.3), est téléchargé par asio-sys à la compilation ; LLVM requis.
 [target.'cfg(windows)'.dependencies]
 cpal = { version = "0.18", features = ["asio"] }
+# Bus des disques (USB, FireWire, cartes) pour l'éjection des disques externes.
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_RestartManager"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
