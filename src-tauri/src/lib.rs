@@ -3,6 +3,7 @@
 
 mod commands;
 mod explorer;
+mod legal;
 mod logs;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -132,6 +133,8 @@ pub fn run() {
             monitor::monitor_close,
             quick::quick_open,
             quick::quick_pending,
+            legal::legal_text,
+            legal::ffmpeg_info,
             subtitles::subtitles_load,
             subtitles::subtitles_save,
             subtitles::subtitles_check,

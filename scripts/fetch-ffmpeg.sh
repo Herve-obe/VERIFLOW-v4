@@ -16,48 +16,23 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$DEST"
 
-# Sources épinglées (version + empreinte) : une compilation donne toujours le même FFmpeg.
-WIN_URL="https://github.com/GyanD/codexffmpeg/releases/download/${VERSION}/ffmpeg-${VERSION}-essentials_build.zip"
-WIN_SHA="60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
-MR="https://ffmpeg.martin-riedl.de/download"
-# macOS Intel : builds statiques GPL d'evermeet.cx, compilés pour macOS 10.13
-# et plus (ceux de martin-riedl.de exigent macOS 12). Permet Catalina (10.15).
-EV="https://evermeet.cx/ffmpeg"
-# Copie de secours des mêmes fichiers evermeet, conservée dans le dépôt
-# (branche de stockage vendor/ffmpeg-evermeet, jamais fusionnée) : le miroir
-# d'evermeet est parfois injoignable. Même empreinte exigée : la copie ne
-# peut pas différer de l'original.
-EV_MIRROR="https://raw.githubusercontent.com/Herve-obe/VERIFLOW-v4/vendor/ffmpeg-evermeet"
-# Version minimale de macOS acceptée pour les binaires Intel embarqués.
-MACOS_INTEL_MIN="10.15"
-# Linux : builds statiques GPL de BtbN (variante linux64-gpl, branche 9.0),
-# sans --enable-nonfree. Ceux de martin-riedl.de sont compilés avec DeckLink
-# (--enable-nonfree), donc non redistribuables. Autobuild de fin de mois :
-# BtbN conserve ceux-là durablement.
+# Sources épinglées (version + empreinte) : une compilation donne toujours le
+# même FFmpeg, dont on connaît exactement le contenu et les sources (GPLv3 §6).
+# Windows et Linux : builds statiques GPL de BtbN (variantes win64-gpl et
+# linux64-gpl, branche 9.0), sans --enable-nonfree, au même autobuild de fin
+# de mois (BtbN conserve ceux-là durablement). Leurs scripts fixent le commit
+# de chaque bibliothèque : l'archive des sources des Releases les reprend.
 BTBN="https://github.com/BtbN/FFmpeg-Builds/releases/download"
 BTBN_TAG="autobuild-2026-09-30-13-08"
-BTBN_ASSET="ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
-BTBN_SHA="68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269"
-
-# Compatible bash 3.2 (macOS) : pas de tableaux associatifs.
-mr_path() {
-  case "$1" in
-    macos-arm64) echo "macos/arm64/1789931890_${VERSION}" ;;
-  esac
-}
-mr_sha() {
-  case "$1" in
-    macos-arm64-ffmpeg) echo "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924" ;;
-    macos-arm64-ffprobe) echo "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6" ;;
-  esac
-}
-
-ev_sha() {
-  case "$1" in
-    ffmpeg) echo "4acc0be580f9b2788029eb7bd4d645ff87968911b0a62aeeb3940d42d54558d5" ;;
-    ffprobe) echo "24a9c968cd4da72d99c7245e914b921815835eb6dff01d99868031aebaf1d439" ;;
-  esac
-}
+BTBN_LINUX="ffmpeg-n9.0.2-17-g2a571b6068-linux64-gpl-9.0.tar.xz"
+BTBN_LINUX_SHA="68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269"
+BTBN_WIN="ffmpeg-n9.0.2-17-g2a571b6068-win64-gpl-9.0.zip"
+BTBN_WIN_SHA="a0e45723c72141975f51d8666302e614711745f3102b704ca3f82c897a58d278"
+# macOS : FFmpeg compilé par VERIFLOW (scripts/build-ffmpeg-macos.sh, job
+# « ffmpeg-macos » du build), une fois par architecture ; dossier passé dans
+# FFMPEG_MACOS_DIR, avec un sous-dossier arm64 et un sous-dossier x86_64.
+# Version minimale de macOS acceptée pour les binaires Intel embarqués.
+MACOS_INTEL_MIN="10.15"
 
 sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
@@ -88,54 +63,27 @@ download() {
   fi
 }
 
-# Récupère un outil depuis martin-riedl.de : fetch_mr <plateforme> <outil> <destination>
-fetch_mr() {
-  download "$MR/$(mr_path "$1")/$2.zip" "$WORK/$1-$2.zip" "$(mr_sha "$1-$2")"
-  unzip -o -q "$WORK/$1-$2.zip" -d "$WORK/$1-$2"
-  cp "$WORK/$1-$2/$2" "$3"
-  chmod +x "$3"
-}
-
-# Récupère ffmpeg et ffprobe depuis BtbN (Linux) : fetch_btbn <destination sans suffixe>
+# Récupère ffmpeg et ffprobe depuis BtbN : fetch_btbn <fichier> <empreinte> <destination sans suffixe> [.exe]
 fetch_btbn() {
-  local asset="$BTBN_ASSET"
-  if [ -z "$asset" ]; then
-    # Nom pas encore épinglé : lu dans la liste des fichiers de l'autobuild.
-    asset="$(curl -fsSL --retry 4 "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/$BTBN_TAG" |
-      grep -o '"name": *"ffmpeg-n9\.0[^"]*-linux64-gpl-9\.0\.tar\.xz"' | head -1 | sed 's/.*"\(ffmpeg-[^"]*\)"/\1/')"
-    echo "AVERTISSEMENT : fichier à épingler (BTBN_ASSET) : $asset" >&2
-    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=Fichier à épingler::$asset"
-  fi
-  download "$BTBN/$BTBN_TAG/$asset" "$WORK/btbn.tar.xz" "$BTBN_SHA"
-  tar -xJf "$WORK/btbn.tar.xz" -C "$WORK"
+  local asset="$1" dir="${1%.tar.xz}"
+  dir="${dir%.zip}"
+  download "$BTBN/$BTBN_TAG/$asset" "$WORK/$asset" "$2"
+  case "$asset" in
+    *.zip) unzip -o -q "$WORK/$asset" -d "$WORK" ;;
+    *) tar -xJf "$WORK/$asset" -C "$WORK" ;;
+  esac
   for tool in ffmpeg ffprobe; do
-    cp "$WORK/${asset%.tar.xz}/bin/$tool" "$1-$tool"
-    chmod +x "$1-$tool"
+    cp "$WORK/$dir/bin/$tool${4:-}" "$3-$tool${4:-}"
+    chmod +x "$3-$tool${4:-}"
   done
 }
 
-# Récupère un outil depuis evermeet.cx (macOS Intel) : fetch_ev <outil> <destination>
-fetch_ev() {
-  local name="$1-${VERSION}.zip"
-  if curl -fsSL --retry 2 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$EV/$name"; then
-    echo "Téléchargé depuis evermeet.cx : $name"
-  else
-    echo "evermeet.cx injoignable pour $name, copie de secours : $EV_MIRROR/$name" >&2
-    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning title=FFmpeg macOS Intel::evermeet.cx injoignable, copie de secours utilisée pour $name"
-  fi
-  if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
-    curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors --max-time 300 -o "$WORK/ev-$1.zip" "$EV_MIRROR/$name" || rm -f "$WORK/ev-$1.zip"
-  fi
-  # Vérification finale (empreinte), message clair en cas d'échec.
-  if [ ! -s "$WORK/ev-$1.zip" ] || [ "$(sha256 "$WORK/ev-$1.zip")" != "$(ev_sha "$1")" ]; then
-    echo "ERREUR : $name introuvable ou altéré (evermeet.cx et copie de secours du dépôt)" >&2
-    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Téléchargement FFmpeg::$name introuvable ou altéré (evermeet.cx et copie de secours du dépôt)"
-    exit 1
-  fi
-  unzip -o -q "$WORK/ev-$1.zip" -d "$WORK/ev-$1"
-  cp "$WORK/ev-$1/$1" "$2"
-  chmod +x "$2"
-  check_macos_min "$2" "$MACOS_INTEL_MIN"
+# FFmpeg macOS compilé par VERIFLOW : copy_macos <arm64|x86_64> <outil> <destination>
+copy_macos() {
+  local src="${FFMPEG_MACOS_DIR:?FFMPEG_MACOS_DIR : dossier du FFmpeg macOS compilé par le job ffmpeg-macos}/$1/$2"
+  [ -s "$src" ] || { echo "ERREUR : $src absent" >&2; exit 1; }
+  cp "$src" "$3"
+  chmod +x "$3"
 }
 
 # Version de macOS exigée par un binaire (LC_BUILD_VERSION ou LC_VERSION_MIN_MACOSX).
@@ -160,29 +108,30 @@ check_macos_min() {
 
 case "$TARGET" in
   x86_64-pc-windows-msvc)
-    download "$WIN_URL" "$WORK/win.zip" "$WIN_SHA"
-    unzip -o -q "$WORK/win.zip" -d "$WORK/win"
-    for tool in ffmpeg ffprobe; do
-      cp "$WORK/win/ffmpeg-${VERSION}-essentials_build/bin/$tool.exe" "$DEST/veriflow-$tool-$TARGET.exe"
-    done
+    fetch_btbn "$BTBN_WIN" "$BTBN_WIN_SHA" "$WORK/veriflow" .exe
+    for tool in ffmpeg ffprobe; do mv "$WORK/veriflow-$tool.exe" "$DEST/veriflow-$tool-$TARGET.exe"; done
     ;;
   x86_64-unknown-linux-gnu)
-    fetch_btbn "$DEST/veriflow"
-    for tool in ffmpeg ffprobe; do mv "$DEST/veriflow-$tool" "$DEST/veriflow-$tool-$TARGET"; done
+    fetch_btbn "$BTBN_LINUX" "$BTBN_LINUX_SHA" "$WORK/veriflow"
+    for tool in ffmpeg ffprobe; do mv "$WORK/veriflow-$tool" "$DEST/veriflow-$tool-$TARGET"; done
     ;;
   aarch64-apple-darwin)
-    for tool in ffmpeg ffprobe; do fetch_mr macos-arm64 "$tool" "$DEST/veriflow-$tool-$TARGET"; done
+    for tool in ffmpeg ffprobe; do copy_macos arm64 "$tool" "$DEST/veriflow-$tool-$TARGET"; done
     ;;
   x86_64-apple-darwin)
-    for tool in ffmpeg ffprobe; do fetch_ev "$tool" "$DEST/veriflow-$tool-$TARGET"; done
+    for tool in ffmpeg ffprobe; do
+      copy_macos x86_64 "$tool" "$DEST/veriflow-$tool-$TARGET"
+      check_macos_min "$DEST/veriflow-$tool-$TARGET" "$MACOS_INTEL_MIN"
+    done
     ;;
   universal-apple-darwin)
     # Binaire universel (Apple Silicon + Intel) assemblé avec lipo, puis signé ad hoc.
     # Tauri compile aussi chaque architecture séparément : il lui faut les
     # versions arm64 et x86_64 en plus de la version universelle.
     for tool in ffmpeg ffprobe; do
-      fetch_mr macos-arm64 "$tool" "$DEST/veriflow-$tool-aarch64-apple-darwin"
-      fetch_ev "$tool" "$DEST/veriflow-$tool-x86_64-apple-darwin"
+      copy_macos arm64 "$tool" "$DEST/veriflow-$tool-aarch64-apple-darwin"
+      copy_macos x86_64 "$tool" "$DEST/veriflow-$tool-x86_64-apple-darwin"
+      check_macos_min "$DEST/veriflow-$tool-x86_64-apple-darwin" "$MACOS_INTEL_MIN"
       lipo -create "$DEST/veriflow-$tool-aarch64-apple-darwin" "$DEST/veriflow-$tool-x86_64-apple-darwin" \
         -output "$DEST/veriflow-$tool-$TARGET"
       codesign --force --sign - "$DEST/veriflow-$tool-$TARGET"

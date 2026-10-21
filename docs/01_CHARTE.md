@@ -179,6 +179,12 @@ VERIFLOW-v4/
 - Ce que l'on vend réellement : les **installeurs officiels signés**, les mises à jour, le support, la documentation et la confiance dans une version certifiée (argument fort pour un outil de preuve d'intégrité).
 - Protection possible : le **nom et le logo VERIFLOW** ne sont pas couverts par la GPL. Un dépôt de marque (INPI, payant) interdirait à un tiers de redistribuer une copie sous ce nom. À envisager au lancement commercial.
 - Toute dépendance doit être compatible GPLv3 : MIT, BSD, Apache 2.0, LGPL, GPLv2+, SIL OFL. Interdit : bibliothèques sous licence propriétaire incompatible, "GPLv2 only", "nonfree" de FFmpeg (fdk-aac, NDI SDK...).
+- FFmpeg et sources (décision d'Hervé du 20/10/2026) :
+  - builds BtbN pour Windows et Linux ;
+  - FFmpeg compilé par VERIFLOW pour macOS ;
+  - code source complet de FFmpeg et de chaque bibliothèque joint à chaque Release (GPLv3 §6 d) ;
+  - détails dans `docs/FFMPEG.md`.
+- Textes juridiques : `legal/CLUF.md`, `legal/CGU.md`, `legal/COMPOSANTS_TIERS.md`, et avis de licences des composants Rust et JavaScript générés au build. Ils sont livrés dans l'installeur et lisibles dans Aide > Licences. CLUF et CGU sont à faire relire par un juriste avant la vente.
 - Les SDK RAW caméra propriétaires (V2) devront être évalués un par un : un SDK propriétaire ne peut pas être lié à un programme GPL sans exception de licence. Solution envisagée : module externe optionnel, installé séparément par l'utilisateur.
 
 ### 6.2 Codecs brevetés : la licence GPL ne règle pas les brevets

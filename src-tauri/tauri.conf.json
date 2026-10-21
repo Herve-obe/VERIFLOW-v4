@@ -32,6 +32,13 @@
     "shortDescription": "Gestion des rushes audio et vidéo",
     "copyright": "Hervé Obejero, GPL-3.0-or-later",
     "license": "GPL-3.0-or-later",
+    "licenseFile": "../legal/CLUF.md",
+    "resources": {
+      "../LICENSE": "licenses/LICENSE-GPL-3.0.txt",
+      "../legal/CLUF.md": "licenses/CLUF.md",
+      "../legal/CGU.md": "licenses/CGU.md",
+      "../legal/COMPOSANTS_TIERS.md": "licenses/COMPOSANTS_TIERS.md"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

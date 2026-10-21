@@ -14,6 +14,7 @@
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
   import ShortcutsEditor from "./ShortcutsEditor.svelte";
   import Guide from "./Guide.svelte";
+  import { legalText, ffmpegInfo, type FfmpegInfo, type LegalDoc } from "../lib/legal";
 
   let info = $state<AppInfo | null>(null);
   onMount(() => {
@@ -21,6 +22,35 @@
   });
 
   const close = () => (menuState.dialog = null);
+
+  // Licences : une rubrique par document livré avec VERIFLOW.
+  const LEGAL_TABS: { id: LegalDoc; label: string }[] = [
+    { id: "gpl", label: "VERIFLOW (GPLv3)" },
+    { id: "cluf", label: "CLUF" },
+    { id: "cgu", label: "CGU" },
+    { id: "ffmpeg", label: "FFmpeg" },
+    { id: "tiers", label: "licenses.tab.tiers" },
+    { id: "third_party", label: "licenses.tab.texts" },
+  ];
+  let legalTab = $state<LegalDoc>("gpl");
+  let legal = $state<Partial<Record<LegalDoc, string>>>({});
+  let ffmpeg = $state<FfmpegInfo | null>(null);
+  let ffmpegError = $state("");
+  $effect(() => {
+    if (menuState.dialog !== "licenses") return;
+    const id = legalTab;
+    if (legal[id] === undefined) {
+      legalText(id)
+        .then((text) => (legal[id] = text))
+        .catch((e) => (legal[id] = String(e)));
+    }
+    if (id === "ffmpeg" && !ffmpeg && !ffmpegError) {
+      ffmpegInfo()
+        .then((f) => (ffmpeg = f))
+        .catch((e) => (ffmpegError = String(e)));
+    }
+  });
+  const tabLabel = (l: string) => (l.startsWith("licenses.") ? t(l as never) : l);
 
   // Préférences : une section par onglet.
   const PREF_TABS = ["general", "shortcuts", "offload", "player", "transcode"] as const;
@@ -206,15 +236,32 @@
     </div>
   </Modal>
 {:else if menuState.dialog === "licenses"}
-  <Modal title={t("menu.help.licenses")} onClose={close} width="min(680px, 94vw)">
-    <div class="scroll text">
-      <h3>VERIFLOW</h3>
-      <p>{t("licenses.veriflow")}</p>
-      <h3>FFmpeg</h3>
-      <p>{t("licenses.ffmpeg")}</p>
-      <p class="mono">https://ffmpeg.org · https://git.ffmpeg.org/ffmpeg.git</p>
-      <h3>{t("licenses.others.title")}</h3>
-      <p>{t("licenses.others")}</p>
+  <Modal title={t("menu.help.licenses")} onClose={close} width="min(960px, 96vw)" height="min(680px, 92vh)">
+    <div class="prefs">
+      <nav class="sections" aria-label={t("menu.help.licenses")}>
+        {#each LEGAL_TABS as tab (tab.id)}
+          <button class:on={legalTab === tab.id} onclick={() => (legalTab = tab.id)}>{tabLabel(tab.label)}</button>
+        {/each}
+      </nav>
+      <section class="pane legal">
+        {#if legalTab === "gpl"}
+          <p class="intro">{t("licenses.veriflow")}</p>
+        {:else if legalTab === "ffmpeg"}
+          <p class="intro">{t("licenses.ffmpeg")}</p>
+          {#if ffmpeg}
+            <p class="mono">{ffmpeg.version}</p>
+            <pre class="conf">{ffmpeg.buildconf}</pre>
+          {:else if ffmpegError}
+            <p class="note">{ffmpegError}</p>
+          {/if}
+        {:else if legalTab === "third_party"}
+          <p class="intro">{t("licenses.others")}</p>
+        {/if}
+        {#if i18n.lang !== "fr" && (legalTab === "cluf" || legalTab === "cgu" || legalTab === "tiers")}
+          <p class="note">{t("licenses.french")}</p>
+        {/if}
+        <pre class="doc">{legal[legalTab] ?? "…"}</pre>
+      </section>
     </div>
   </Modal>
 {:else if menuState.dialog === "about"}
@@ -225,7 +272,9 @@
       <p>{t("about.tagline")}</p>
       <p class="muted">{t("about.author")}</p>
       <p class="muted">{t("about.license")}</p>
+      <p class="muted">{t("about.ffmpeg")}</p>
       {#if info}<p class="mono muted">{info.os} · {info.arch}</p>{/if}
+      <button class="legal-btn" onclick={() => (menuState.dialog = "licenses")}>{t("about.legal")}</button>
     </div>
   </Modal>
 {/if}
@@ -395,14 +444,41 @@
     color: var(--vf-text-muted);
     font-size: var(--vf-text-xs);
   }
-  .text p {
-    font-size: var(--vf-text-sm);
-    line-height: 1.5;
-    margin: 0 0 var(--vf-space-2);
-  }
   .mono {
     font-family: var(--vf-font-mono);
     font-size: var(--vf-text-xs);
+  }
+  .legal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-2);
+    min-height: 0;
+  }
+  .legal .intro {
+    font-size: var(--vf-text-sm);
+    line-height: 1.5;
+    margin: 0;
+  }
+  .legal pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--vf-font-mono);
+    font-size: var(--vf-text-xs);
+    line-height: 1.5;
+    color: var(--vf-text);
+  }
+  .legal .conf {
+    color: var(--vf-text-muted);
+  }
+  .legal-btn {
+    margin-top: var(--vf-space-3);
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-3);
+    cursor: pointer;
   }
   .about {
     display: flex;
