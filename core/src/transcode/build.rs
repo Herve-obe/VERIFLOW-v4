@@ -942,6 +942,7 @@ mod tests {
             path: "clip.mov".into(),
             format: "mov".into(),
             duration: 10.0,
+            start_time: 0.0,
             size: 0,
             video: video.then(|| VideoStream {
                 index: 0,

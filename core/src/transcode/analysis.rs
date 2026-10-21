@@ -382,6 +382,7 @@ mod tests {
             path: "a.mov".into(),
             format: "mov".into(),
             duration: 4.0,
+            start_time: 0.0,
             size: 0,
             video: Some(crate::media::probe::VideoStream {
                 index: 0,
