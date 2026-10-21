@@ -45,6 +45,7 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 - **Son de remplacement calé par timecode** (référence BWF du son, timecode de l'image).
 - **Traçabilité** : empreinte XXH128 (celle de l'OFFLOAD et des ASC MHL), rapport CSV du lot, VMAF du fichier produit.
 - **Normalisation sans compression ni limiteur** : la dynamique n'est jamais modifiée sans le dire.
+- **Couche alpha** (ajout du 20/10/2026) : quand la source en a une (format de pixels `yuva`, `rgba`, `argb`, `gbrap`...), elle est transmise en ProRes 4444 et 4444 XQ (prores_ks, `yuva444p10le`, alpha sur 16 bits, même si l'encodeur Apple VideoToolbox était proposé), en QuickTime Animation (`argb`), en PNG et en TIFF (`rgba`, ou `rgba64` en plus de 8 bits), et en HAP Alpha. Les autres formats n'ont pas de couche alpha.
 - **Sécurité** : écriture sous un nom `.part`, renommé à la fin ; l'original n'est jamais remplacé.
 
 ## Choix techniques
@@ -80,7 +81,6 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 - Éditeur de sous-titres : SRT et WebVTT seulement (les fichiers ASS restent utilisables tels quels, sans édition, pour garder leurs styles).
 - Découpe : points saisis en timecode ou secondes, sans lecteur dans l'onglet (le PLAYER donne les timecodes).
 - Encodeurs matériels non essayés ici (pas de carte graphique ni de Mac sur la machine de test).
-- ProRes 4444 : couche alpha non transmise.
 
 ## À tester sur poste réel
 1. Windows et Mac : H.264, HEVC et AV1, ligne « Encodeur » (carte graphique ou système) et vitesse.
@@ -94,3 +94,4 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
 9. Préréglage personnel : enregistrer, exporter, importer sur l'autre poste.
 10. MXF OP-Atom : fichiers DNxHD _V1 et _A1, _A2 copiés dans Avid MediaFiles/MXF, reconnus par Media Composer avec le bon timecode.
 11. Éditeur de sous-titres : ouvrir un SRT reçu d'un client, corriger les signalements, enregistrer, incruster ; créer un VTT de zéro.
+12. Couche alpha : un ProRes 4444 avec alpha (titre, logo animé exporté de Resolve ou After Effects) vers ProRes 4444, puis import dans Resolve ou Premiere : transparence conservée ; même essai vers PNG.
