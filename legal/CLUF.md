@@ -47,6 +47,8 @@ Le code source correspondant de FFmpeg et de chaque bibliothèque compilée deda
 - `ffmpeg-sources-9.0.2-windows-linux.tar` : sources des builds Windows et Linux ;
 - `ffmpeg-sources-9.0.2-macos.tar` : sources du build macOS.
 
+Une archive de plus de 1 900 Mio est publiée en morceaux (`.part00`, `.part01`...), car GitHub limite la taille de chaque fichier ; `ffmpeg-sources-9.0.2-LISEZMOI.txt` explique comment la reconstituer.
+
 Ce code source reste disponible tant que la version correspondante est proposée au téléchargement.
 
 ## 7. Brevets

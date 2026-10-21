@@ -51,6 +51,8 @@ Le job `sources` du build (`scripts/ffmpeg-sources.sh`) joint deux archives à c
 - FFmpeg 9.0.2 et chaque bibliothèque au commit épinglé ;
 - le script de compilation.
 
+GitHub limite chaque fichier de Release à 2 Gio. Une archive de plus de 1 900 Mio (celle de Windows et Linux, environ 2,2 Go) est donc publiée en morceaux `.part00`, `.part01`... Le fichier `ffmpeg-sources-9.0.2-LISEZMOI.txt` explique comment la reconstituer (`cat` ou `copy /b`).
+
 Lancement manuel du build avec l'option « sources » : les archives sont produites en artefact, pour vérification.
 
 ## Textes juridiques

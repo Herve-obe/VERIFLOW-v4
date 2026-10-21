@@ -28,5 +28,8 @@ Code source correspondant (GPLv3, article 6 d)
   VERIFLOW, au même endroit que les installeurs :
     ffmpeg-sources-9.0.2-windows-linux.tar
     ffmpeg-sources-9.0.2-macos.tar
+  Une archive trop grosse pour GitHub (2 Gio par fichier) est publiée en
+  morceaux .part00, .part01... ; ffmpeg-sources-9.0.2-LISEZMOI.txt explique
+  comment la reconstituer.
   Il reste disponible tant que la version correspondante est proposée au
   téléchargement.

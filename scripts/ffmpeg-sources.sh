@@ -119,8 +119,30 @@ EOF
 sums "$MAC"
 
 log "Archives finales"
+# GitHub refuse les fichiers de Release de 2 Gio ou plus : une archive plus
+# grosse est découpée en morceaux de 1 900 Mio (.part00, .part01...).
+PART=$((1900 * 1024 * 1024))
 for d in "$WL" "$MAC"; do
-  tar -C "$WORK" -cf "$OUT/$(basename "$d").tar" "$(basename "$d")"
+  tar="$OUT/$(basename "$d").tar"
+  tar -C "$WORK" -cf "$tar" "$(basename "$d")"
+  if [ "$(stat -c %s "$tar")" -gt "$PART" ]; then
+    split -b "$PART" -d -a 2 "$tar" "$tar.part"
+    rm "$tar"
+  fi
 done
-(cd "$OUT" && sha256sum ffmpeg-sources-*.tar >"ffmpeg-sources-$VERSION.sha256")
+cat >"$OUT/ffmpeg-sources-$VERSION-LISEZMOI.txt" <<EOF
+Code source correspondant des FFmpeg livrés avec VERIFLOW (GPLv3 §6 d)
+=====================================================================
+
+ffmpeg-sources-$VERSION-windows-linux.tar : FFmpeg Windows et Linux (BtbN).
+ffmpeg-sources-$VERSION-macos.tar : FFmpeg macOS (compilé par VERIFLOW).
+ffmpeg-sources-$VERSION.sha256 : empreintes SHA-256 des fichiers publiés.
+
+Une archive de plus de 1 900 Mio est publiée en morceaux (.part00,
+.part01...), car GitHub limite chaque fichier à 2 Gio. Pour la reconstituer :
+  Linux, macOS : cat <archive>.tar.part* > <archive>.tar
+  Windows      : copy /b <archive>.tar.part00 + <archive>.tar.part01 <archive>.tar
+Chaque archive contient un LISEZMOI.txt qui explique comment recompiler.
+EOF
+(cd "$OUT" && sha256sum ffmpeg-sources-*.tar* "ffmpeg-sources-$VERSION-LISEZMOI.txt" >"ffmpeg-sources-$VERSION.sha256")
 ls -l "$OUT"
