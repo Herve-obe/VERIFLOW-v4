@@ -48,6 +48,7 @@ fn main() {
         project: Some("Démo VERIFLOW".into()),
         operator: Some("DIT".into()),
         notes: None,
+        ..Default::default()
     };
     let data = ReportData {
         inv: &inv,

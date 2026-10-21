@@ -178,11 +178,24 @@ pub fn offload_template_preview(
     template: String,
     vars: TemplateVars,
     card: String,
+    source: Option<PathBuf>,
     date: Option<String>,
 ) -> String {
+    let vars = match source.filter(|s| s.is_dir()) {
+        Some(s) => vars.with_card(&veriflow_core::offload::card::detect(&s)),
+        None => vars,
+    };
     render_template(&template, &card, &vars, &date.unwrap_or_else(local_date))
         .display()
         .to_string()
+}
+
+/// Type de carte, bobine et caméra reconnus sur la source.
+#[tauri::command]
+pub async fn offload_card_info(source: PathBuf) -> veriflow_core::offload::card::CardInfo {
+    tauri::async_runtime::spawn_blocking(move || veriflow_core::offload::card::detect(&source))
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]

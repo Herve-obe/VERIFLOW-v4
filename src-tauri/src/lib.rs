@@ -92,6 +92,7 @@ pub fn run() {
             offload::offload_start,
             offload::offload_check_existing,
             offload::offload_template_preview,
+            offload::offload_card_info,
             offload::offload_check_cancel,
             offload::offload_cancel,
             offload::offload_eject,

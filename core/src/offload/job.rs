@@ -23,6 +23,32 @@ pub struct TemplateVars {
     pub projet: Option<String>,
     pub jour: Option<String>,
     pub camera: Option<String>,
+    /// Bobine (« A001 ») : reconnue sur la carte si absente ; à défaut, le
+    /// nom de la carte.
+    #[serde(default)]
+    pub bobine: Option<String>,
+    /// Type de support reconnu (« Sony XAVC », « RED »...).
+    #[serde(default)]
+    pub support: Option<String>,
+}
+
+impl TemplateVars {
+    /// Complète les variables avec ce qui a été reconnu sur la carte : la
+    /// caméra et la bobine saisies restent prioritaires.
+    pub fn with_card(&self, info: &super::card::CardInfo) -> Self {
+        let pick = |own: &Option<String>, found: &Option<String>| {
+            own.clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| found.clone())
+        };
+        Self {
+            projet: self.projet.clone(),
+            jour: self.jour.clone(),
+            camera: pick(&self.camera, &info.camera),
+            bobine: pick(&self.bobine, &info.reel),
+            support: pick(&self.support, &info.kind),
+        }
+    }
 }
 
 /// Demande d'offload envoyée par l'interface.
@@ -49,6 +75,15 @@ pub struct OffloadRequest {
     /// reprise d'une copie trouvée dans un autre dossier.
     #[serde(default)]
     pub roots: Option<Vec<PathBuf>>,
+    /// Logo de la production dans le rapport PDF.
+    #[serde(default)]
+    pub logo: Option<PathBuf>,
+    /// Vignettes des vidéos dans le rapport PDF.
+    #[serde(default)]
+    pub thumbnails: bool,
+    /// Horodatage RFC 3161 du PDF : adresse de l'autorité (absente : aucun).
+    #[serde(default)]
+    pub timestamp: Option<String>,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -75,6 +110,8 @@ pub fn render_template(template: &str, card: &str, vars: &TemplateVars, date: &s
             "projet" | "project" => vars.projet.clone().unwrap_or_default(),
             "jour" | "day" => vars.jour.clone().unwrap_or_default(),
             "camera" | "caméra" => vars.camera.clone().unwrap_or_default(),
+            "bobine" | "reel" => vars.bobine.clone().unwrap_or_else(|| card.to_owned()),
+            "support" | "media" => vars.support.clone().unwrap_or_default(),
             _ => String::new(),
         }
     };
@@ -139,7 +176,8 @@ pub fn local_date() -> String {
 pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
     let inv = scan(&crate::absolute_path(&req.source))?;
     let date = req.date.clone().unwrap_or_else(local_date);
-    let rel = render_template(&req.template, &inv.name, &req.vars, &date);
+    let card = super::card::detect(&crate::absolute_path(&req.source));
+    let rel = render_template(&req.template, &inv.name, &req.vars.with_card(&card), &date);
     let roots: Vec<PathBuf> = match &req.roots {
         Some(r) if r.len() == req.destinations.len() => {
             r.iter().map(|p| crate::absolute_path(p)).collect()
@@ -241,6 +279,9 @@ pub fn execute(
             .or_else(|| req.vars.projet.clone()),
         operator: req.operator.clone(),
         notes: req.notes.clone(),
+        logo: req.logo.clone(),
+        thumbnails: req.thumbnails,
+        timestamp: req.timestamp.clone().filter(|u| !u.trim().is_empty()),
     };
     let reports = write_reports(&ReportData {
         inv: &inv,
@@ -274,6 +315,7 @@ mod tests {
             projet: Some("Court métrage".into()),
             jour: Some("J03".into()),
             camera: Some("A".into()),
+            ..Default::default()
         };
         let r = |t: &str| render_template(t, "A001", &v, "2026-10-06");
         assert_eq!(
@@ -297,6 +339,30 @@ mod tests {
             render_template("", "A001", &empty, "d"),
             PathBuf::from("A001")
         );
+        // Bobine et support reconnus sur la carte ; caméra saisie prioritaire.
+        let found = super::super::card::CardInfo {
+            kind: Some("RED".into()),
+            reel: Some("B004".into()),
+            camera: Some("B".into()),
+        };
+        assert_eq!(
+            render_template(
+                "{support}/{camera}/{bobine}",
+                "CARTE",
+                &empty.with_card(&found),
+                "d"
+            ),
+            PathBuf::from("RED").join("B").join("B004")
+        );
+        assert_eq!(
+            render_template("{camera}/{bobine}", "CARTE", &v.with_card(&found), "d"),
+            PathBuf::from("A").join("B004")
+        );
+        // Rien de reconnu : la bobine est le nom de la carte.
+        assert_eq!(
+            render_template("{bobine}", "CARTE", &empty, "d"),
+            PathBuf::from("CARTE")
+        );
     }
 
     #[test]
@@ -319,6 +385,9 @@ mod tests {
             existing: ExistingMode::Verify,
             date: None,
             roots: None,
+            logo: None,
+            thumbnails: false,
+            timestamp: None,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);

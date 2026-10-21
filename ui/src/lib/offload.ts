@@ -38,7 +38,15 @@ export interface OffloadRequest {
   date?: string | null;
   /** Dossiers finals imposés (reprise d'une copie trouvée dans un autre dossier). */
   roots?: string[] | null;
+  /** Logo de la production et vignettes des vidéos dans le rapport PDF. */
+  logo?: string | null;
+  thumbnails?: boolean;
+  /** Autorité d'horodatage RFC 3161 du PDF (absente : aucun horodatage). */
+  timestamp?: string | null;
 }
+
+/** Autorité d'horodatage proposée (DigiCert, gratuite, reconnue par Acrobat). */
+export const DEFAULT_TSA = "http://timestamp.digicert.com";
 
 export type ExistingMode = "verify" | "complete" | "replace";
 
@@ -108,7 +116,16 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
-  reports: { csv: string; html: string; pdf: string; pdf_sha256: string }[];
+  reports: {
+    csv: string;
+    html: string;
+    pdf: string;
+    pdf_sha256: string;
+    /** Horodatage RFC 3161 du PDF : jeton, date certifiée ou échec. */
+    tsr: string | null;
+    timestamp: string | null;
+    timestamp_error: string | null;
+  }[];
   source_name: string;
   fingerprint: string;
 }
@@ -124,8 +141,15 @@ export const volumes = () => invoke<Volume[]>("offload_volumes");
 export const preflight = (request: OffloadRequest) => invoke<PreflightView>("offload_preflight", { request });
 export const start = (request: OffloadRequest, eject: boolean, check: number | null = null) =>
   invoke<number>("offload_start", { request, eject, check });
-export const templatePreview = (template: string, vars: OffloadRequest["vars"], card: string, date: string | null) =>
-  invoke<string>("offload_template_preview", { template, vars, card, date });
+export const templatePreview = (template: string, vars: OffloadRequest["vars"], card: string, source: string | null, date: string | null) =>
+  invoke<string>("offload_template_preview", { template, vars, card, source, date });
+/** Type de support, bobine et lettre de caméra reconnus sur la carte. */
+export interface CardInfo {
+  kind: string | null;
+  reel: string | null;
+  camera: string | null;
+}
+export const cardInfo = (source: string) => invoke<CardInfo>("offload_card_info", { source });
 export const checkExisting = (request: OffloadRequest) => invoke<CheckView>("offload_check_existing", { request });
 export const checkCancel = () => invoke<void>("offload_check_cancel");
 export const onCheckProgress = (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>

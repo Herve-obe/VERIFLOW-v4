@@ -23,6 +23,8 @@ md-5 = "0.10"
 filetime = "0.2"
 gethostname = "1"
 pdf-writer = "0.14"
+# OFFLOAD : horodatage RFC 3161 (MIT ou Apache 2.0), en HTTP sans TLS.
+ureq = { version = "3.4", default-features = false }
 fs4 = "1"
 walkdir = "2"
 sha1 = "0.10"

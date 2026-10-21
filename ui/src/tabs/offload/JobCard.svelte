@@ -105,6 +105,11 @@
         <button class="ghost" onclick={() => open(root)}>{t("offload.open.folder")} {i + 1}</button>
       {/each}
     </div>
+    {#if job.result.reports[0]?.timestamp}
+      <div class="small">{t("offload.tsa.done")} {job.result.reports[0].timestamp}</div>
+    {:else if job.result.reports[0]?.timestamp_error}
+      <div class="small err">{t("offload.tsa.failed")} : {job.result.reports[0].timestamp_error}</div>
+    {/if}
     {#if openError}<div class="small err">{openError}</div>{/if}
   {/if}
 
