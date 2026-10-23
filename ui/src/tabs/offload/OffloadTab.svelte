@@ -1,7 +1,7 @@
 <!-- Onglet OFFLOAD : copie sécurisée d'une source vers une ou plusieurs destinations,
      vérification bit à bit, ASC MHL et rapports (charte §7.1). -->
 <script lang="ts">
-  import { prefs } from "../../stores/prefs.svelte";
+  import { prefs, onPrefsApplied } from "../../stores/prefs.svelte";
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { ask } from "../../stores/confirm.svelte";
@@ -61,6 +61,17 @@
   const formKey = () => JSON.stringify([source, destinations, template, jour, camera]);
   let summaryEl = $state<HTMLElement | null>(null);
   let revealSummary = false;
+
+  // Préférences validées : l'onglet reprend leurs valeurs.
+  onMount(() =>
+    onPrefsApplied(() => {
+      const p = structuredClone($state.snapshot(prefs.offload));
+      template = p.template;
+      algorithms = p.algorithms;
+      operator = p.operator;
+      eject = p.eject;
+    }),
+  );
 
   $effect(() => {
     const s: Settings = { destinations, template, algorithms, operator, eject };
