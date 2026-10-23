@@ -179,6 +179,11 @@
               {/each}
             </div>
           </div>
+          <label class="row">
+            <span>{t("prefs.player.reportAuto")}</span>
+            <input type="checkbox" bind:checked={draft.player.reportAuto} />
+          </label>
+          <p class="note">{t("prefs.player.reportAuto.note")}</p>
         <div class="factory"><button class="ghost" onclick={() => factory("player")}>{t("prefs.factory")}</button></div>
         {:else if prefTab === "transcode"}
           <h3>{t("prefs.transcode")}</h3>

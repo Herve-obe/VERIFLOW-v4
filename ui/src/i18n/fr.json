@@ -832,6 +832,8 @@
   "prefs.player.tc": "Timecode incrusté",
   "prefs.player.scopes": "Scopes affichés",
   "prefs.player.marker": "Couleur des nouveaux marqueurs",
+  "prefs.player.reportAuto": "Ouvrir la saisie du rapport à chaque nouvelle prise",
+  "prefs.player.reportAuto.note": "Quand un projet est ouvert, la fenêtre de saisie (touche R) s'ouvre dès qu'une autre prise est chargée dans le PLAYER.",
   "prefs.transcode.note": "Destination de TRANSCODE. « Valider » l'applique tout de suite, en VIDEO comme en AUDIO.",
   "prefs.transcode.next": "À côté de chaque fichier source",
   "prefs.transcode.dest": "Dossier de sortie",

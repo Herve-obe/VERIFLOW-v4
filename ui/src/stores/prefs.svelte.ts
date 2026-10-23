@@ -11,8 +11,9 @@ export interface Prefs {
   shortcuts: Record<string, Shortcut | null>;
   /** Valeurs de départ d'OFFLOAD (première ouverture, ou après remise à zéro). */
   offload: { template: string; algorithms: HashAlgo[]; eject: boolean; operator: string };
-  /** Affichages du PLAYER au premier lancement d'un lecteur. */
-  player: { tcOverlay: boolean; scopes: boolean; markerColor: MarkerColor };
+  /** Affichages du PLAYER au premier lancement d'un lecteur ; `reportAuto` :
+   *  saisie du rapport ouverte à chaque nouvelle prise (projet ouvert). */
+  player: { tcOverlay: boolean; scopes: boolean; markerColor: MarkerColor; reportAuto: boolean };
   /** Destination proposée par TRANSCODE à chaque ouverture. */
   transcode: { dest: string; nextToSource: boolean };
 }
@@ -20,7 +21,7 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   shortcuts: {},
   offload: { template: "{date}/{carte}", algorithms: ["xxh128"], eject: false, operator: "" },
-  player: { tcOverlay: false, scopes: false, markerColor: "red" },
+  player: { tcOverlay: false, scopes: false, markerColor: "red", reportAuto: false },
   transcode: { dest: "", nextToSource: false },
 };
 

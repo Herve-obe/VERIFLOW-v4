@@ -56,7 +56,7 @@ Objectif (charte §7.4) : produire les rapports image et son du tournage, au for
 
 ## Limites connues
 - Le modèle des rapports papier a été reconstitué d'après le contenu des fichiers Excel de l'école : **la mise en page exacte est à comparer avec les originaux** (marges, tailles, nombre de lignes par feuillet).
-- Ouverture automatique de la fenêtre de saisie au changement de prise (charte : PROPOSÉ) : non faite ; la touche R suffit pour l'instant.
+- Ouverture automatique de la fenêtre de saisie au changement de prise : faite le 20/10/2026, en option (Préférences > PLAYER, décochée par défaut). Quand un projet est ouvert, la fenêtre s'ouvre dès qu'une autre prise est chargée dans le PLAYER (vidéo ou son), pour la prise chargée.
 
 ## À tester sur poste réel
 1. Créer un rapport image et un rapport son ; comparer les PDF aux rapports papier de l'école. Puis ajouter et réordonner des colonnes (bouton « Colonnes »), trier en cliquant sur un titre, et vérifier le PDF (paysage) et le rapport suivant (mêmes colonnes).
@@ -64,3 +64,4 @@ Objectif (charte §7.4) : produire les rapports image et son du tournage, au for
 3. Exporter en PDF, XLSX (ouvrir dans Excel), CSV, HTML, et EDL (importer dans DaVinci Resolve).
 4. Ajouter un logo et le nom de l'école, vérifier leur place sur le PDF.
 5. Rapport son d'un enregistreur réel (Sound Devices) : noms de pistes, scène, prise, TC.
+6. Préférences > PLAYER, « Ouvrir la saisie du rapport à chaque nouvelle prise » cochée, projet ouvert : charger plusieurs prises à la suite dans le PLAYER (vidéo puis son) ; la fenêtre de saisie s'ouvre pour chaque prise, pas en rechargeant la même.
