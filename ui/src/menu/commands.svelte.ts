@@ -21,6 +21,7 @@ import {
 } from "../lib/project.svelte";
 import { dispatchPlayerAction } from "../shortcuts";
 import { PLAYER_SHORTCUTS, type PlayerAction, type Shortcut } from "../shortcuts/defaults";
+import { effectiveShortcut } from "../stores/prefs.svelte";
 
 export type Platform = "macos" | "windows" | "linux";
 
@@ -35,7 +36,7 @@ export const platform: Platform = detect();
 export const isMac = platform === "macos";
 
 /** Fenêtre ouverte depuis les menus. */
-export type Dialog = "about" | "shortcuts" | "licenses" | "prefs";
+export type Dialog = "about" | "shortcuts" | "licenses" | "prefs" | "guide";
 export const menuState = $state({ dialog: null as Dialog | null });
 
 export interface Command {
@@ -49,6 +50,11 @@ export interface Command {
   native?: string;
   enabled?: () => boolean;
   run: () => void;
+  /** Action modifiable dans Préférences > Raccourcis (identifiant commun
+   *  avec le clavier : « tab.media », « play.toggle »...). */
+  prefId?: string;
+  /** Raccourci par défaut de cette action modifiable. */
+  defaultShortcut?: Shortcut;
 }
 
 export type Entry = string | "-" | { submenu: () => string; items: () => Entry[] };
@@ -187,12 +193,37 @@ const list: Command[] = [
   play("mark.add", "menu.play.marker"),
   play("report.edit", "menu.play.report"),
 
-  { id: "help.shortcuts", label: () => t("menu.help.shortcuts"), shortcut: { key: "F1" }, run: show("shortcuts") },
+  { id: "help.guide", label: () => t("menu.help.guide"), shortcut: { key: "F1" }, run: show("guide") },
+  { id: "help.shortcuts", label: () => t("menu.help.shortcuts"), run: show("shortcuts") },
   { id: "help.licenses", label: () => t("menu.help.licenses"), run: show("licenses") },
   { id: "help.about", label: () => t("menu.help.about"), run: show("about") },
 ];
 
+// Raccourcis modifiables (Préférences > Raccourcis) : le raccourci affiché et
+// utilisé est celui des préférences, sinon celui ci-dessus. Couper, copier,
+// coller, annuler... restent ceux du système.
+const prefIdOf = (id: string) =>
+  id.startsWith("view.tab.")
+    ? `tab.${id.slice("view.tab.".length)}`
+    : id === "view.mode"
+      ? "mode.toggle"
+      : id.startsWith("play.")
+        ? id.slice("play.".length)
+        : id;
+for (const c of list) {
+  if (!c.shortcut || (c.id.startsWith("edit.") && c.id !== "edit.prefs")) continue;
+  const fallback = c.shortcut;
+  const pid = prefIdOf(c.id);
+  c.prefId = pid;
+  c.defaultShortcut = fallback;
+  Object.defineProperty(c, "shortcut", { get: () => effectiveShortcut(pid, fallback), enumerable: true });
+}
+
 export const COMMANDS: Record<string, Command> = Object.fromEntries(list.map((c) => [c.id, c]));
+
+/** Action sans entrée de menu, modifiable aussi : bascule VIDEO / AUDIO
+ *  qui fonctionne même pendant une saisie. */
+export const EXTRA_ACTIONS = [{ prefId: "mode.toggle.force", label: () => t("prefs.sc.mode.force"), fallback: { key: "Tab", ctrl: true } as Shortcut }];
 
 const RECENT_PREFIX = "file.recent:";
 
@@ -287,7 +318,7 @@ export const MENUS: MenuDef[] = [
   {
     id: "help",
     label: () => t("menu.help"),
-    items: () => ["help.shortcuts", "help.licenses", ...(isMac ? [] : ["-", "help.about"])],
+    items: () => ["help.guide", "help.shortcuts", "help.licenses", ...(isMac ? [] : ["-", "help.about"])],
   },
 ];
 
