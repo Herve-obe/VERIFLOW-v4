@@ -339,6 +339,203 @@ pub fn processes_using(_dir: &Path) -> Vec<String> {
     Vec::new()
 }
 
+/// Éjection par le gestionnaire de périphériques (comme « Retirer le
+/// périphérique en toute sécurité ») : le disque du volume est retrouvé par
+/// son numéro, puis Windows est prié d'éjecter le périphérique, en remontant
+/// vers le boîtier USB si le disque seul ne s'éjecte pas. `None` : disque
+/// introuvable ; `Some(Err)` : refus, avec la raison donnée par Windows.
+#[cfg(windows)]
+fn pnp_eject(letter: &str) -> Option<std::result::Result<(), String>> {
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_Get_Parent, CM_Request_Device_EjectW, PNP_VetoIllegalDeviceRequest,
+        PNP_VetoNonDisableable, PNP_VetoTypeUnknown, SetupDiDestroyDeviceInfoList,
+        SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
+        CR_SUCCESS, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, PNP_VETO_TYPE, SP_DEVICE_INTERFACE_DATA,
+        SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
+    };
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Ioctl::{
+        GUID_DEVINTERFACE_DISK, IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
+    };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+
+    // Numéro de disque d'un chemin de périphérique (volume ou disque).
+    // SAFETY : appels Win32 documentés, handle refermé, tampon à la taille.
+    let number = |path: &[u16]| -> Option<u32> {
+        unsafe {
+            let h = CreateFileW(
+                path.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            );
+            if h == INVALID_HANDLE_VALUE {
+                return None;
+            }
+            let mut n = STORAGE_DEVICE_NUMBER::default();
+            let mut len = 0u32;
+            let ok = DeviceIoControl(
+                h,
+                IOCTL_STORAGE_GET_DEVICE_NUMBER,
+                std::ptr::null(),
+                0,
+                (&mut n as *mut STORAGE_DEVICE_NUMBER).cast(),
+                std::mem::size_of::<STORAGE_DEVICE_NUMBER>() as u32,
+                &mut len,
+                std::ptr::null_mut(),
+            );
+            CloseHandle(h);
+            (ok != 0).then_some(n.DeviceNumber)
+        }
+    };
+    let volume: Vec<u16> = format!(r"\\.\{letter}")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let wanted = number(&volume)?;
+
+    // SAFETY : énumération SetupAPI ; la liste est détruite dans tous les cas,
+    // le tampon de détail est aligné (u32) et dimensionné par Windows.
+    let devinst = unsafe {
+        let set = SetupDiGetClassDevsW(
+            &GUID_DEVINTERFACE_DISK,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
+        );
+        if set == -1 {
+            return None;
+        }
+        let mut found = None;
+        let mut index = 0u32;
+        loop {
+            let mut iface = SP_DEVICE_INTERFACE_DATA {
+                cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DATA>() as u32,
+                ..Default::default()
+            };
+            if SetupDiEnumDeviceInterfaces(
+                set,
+                std::ptr::null(),
+                &GUID_DEVINTERFACE_DISK,
+                index,
+                &mut iface,
+            ) == 0
+            {
+                break;
+            }
+            index += 1;
+            let mut needed = 0u32;
+            SetupDiGetDeviceInterfaceDetailW(
+                set,
+                &iface,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+                std::ptr::null_mut(),
+            );
+            if needed == 0 {
+                continue;
+            }
+            let mut buf = vec![0u32; (needed as usize).div_ceil(4)];
+            let detail = buf.as_mut_ptr().cast::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
+            (*detail).cbSize = std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
+            let mut info = SP_DEVINFO_DATA {
+                cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+                ..Default::default()
+            };
+            if SetupDiGetDeviceInterfaceDetailW(
+                set,
+                &iface,
+                detail,
+                needed,
+                std::ptr::null_mut(),
+                &mut info,
+            ) == 0
+            {
+                continue;
+            }
+            // Chemin terminé par un zéro, juste après cbSize.
+            let start = std::ptr::addr_of!((*detail).DevicePath).cast::<u16>();
+            let max = (needed as usize - 4) / 2;
+            let path = std::slice::from_raw_parts(start, max);
+            let end = path.iter().position(|&c| c == 0).unwrap_or(max);
+            let mut path = path[..end].to_vec();
+            path.push(0);
+            if number(&path) == Some(wanted) {
+                found = Some(info.DevInst);
+                break;
+            }
+        }
+        SetupDiDestroyDeviceInfoList(set);
+        found
+    }?;
+
+    // Le disque, puis ses parents (boîtier USB, concentrateur), deux niveaux.
+    let mut node = devinst;
+    let mut last = String::new();
+    for _ in 0..3 {
+        for _attempt in 0..3 {
+            let mut veto: PNP_VETO_TYPE = PNP_VetoTypeUnknown;
+            let mut name = [0u16; 260];
+            // SAFETY : tampon de 260 caractères annoncé tel quel.
+            let cr = unsafe {
+                CM_Request_Device_EjectW(node, &mut veto, name.as_mut_ptr(), name.len() as u32, 0)
+            };
+            if cr == CR_SUCCESS && veto == PNP_VetoTypeUnknown {
+                return Some(Ok(()));
+            }
+            let len = name.iter().position(|&c| c == 0).unwrap_or(0);
+            let who = String::from_utf16_lossy(&name[..len]);
+            if veto == PNP_VetoIllegalDeviceRequest || veto == PNP_VetoNonDisableable {
+                break;
+            }
+            last = veto_text(veto, &who);
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+        let mut parent = 0u32;
+        // SAFETY : appel cfgmgr32 documenté.
+        if unsafe { CM_Get_Parent(&mut parent, node, 0) } != CR_SUCCESS {
+            break;
+        }
+        node = parent;
+    }
+    Some(Err(if last.is_empty() {
+        "Windows refuse d'éjecter ce disque".to_owned()
+    } else {
+        last
+    }))
+}
+
+/// Raison d'un refus d'éjection, d'après le type de veto de Windows.
+#[allow(non_upper_case_globals)]
+#[cfg(windows)]
+fn veto_text(veto: i32, who: &str) -> String {
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::*;
+    let why = match veto {
+        PNP_VetoOutstandingOpen => "des fichiers ou dossiers du disque sont encore ouverts",
+        PNP_VetoWindowsApp => "un programme refuse",
+        PNP_VetoWindowsService => "un service de Windows refuse",
+        PNP_VetoDevice | PNP_VetoDriver | PNP_VetoLegacyDevice | PNP_VetoLegacyDriver => {
+            "un pilote refuse"
+        }
+        PNP_VetoPendingClose => "fermeture en cours, réessaie dans quelques secondes",
+        PNP_VetoInsufficientRights => "droits insuffisants",
+        PNP_VetoAlreadyRemoved => "le disque est déjà retiré",
+        _ => "refus de Windows",
+    };
+    if who.is_empty() {
+        why.to_owned()
+    } else {
+        format!("{why} ({who})")
+    }
+}
+
 /// Sous Windows, le dossier courant d'un programme garde son volume ouvert.
 /// Un sélecteur de fichiers peut l'avoir placé sur le disque à éjecter : on
 /// le ramène dans le dossier temporaire.
@@ -397,6 +594,28 @@ pub fn eject(mount_point: &Path, hint: Option<&Path>) -> Result<()> {
     let _ejecting = Ejecting::start();
     let mp = mount_point.display().to_string();
     leave_volume(mount_point);
+    // Windows : retrait sécurisé par le gestionnaire de périphériques, qui
+    // éjecte aussi les disques durs USB et donne la raison d'un refus. La
+    // commande « Éjecter » de l'Explorateur ne sert plus que de secours.
+    #[cfg(windows)]
+    match pnp_eject(mp.trim_end_matches(['\\', '/'])) {
+        Some(Ok(())) => return Ok(()),
+        Some(Err(why)) => {
+            let mut message = format!("Windows refuse l'éjection : {why}");
+            let users = processes_using(hint.unwrap_or(mount_point));
+            if !users.is_empty() {
+                message.push_str(&format!(" ; fichiers ouverts par : {}", users.join(", ")));
+            }
+            if let Some(veto) = eject_veto() {
+                message.push_str(&format!(". Journal de Windows : {veto}"));
+            }
+            return Err(Error::Tool {
+                tool: "éjection".into(),
+                message,
+            });
+        }
+        None => {}
+    }
     let output = if cfg!(target_os = "macos") {
         Command::new("diskutil").args(["eject", &mp]).output()
     } else if cfg!(windows) {
