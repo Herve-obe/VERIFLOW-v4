@@ -339,6 +339,54 @@ pub fn processes_using(_dir: &Path) -> Vec<String> {
     Vec::new()
 }
 
+/// Sous Windows, le dossier courant d'un programme garde son volume ouvert.
+/// Un sélecteur de fichiers peut l'avoir placé sur le disque à éjecter : on
+/// le ramène dans le dossier temporaire.
+fn leave_volume(mount_point: &Path) {
+    if !cfg!(windows) {
+        return;
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+    let lower = |p: &Path| {
+        p.to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_lowercase()
+    };
+    let mp = lower(mount_point);
+    if !mp.is_empty() && lower(&cwd).starts_with(mp.trim_end_matches(['\\', '/'])) {
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+    }
+}
+
+/// Dernier refus d'éjection noté par Windows (journal Système, Kernel-PnP,
+/// événement 225, deux dernières minutes) : il nomme le programme bloquant.
+#[cfg(windows)]
+fn eject_veto() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \
+        Get-WinEvent -MaxEvents 1 -ErrorAction SilentlyContinue -FilterHashtable \
+        @{LogName='System'; ProviderName='Microsoft-Windows-Kernel-PnP'; Id=225; \
+        StartTime=(Get-Date).AddMinutes(-2)} | ForEach-Object { $_.Message }";
+    let out = Command::new("powershell")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.is_empty()).then_some(text)
+}
+
+#[cfg(not(windows))]
+fn eject_veto() -> Option<String> {
+    None
+}
+
 /// Éjecte proprement un volume amovible (après la copie).
 ///
 /// Les dossiers suivis par l'explorateur sur ce volume doivent être libérés
@@ -348,6 +396,7 @@ pub fn processes_using(_dir: &Path) -> Vec<String> {
 pub fn eject(mount_point: &Path, hint: Option<&Path>) -> Result<()> {
     let _ejecting = Ejecting::start();
     let mp = mount_point.display().to_string();
+    leave_volume(mount_point);
     let output = if cfg!(target_os = "macos") {
         Command::new("diskutil").args(["eject", &mp]).output()
     } else if cfg!(windows) {
@@ -398,13 +447,20 @@ pub fn eject(mount_point: &Path, hint: Option<&Path>) -> Result<()> {
     let windows_message = |code: Option<i32>| match code {
         Some(1) => {
             let users = processes_using(hint.unwrap_or(mount_point));
-            Some(if users.is_empty() {
+            let mut msg = if users.is_empty() {
                 "le disque est encore utilisé par un autre programme \
                  (Explorateur, antivirus, indexation, lecteur vidéo...)"
                     .to_owned()
             } else {
                 format!("le disque est encore utilisé par : {}", users.join(", "))
-            })
+            };
+            // Le gestionnaire de redémarrage ne voit que les fichiers ouverts ;
+            // Windows journalise le programme qui a refusé l'éjection, quel
+            // que soit ce qu'il tient ouvert (dossier, volume).
+            if let Some(veto) = eject_veto() {
+                msg.push_str(&format!(". Windows indique : {veto}"));
+            }
+            Some(msg)
         }
         Some(2) => Some("volume introuvable".to_owned()),
         _ => None,
