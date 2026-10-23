@@ -122,4 +122,19 @@
   .content :global(strong) {
     color: var(--vf-text);
   }
+  .content :global(table) {
+    border-collapse: collapse;
+    margin: var(--vf-space-2) 0;
+    font-size: var(--vf-text-sm);
+  }
+  .content :global(th),
+  .content :global(td) {
+    border: 1px solid var(--vf-border);
+    padding: var(--vf-space-1) var(--vf-space-3);
+    text-align: left;
+    color: var(--vf-text);
+  }
+  .content :global(th) {
+    background: var(--vf-surface-high);
+  }
 </style>
