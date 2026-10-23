@@ -130,18 +130,18 @@
           <h3>{t("prefs.shortcuts")}</h3>
           <ShortcutsEditor />
         {:else if prefTab === "offload"}
-          <h3>{t("draft.offload")}</h3>
+          <h3>{t("prefs.offload")}</h3>
           <p class="note">{t("prefs.defaults.note")}</p>
           <label class="row">
-            <span>{t("draft.offload.template")}</span>
+            <span>{t("prefs.offload.template")}</span>
             <input class="text mono" bind:value={draft.offload.template} spellcheck="false" />
           </label>
           <label class="row">
-            <span>{t("draft.offload.operator")}</span>
+            <span>{t("prefs.offload.operator")}</span>
             <input class="text" bind:value={draft.offload.operator} />
           </label>
           <div class="row">
-            <span>{t("draft.offload.algorithms")}</span>
+            <span>{t("prefs.offload.algorithms")}</span>
             <div class="checks">
               {#each ALGORITHMS as a (a.id)}
                 <label><input type="checkbox" checked={draft.offload.algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} /> {a.label}</label>
@@ -149,23 +149,23 @@
             </div>
           </div>
           <label class="row">
-            <span>{t("draft.offload.eject")}</span>
+            <span>{t("prefs.offload.eject")}</span>
             <input type="checkbox" bind:checked={draft.offload.eject} />
           </label>
         <div class="factory"><button class="ghost" onclick={() => factory("offload")}>{t("prefs.factory")}</button></div>
         {:else if prefTab === "player"}
-          <h3>{t("draft.player")}</h3>
-          <p class="note">{t("draft.player.note")}</p>
+          <h3>{t("prefs.player")}</h3>
+          <p class="note">{t("prefs.player.note")}</p>
           <label class="row">
-            <span>{t("draft.player.tc")}</span>
+            <span>{t("prefs.player.tc")}</span>
             <input type="checkbox" bind:checked={draft.player.tcOverlay} />
           </label>
           <label class="row">
-            <span>{t("draft.player.scopes")}</span>
+            <span>{t("prefs.player.scopes")}</span>
             <input type="checkbox" bind:checked={draft.player.scopes} />
           </label>
           <div class="row">
-            <span>{t("draft.player.marker")}</span>
+            <span>{t("prefs.player.marker")}</span>
             <div class="colors">
               {#each MARKER_COLORS as c (c)}
                 <button
@@ -181,14 +181,14 @@
           </div>
         <div class="factory"><button class="ghost" onclick={() => factory("player")}>{t("prefs.factory")}</button></div>
         {:else if prefTab === "transcode"}
-          <h3>{t("draft.transcode")}</h3>
-          <p class="note">{t("draft.transcode.note")}</p>
+          <h3>{t("prefs.transcode")}</h3>
+          <p class="note">{t("prefs.transcode.note")}</p>
           <label class="row">
-            <span>{t("draft.transcode.next")}</span>
+            <span>{t("prefs.transcode.next")}</span>
             <input type="checkbox" bind:checked={draft.transcode.nextToSource} />
           </label>
           <div class="row">
-            <span>{t("draft.transcode.dest")}</span>
+            <span>{t("prefs.transcode.dest")}</span>
             <span class="path" title={draft.transcode.dest}>{draft.transcode.dest || t("transcode.dest.none")}</span>
             <button class="ghost" onclick={chooseTranscodeDest}>{t("offload.browse")}</button>
             {#if draft.transcode.dest}<button class="ghost" onclick={() => (draft.transcode.dest = "")}>×</button>{/if}
