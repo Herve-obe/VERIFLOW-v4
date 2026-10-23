@@ -59,8 +59,10 @@ fn on_screen(app: &AppHandle, g: &Geometry) -> bool {
 }
 
 /// Ouvre le lecteur rapide sur `media`, ou recharge la fenêtre déjà ouverte.
+/// Commande asynchrone : sous Windows, créer une fenêtre depuis une commande
+/// synchrone bloque l'application (fenêtre blanche, test d'Hervé du 23/10/2026).
 #[tauri::command]
-pub fn quick_open(
+pub async fn quick_open(
     app: AppHandle,
     media: QuickMedia,
     geometry: Option<Geometry>,
