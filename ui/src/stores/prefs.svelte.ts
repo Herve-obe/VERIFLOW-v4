@@ -54,6 +54,34 @@ $effect.root(() => {
   });
 });
 
+/** Rubriques réglées par le bouton « Valider » des Préférences. */
+export type AppliedPrefs = Pick<Prefs, "offload" | "player" | "transcode">;
+
+const listeners = new Set<() => void>();
+
+/** Appelé quand les Préférences sont validées : l'onglet reprend aussitôt
+ *  ces valeurs. Rend la fonction de désabonnement (à rendre par onMount). */
+export function onPrefsApplied(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/** Enregistre les rubriques validées et les applique aux onglets ouverts. */
+export function applyPrefs(next: AppliedPrefs) {
+  const v = structuredClone(next);
+  prefs.offload = v.offload;
+  prefs.player = v.player;
+  prefs.transcode = v.transcode;
+  // Choix mémorisés par les lecteurs (VideoView, MarkersPanel) : effacés
+  // pour qu'un lecteur ouvert plus tard parte aussi des Préférences.
+  try {
+    ["veriflow.player.tc.overlay", "veriflow.player.scopes", "veriflow.marker.color"].forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* stockage indisponible */
+  }
+  listeners.forEach((fn) => fn());
+}
+
 /** Raccourci en vigueur d'une action : celui de l'utilisateur, sinon celui
  *  par défaut (undefined : aucun). */
 export function effectiveShortcut(id: string, fallback?: Shortcut): Shortcut | undefined {

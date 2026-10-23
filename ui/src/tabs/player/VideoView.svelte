@@ -1,6 +1,6 @@
 <!-- PLAYER VIDEO : lecture précise à l'image, shuttle J/K/L, points d'entrée et de sortie. -->
 <script lang="ts">
-  import { prefs } from "../../stores/prefs.svelte";
+  import { prefs, onPrefsApplied } from "../../stores/prefs.svelte";
   import { onDestroy, onMount, untrack } from "svelte";
   import Transport from "../../components/Transport.svelte";
   import OutputPicker from "../../components/OutputPicker.svelte";
@@ -524,6 +524,16 @@
     tcOverlay = !tcOverlay;
     writePref(PREF_TC, tcOverlay ? "1" : "0");
   }
+
+  // Préférences validées : TC incrusté et scopes reprennent leurs valeurs.
+  onMount(() =>
+    onPrefsApplied(() => {
+      tcOverlay = prefs.player.tcOverlay;
+      scopes = prefs.player.scopes;
+      writePref(PREF_TC, tcOverlay ? "1" : "0");
+      writePref(PREF_SCOPES, scopes ? "1" : "0");
+    }),
+  );
 
   function onKeydown(e: KeyboardEvent) {
     if (!clip || !active()) return;

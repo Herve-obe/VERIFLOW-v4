@@ -22,13 +22,14 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 - **Préférences** (fenêtre à sections, complétée le 20/10/2026) :
   - **Général** : langue, ouverture (reprendre ou repartir à zéro), données de l'application ;
   - **Raccourcis** : toutes les actions des menus Fichier, Édition (Préférences), Affichage, Lecture et Aide, plus la bascule VIDEO / AUDIO forcée (Ctrl+Tab). « Modifier » puis la nouvelle combinaison (Échap annule) ; un raccourci déjà pris est retiré de l'autre action, avec un message ; « × » retire un raccourci ; « Par défaut » et « Tout rétablir ». Couper, copier, coller, annuler et tout sélectionner restent ceux du système. Les raccourcis modifiés valent partout : clavier, menus affichés, menu natif de macOS, fenêtre Aide > Raccourcis clavier (charte §4 : « tous les raccourcis sont reconfigurables ») ;
-  - **OFFLOAD** : valeurs de départ (arborescence, opérateur, empreintes, éjection), utilisées à la première ouverture, après une remise à zéro ou en mode « Repartir à zéro » ;
-  - **PLAYER** : TC incrusté et scopes au premier lancement d'un lecteur, couleur des nouveaux marqueurs, ouverture de la saisie du rapport à chaque nouvelle prise ;
-  - **TRANSCODE** : destination proposée à chaque ouverture (à côté de chaque source, ou un dossier).
+  - **OFFLOAD** : arborescence, opérateur, empreintes, éjection ;
+  - **PLAYER** : TC incrusté, scopes, couleur des nouveaux marqueurs, ouverture de la saisie du rapport à chaque nouvelle prise ;
+  - **TRANSCODE** : destination (à côté de chaque source, ou un dossier), en VIDEO comme en AUDIO.
+  - Retour d'Hervé du 22/10/2026 (les valeurs ne passaient pas dans le logiciel) : OFFLOAD, PLAYER et TRANSCODE se modifient dans un brouillon. **Valider** les enregistre et les applique aussitôt aux onglets ouverts (et aux lecteurs ouverts ensuite) ; **Annuler** ou la croix les abandonne. Chaque rubrique a un bouton **Valeurs d'usine** (à valider ensuite). Langue, ouverture et raccourcis s'appliquent dès qu'on les change.
   - Enregistrées sous `veriflow.prefs` (gardées par la remise à zéro), code `ui/src/stores/prefs.svelte.ts`, `ui/src/menu/ShortcutsEditor.svelte`.
 - **Données de l'application** (demande d'Hervé du 20/10/2026, Préférences > Général) :
   - « À l'ouverture de VERIFLOW » : *Reprendre où j'en étais* (par défaut) ou *Repartir à zéro*. À zéro, l'état de travail est effacé à chaque ouverture : destinations et options d'OFFLOAD, réglages de SYNC, dossiers dépliés de l'explorateur, affichages du PLAYER, sections ouvertes de TRANSCODE. Restent : langue, projets récents, favoris, préréglages TRANSCODE créés, sortie audio ;
-  - « Remettre à zéro maintenant » (même effacement) et « Effacer toutes les données » (tout, réglages compris), avec confirmation, puis rechargement ;
+  - « Vider l'état de travail » (même effacement) et « Effacer toutes les données » (tout, réglages compris), avec confirmation, puis rechargement ;
   - les projets `.veriflow`, rapports et copies ne sont jamais touchés ;
   - désinstallation sous Windows : seul l'installeur NSIS (`setup.exe`) est publié, en français et en anglais ; son désinstalleur propose « Supprimer les données de l'application » (dossiers `%APPDATA%` et `%LOCALAPPDATA%\com.veriflow.app`, où le moteur web garde les réglages). Le MSI, qui ne le propose pas, n'est plus publié. macOS et Linux n'ont pas de désinstalleur : « Effacer toutes les données » fait le même travail.
 - Code : `ui/src/lib/appdata.ts` (clés `veriflow.*` gardées ou effacées), appliqué dans `ui/src/main.ts` avant le chargement des vues.
@@ -59,7 +60,7 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 ## À tester sur poste réel
 
 - Raccourcis : changer « Nouveau projet » en Ctrl+Maj+N, vérifier le menu et le clavier ; donner à une action un raccourci déjà pris (message, l'autre action perd le sien) ; « Tout rétablir ». Sur macOS, le menu natif doit afficher le nouveau raccourci.
-- OFFLOAD, PLAYER, TRANSCODE : changer les valeurs, « Remettre à zéro maintenant » (Général) : l'onglet reprend les valeurs des Préférences.
+- OFFLOAD, PLAYER, TRANSCODE : changer les valeurs puis « Valider » : l'onglet les prend aussitôt. Changer puis « Annuler » : rien ne change. « Valeurs d'usine » puis « Valider » : valeurs d'origine.
 
 - Données : désinstaller avec la case « Supprimer les données de l'application » cochée, réinstaller : plus aucune destination d'OFFLOAD. « Repartir à zéro » : fermer, rouvrir, l'état de travail est vide, la langue et les favoris restent.
 
