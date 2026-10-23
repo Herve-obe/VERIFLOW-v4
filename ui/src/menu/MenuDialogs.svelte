@@ -1,14 +1,14 @@
 <!-- Fenêtres ouvertes depuis la barre de menus : Préférences, Raccourcis
      clavier, Licences, À propos. -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import Modal from "../components/Modal.svelte";
   import { MENUS, command, menuState, shortcutLabel, type Entry } from "./commands.svelte";
   import { i18n, setLanguage, t, LANGUAGES, type Language } from "../i18n/index.svelte";
   import { appInfo, type AppInfo } from "../lib/api";
   import { clearAllData, resetSession, setStartupMode, startupMode, type StartupMode } from "../lib/appdata";
   import { ask } from "../stores/confirm.svelte";
-  import { prefs } from "../stores/prefs.svelte";
+  import { prefs, applyPrefs, DEFAULT_PREFS, type AppliedPrefs } from "../stores/prefs.svelte";
   import { ALGORITHMS, type HashAlgo } from "../lib/offload";
   import { MARKER_COLORS, markerCss } from "../lib/logs";
   import { open as pickFolder } from "@tauri-apps/plugin-dialog";
@@ -26,15 +26,31 @@
   type PrefTab = (typeof PREF_TABS)[number];
   let prefTab = $state<PrefTab>("general");
 
+  // Rubriques OFFLOAD, PLAYER et TRANSCODE : modifiées dans un brouillon,
+  // appliquées aux onglets par « Valider », abandonnées par « Annuler ».
+  const snapshot = (): AppliedPrefs =>
+    structuredClone({ offload: $state.snapshot(prefs.offload), player: $state.snapshot(prefs.player), transcode: $state.snapshot(prefs.transcode) });
+  let draft = $state<AppliedPrefs>(snapshot());
+  $effect(() => {
+    if (menuState.dialog === "prefs") draft = untrack(snapshot);
+  });
+  function factory(section: keyof AppliedPrefs) {
+    draft[section] = structuredClone(DEFAULT_PREFS[section]) as never;
+  }
+  function validate() {
+    applyPrefs($state.snapshot(draft) as AppliedPrefs);
+    close();
+  }
+
   function toggleAlgo(id: HashAlgo) {
-    const a = prefs.offload.algorithms;
-    prefs.offload.algorithms = a.includes(id) ? a.filter((x) => x !== id) : [...a, id];
+    const a = draft.offload.algorithms;
+    draft.offload.algorithms = a.includes(id) ? a.filter((x) => x !== id) : [...a, id];
   }
   async function chooseTranscodeDest() {
     const r = await pickFolder({ directory: true, multiple: false });
     if (typeof r === "string") {
-      prefs.transcode.dest = r;
-      prefs.transcode.nextToSource = false;
+      draft.transcode.dest = r;
+      draft.transcode.nextToSource = false;
     }
   }
 
@@ -118,34 +134,35 @@
           <p class="note">{t("prefs.defaults.note")}</p>
           <label class="row">
             <span>{t("prefs.offload.template")}</span>
-            <input class="text mono" bind:value={prefs.offload.template} spellcheck="false" />
+            <input class="text mono" bind:value={draft.offload.template} spellcheck="false" />
           </label>
           <label class="row">
             <span>{t("prefs.offload.operator")}</span>
-            <input class="text" bind:value={prefs.offload.operator} />
+            <input class="text" bind:value={draft.offload.operator} />
           </label>
           <div class="row">
             <span>{t("prefs.offload.algorithms")}</span>
             <div class="checks">
               {#each ALGORITHMS as a (a.id)}
-                <label><input type="checkbox" checked={prefs.offload.algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} /> {a.label}</label>
+                <label><input type="checkbox" checked={draft.offload.algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} /> {a.label}</label>
               {/each}
             </div>
           </div>
           <label class="row">
             <span>{t("prefs.offload.eject")}</span>
-            <input type="checkbox" bind:checked={prefs.offload.eject} />
+            <input type="checkbox" bind:checked={draft.offload.eject} />
           </label>
+        <div class="factory"><button class="ghost" onclick={() => factory("offload")}>{t("prefs.factory")}</button></div>
         {:else if prefTab === "player"}
           <h3>{t("prefs.player")}</h3>
           <p class="note">{t("prefs.player.note")}</p>
           <label class="row">
             <span>{t("prefs.player.tc")}</span>
-            <input type="checkbox" bind:checked={prefs.player.tcOverlay} />
+            <input type="checkbox" bind:checked={draft.player.tcOverlay} />
           </label>
           <label class="row">
             <span>{t("prefs.player.scopes")}</span>
-            <input type="checkbox" bind:checked={prefs.player.scopes} />
+            <input type="checkbox" bind:checked={draft.player.scopes} />
           </label>
           <div class="row">
             <span>{t("prefs.player.marker")}</span>
@@ -153,9 +170,9 @@
               {#each MARKER_COLORS as c (c)}
                 <button
                   class="dot"
-                  class:on={prefs.player.markerColor === c}
+                  class:on={draft.player.markerColor === c}
                   style:background={markerCss(c)}
-                  onclick={() => (prefs.player.markerColor = c)}
+                  onclick={() => (draft.player.markerColor = c)}
                   aria-label={c}
                   title={c}
                 ></button>
@@ -164,24 +181,31 @@
           </div>
           <label class="row">
             <span>{t("prefs.player.reportAuto")}</span>
-            <input type="checkbox" bind:checked={prefs.player.reportAuto} />
+            <input type="checkbox" bind:checked={draft.player.reportAuto} />
           </label>
           <p class="note">{t("prefs.player.reportAuto.note")}</p>
+        <div class="factory"><button class="ghost" onclick={() => factory("player")}>{t("prefs.factory")}</button></div>
         {:else if prefTab === "transcode"}
           <h3>{t("prefs.transcode")}</h3>
           <p class="note">{t("prefs.transcode.note")}</p>
           <label class="row">
             <span>{t("prefs.transcode.next")}</span>
-            <input type="checkbox" bind:checked={prefs.transcode.nextToSource} />
+            <input type="checkbox" bind:checked={draft.transcode.nextToSource} />
           </label>
           <div class="row">
             <span>{t("prefs.transcode.dest")}</span>
-            <span class="path" title={prefs.transcode.dest}>{prefs.transcode.dest || t("transcode.dest.none")}</span>
+            <span class="path" title={draft.transcode.dest}>{draft.transcode.dest || t("transcode.dest.none")}</span>
             <button class="ghost" onclick={chooseTranscodeDest}>{t("offload.browse")}</button>
-            {#if prefs.transcode.dest}<button class="ghost" onclick={() => (prefs.transcode.dest = "")}>×</button>{/if}
+            {#if draft.transcode.dest}<button class="ghost" onclick={() => (draft.transcode.dest = "")}>×</button>{/if}
           </div>
+          <div class="factory"><button class="ghost" onclick={() => factory("transcode")}>{t("prefs.factory")}</button></div>
         {/if}
       </section>
+    </div>
+    <div class="footer">
+      <span class="note">{t("prefs.footer.note")}</span>
+      <button class="ghost" onclick={close}>{t("prefs.cancel")}</button>
+      <button class="primary" onclick={validate}>{t("prefs.validate")}</button>
     </div>
   </Modal>
 {:else if menuState.dialog === "shortcuts"}
@@ -229,8 +253,31 @@
   .prefs {
     display: grid;
     grid-template-columns: 180px 1fr;
-    height: 100%;
+    height: calc(100% - 52px);
     min-height: 0;
+  }
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-2);
+    height: 52px;
+    padding: 0 var(--vf-space-4);
+    border-top: 1px solid var(--vf-border);
+  }
+  .footer .note {
+    flex: 1;
+    margin: 0;
+  }
+  .footer .primary {
+    background: var(--vf-accent);
+    color: var(--vf-on-accent);
+    border-color: transparent;
+    font-weight: 600;
+  }
+  .factory {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--vf-space-3);
   }
   .sections {
     display: flex;
