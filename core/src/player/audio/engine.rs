@@ -48,8 +48,25 @@ pub struct OutputChoice {
     pub first_channel: u16,
 }
 
+/// Exécute `f` sur un fil neuf. Sous Windows, cpal initialise COM en mode
+/// multithread sur le fil appelant ; un fil réutilisé, déjà passé en mode
+/// « appartement » (sélecteur de fichiers, par exemple), le refuse : « Failed
+/// to get audio client: Impossible de modifier le mode thread » (test d'Hervé
+/// du 24/10/2026).
+fn on_fresh_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    thread::scope(|s| {
+        s.spawn(f)
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e))
+    })
+}
+
 /// Liste les sorties audio de tous les pilotes disponibles.
 pub fn output_devices() -> Vec<OutputDevice> {
+    on_fresh_thread(list_outputs)
+}
+
+fn list_outputs() -> Vec<OutputDevice> {
     let mut out = Vec::new();
     for host_id in cpal::available_hosts() {
         let Ok(host) = cpal::host_from_id(host_id) else {
@@ -203,6 +220,10 @@ impl AudioEngine {
 
     /// Ouvre une session sur la sortie choisie.
     pub fn open_with(paths: &[PathBuf], choice: &OutputChoice) -> Result<Self> {
+        on_fresh_thread(|| Self::open_on_this_thread(paths, choice))
+    }
+
+    fn open_on_this_thread(paths: &[PathBuf], choice: &OutputChoice) -> Result<Self> {
         // Lecture préalable pour connaître la fréquence des fichiers.
         let file_rate = Producer::open(paths, 48_000)?.info().sample_rate;
 
