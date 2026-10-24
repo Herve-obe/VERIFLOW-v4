@@ -33,7 +33,7 @@
 <div class="picker">
   <label>
     <span>{t("audio.output")}</span>
-    <select value={output.choice.device ?? ""} onchange={(e) => pickDevice(e.currentTarget.value)} disabled={output.loading}>
+    <select value={output.choice.device ?? ""} onchange={(e) => (pickDevice(e.currentTarget.value), e.currentTarget.blur())} disabled={output.loading}>
       <option value="">{t("audio.output.default")}</option>
       {#each hosts as h (h)}
         <optgroup label={hostLabel(h)}>
@@ -49,7 +49,7 @@
       <span>{t("audio.output.pair")}</span>
       <select
         value={output.choice.first_channel}
-        onchange={(e) => setOutput({ device: output.choice.device, first_channel: Number(e.currentTarget.value) })}
+        onchange={(e) => (setOutput({ device: output.choice.device, first_channel: Number(e.currentTarget.value) }), e.currentTarget.blur())}
       >
         {#each Array.from({ length: pairs }, (_, i) => i * 2) as c (c)}
           <option value={c}>{c + 1}-{c + 2}</option>
