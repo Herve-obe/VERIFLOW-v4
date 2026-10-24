@@ -431,6 +431,15 @@ fn modes_timecode_only_and_waveform_only() {
     assert_eq!(p.audio, Some(1));
     assert_eq!(p.method, Method::Waveform);
     assert!((p.offset + 10.0).abs() < 0.001, "décalage {}", p.offset);
+
+    // Automatique : le leurre à la même heure n'est pas confirmé par la forme
+    // d'onde ; le vrai son est cherché et retenu, avec la remarque.
+    let (vs, as_) = files();
+    let p = analyze_with(vs, as_, Options::default()).pairs[0].clone();
+    assert_eq!(p.audio, Some(1), "son retenu : {:?}", p.audio);
+    assert_eq!(p.method, Method::Waveform);
+    assert!((p.offset + 10.0).abs() < 0.001, "décalage {}", p.offset);
+    assert_eq!(p.note_key.as_deref(), Some("tc_wrong"));
 }
 
 #[test]

@@ -71,7 +71,7 @@ Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF cou
 - re-wrap MOV des deux plans : décalage résiduel mesuré entre la piste de l'enregistreur et la piste caméra des fichiers produits : 0 échantillon ;
 
 Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même heure, le vrai son (stéréo) daté de 08:00:00 :
-- méthode Automatique : leurre choisi, confiance 11 % signalée en orange, remarque « forme d'onde peu ressemblante » ;
+- méthode Automatique : jusqu'au 24/10/2026, leurre choisi (confiance 11 %, signalée en orange). Depuis (retour d'Hervé : rushes Panasonic sans LTC, horloge non synchronisée, mauvais son retenu), un calage par timecode que la forme d'onde ne confirme pas déclenche la recherche dans tous les sons : vrai son trouvé, remarque « timecode sans rapport avec le son : son retrouvé par la forme d'onde » (test automatique) ;
 - méthode Forme d'onde seule : vrai son trouvé, −10,000 s, confiance 99 % ;
 - re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
