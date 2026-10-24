@@ -66,6 +66,14 @@
     }
   }
 
+  // Entrée dans un champ (clavier principal ou pavé numérique) : enregistre.
+  function saveOnEnter(e: KeyboardEvent) {
+    if (e.key === "Enter" && dirty.size > 0 && !saving && app.project) {
+      e.preventDefault();
+      save();
+    }
+  }
+
   const tech = $derived.by(() => {
     if (!single) return [];
     const p = single.details.probe;
@@ -128,6 +136,7 @@
                 value={draft[f.id] === MIXED ? "" : draft[f.id]}
                 placeholder={draft[f.id] === MIXED ? t("media.mixed") : ""}
                 oninput={(e) => edit(f.id, e.currentTarget.value)}
+                onkeydown={saveOnEnter}
               />
             {/if}
           </label>
@@ -141,7 +150,7 @@
         {#each Array.from({ length: Math.min(channels, 64) }, (_, i) => i + 1) as n (n)}
           <label class:edited={dirty.has(`track.${n}`)}>
             <span>{t("media.track")} {n}</span>
-            <input value={draft[`track.${n}`] ?? ""} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} />
+            <input value={draft[`track.${n}`] ?? ""} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} onkeydown={saveOnEnter} />
           </label>
         {/each}
       </fieldset>
@@ -224,14 +233,19 @@
     font-size: var(--vf-text-sm);
     min-width: 0;
   }
+  /* Barre du bas sur toute la largeur du panneau, séparée des champs
+     (le bouton seul flottait par-dessus la colonne). */
   .save {
     display: flex;
     align-items: center;
     gap: var(--vf-space-2);
     position: sticky;
-    bottom: 0;
+    bottom: calc(-1 * var(--vf-space-3));
+    margin: 0 calc(-1 * var(--vf-space-3)) calc(-1 * var(--vf-space-3));
+    padding: var(--vf-space-2) var(--vf-space-3);
     background: var(--vf-surface);
-    padding-top: var(--vf-space-2);
+    border-top: 1px solid var(--vf-border);
+    box-shadow: 0 -6px 10px -6px var(--vf-bg);
   }
   button {
     background: var(--vf-accent);

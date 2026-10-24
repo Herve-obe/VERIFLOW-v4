@@ -12,6 +12,7 @@
   import { app, openInPlayer, addToReport, sendToTranscode } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
+  import { framesToTc } from "../../lib/timecode";
   import { isTyping } from "../../shortcuts";
   import { reveal } from "../../lib/offload";
   import { list, describe, fields, exportMeta, clock, type MediaEntry, type Described, type FieldDef, type ExportKind } from "../../lib/media";
@@ -196,7 +197,15 @@
     const d = details.get(e.path)?.details;
     return clock(d?.probe?.duration ?? (d?.wav ? d.wav.frames / d.wav.sample_rate : 0));
   };
-  const tc = (e: MediaEntry) => details.get(e.path)?.details.probe?.start_timecode ?? "";
+  // TC de début : celui de la vidéo, sinon la référence temporelle BWF du
+  // WAV, affichée à 25 i/s comme dans le PLAYER (retour d'Hervé du 24/10/2026).
+  const tc = (e: MediaEntry) => {
+    const d = details.get(e.path)?.details;
+    if (d?.probe?.start_timecode) return d.probe.start_timecode;
+    const w = d?.wav;
+    if (w?.time_reference == null || !w.sample_rate) return "";
+    return framesToTc(Math.floor((w.time_reference / w.sample_rate) * 25), { num: 25, den: 1 });
+  };
   const val = (e: MediaEntry, k: string) => details.get(e.path)?.values[k] ?? "";
 
   onMount(async () => {
