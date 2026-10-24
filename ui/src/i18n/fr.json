@@ -673,6 +673,7 @@
   "sync.note.no_same_time": "aucun son à la même heure",
   "sync.note.tc_corrected": "timecode corrigé de {s} s par la forme d'onde",
   "sync.note.weak_waveform": "forme d'onde peu ressemblante : décalage du timecode conservé",
+  "sync.note.tc_wrong": "timecode sans rapport avec le son : son retrouvé par la forme d'onde",
   "sync.unused": "non utilisé",
   "sync.none": "aucun son",
   "sync.method.timecode": "Timecode",

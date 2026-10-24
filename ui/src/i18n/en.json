@@ -673,6 +673,7 @@
   "sync.note.no_same_time": "no sound at the same time",
   "sync.note.tc_corrected": "timecode corrected by {s} s using the waveform",
   "sync.note.weak_waveform": "waveforms differ: timecode offset kept",
+  "sync.note.tc_wrong": "timecode unrelated to the sound: sound found by waveform",
   "sync.unused": "unused",
   "sync.none": "no sound",
   "sync.method.timecode": "Timecode",

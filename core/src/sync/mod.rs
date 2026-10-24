@@ -415,6 +415,20 @@ pub fn search(
 }
 
 /// Analyse un lot : lecture du temps, appariement, affinage, dérive.
+/// La forme d'onde confirme-t-elle le calage par timecode (au milieu de la
+/// zone commune, dans la tolérance) ?
+fn timecode_confirmed(video: &SyncFile, audio: &SyncFile, offset: f64, window: f64) -> bool {
+    let from = offset.max(0.0);
+    let to = (offset + audio.duration).min(video.duration);
+    let common = to - from;
+    if common < 2.0 {
+        return false;
+    }
+    let length = common.min(10.0);
+    let at = from + (common - length) / 2.0;
+    refine_at(video, audio, offset, window, at, length).is_ok_and(|(_, c)| c >= MIN_CONFIDENCE)
+}
+
 pub fn analyze(
     videos: &[PathBuf],
     audios: &[PathBuf],
@@ -496,6 +510,38 @@ pub fn analyze(
             }
             continue;
         };
+        // Automatique : un calage par timecode que la forme d'onde ne confirme
+        // pas (horloges de la caméra et de l'enregistreur non synchronisées
+        // au tournage) est remplacé par une recherche dans tous les sons
+        // (retour d'Hervé du 24/10/2026 : mauvais son retenu).
+        let mut ai = ai;
+        if search_all
+            && opts.mode == Mode::Auto
+            && pair.method != Method::Waveform
+            && has_sound
+            && a[ai].channels > 0
+            && !timecode_confirmed(video, &a[ai], pair.offset, opts.window)
+        {
+            match search(video, &a, cancel) {
+                Ok(Some((found, offset, conf))) => {
+                    ai = found;
+                    pair.audio = Some(found);
+                    pair.offset = offset;
+                    pair.method = Method::Waveform;
+                    pair.refined = true;
+                    pair.confidence = Some(conf);
+                    pair.set_note(
+                        "tc_wrong",
+                        None,
+                        "timecode sans rapport avec le son : son retrouvé par la forme d'onde"
+                            .into(),
+                    );
+                }
+                Ok(None) => {}
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(_) => {}
+            }
+        }
         let audio = &a[ai];
         if audio.channels == 0 || !has_sound {
             continue;
