@@ -230,10 +230,14 @@ fn ltc_on_the_camera_gives_the_time_and_is_excluded() {
         "pcm_s24le",
         "-t",
         "12",
+        // Horloge interne de la caméra, sans rapport : le LTC doit primer.
+        "-timecode",
+        "09:00:00:00",
         v.to_str().unwrap(),
     ]);
     let f = describe(&v);
     assert_eq!(f.source, TimeSource::Ltc);
+    assert_eq!(f.timecode.as_deref(), Some("14:30:00:00"));
     assert_eq!(f.ltc_channel, Some(1));
     assert!((f.start.unwrap() - 52_200.0).abs() < 0.05, "{:?}", f.start);
     // Son de la pièce à 14:29:55:00 : décalage attendu 0 après les 5 s de différence de début.

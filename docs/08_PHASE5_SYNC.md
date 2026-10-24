@@ -9,7 +9,7 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 
 | Source | Détail |
 |---|---|
-| Métadonnées | Timecode de la piste tmcd QuickTime, du MXF ou du conteneur ; référence temporelle BWF (bext) des WAV |
+| Métadonnées | Timecode de la piste tmcd QuickTime, du MXF ou du conteneur ; référence temporelle BWF (bext) des WAV. Un LTC trouvé sur une piste prime sur ce timecode depuis le 24/10/2026 (une Panasonic écrit son horloge interne, non synchronisée, alors que le LTC vient du boîtier) |
 | LTC | Cherché sur chaque canal pendant les 4 premières secondes quand le fichier n'a pas de timecode. Le canal LTC est ensuite exclu de la corrélation et du re-wrap. Cadences NTSC : heure corrigée de 1,001 |
 | Aucune | Le plan peut être trouvé par la forme d'onde (option « Chercher par la forme d'onde ») |
 

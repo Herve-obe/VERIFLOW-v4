@@ -34,7 +34,8 @@
   function load() {
     const d = {
       options: { mode: "auto", refine: true, waveform_search: true, drift: true, window: 2 } as Options,
-      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: false, correct_drift: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
+      // Une piste mono par canal par défaut : chaque micro sur sa piste au montage (retour d'Hervé du 24/10/2026).
+      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: true, correct_drift: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
       validatedOnly: false,
       nextToVideo: true,
     };
