@@ -891,5 +891,9 @@
   "prefs.factory": "Factory values",
   "prefs.validate": "Apply",
   "prefs.cancel": "Cancel",
-  "prefs.footer.note": "Language, startup and shortcuts apply at once; OFFLOAD, PLAYER and TRANSCODE when you apply."
+  "prefs.footer.note": "Language, startup and shortcuts apply at once; OFFLOAD, PLAYER and TRANSCODE when you apply.",
+  "sync.timelines": "Editing timelines",
+  "explorer.eject": "Safely eject",
+  "explorer.ejecting": "Ejecting:",
+  "explorer.ejected": "Ejected, you can unplug it:"
 }

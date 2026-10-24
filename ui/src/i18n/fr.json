@@ -891,5 +891,9 @@
   "prefs.factory": "Valeurs d'usine",
   "prefs.validate": "Valider",
   "prefs.cancel": "Annuler",
-  "prefs.footer.note": "Langue, ouverture et raccourcis s'appliquent aussitôt ; OFFLOAD, PLAYER et TRANSCODE à la validation."
+  "prefs.footer.note": "Langue, ouverture et raccourcis s'appliquent aussitôt ; OFFLOAD, PLAYER et TRANSCODE à la validation.",
+  "sync.timelines": "Timelines pour le montage",
+  "explorer.eject": "Éjecter en toute sécurité",
+  "explorer.ejecting": "Éjection en cours :",
+  "explorer.ejected": "Éjecté, tu peux le débrancher :"
 }

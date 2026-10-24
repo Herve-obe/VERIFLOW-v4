@@ -4,6 +4,7 @@
   import { explorer, loadChildren } from "../../stores/explorer.svelte";
   import { norm, type DirEntry } from "../../lib/explorer";
   import { beginDrag } from "../../stores/drag.svelte";
+  import { t } from "../../i18n/index.svelte";
 
   let {
     entry,
@@ -16,6 +17,7 @@
     onContext,
     label = null,
     detail = null,
+    onEject = null,
   }: {
     entry: DirEntry;
     depth?: number;
@@ -27,6 +29,8 @@
     onContext: (e: MouseEvent, path: string) => void;
     label?: string | null;
     detail?: string | null;
+    /** Support éjectable : bouton « Éjecter » sur la ligne. */
+    onEject?: (() => void) | null;
   } = $props();
 
   const key = $derived(norm(entry.path));
@@ -71,6 +75,19 @@
   <svg class="folder" viewBox="0 0 16 16"><path d="M1.5 3.5h5l1.5 1.5h6.5v8h-13z" fill="currentColor" /></svg>
   <span class="name">{label ?? entry.name}</span>
   {#if detail}<span class="detail">{detail}</span>{/if}
+  {#if onEject}
+    <button
+      class="eject"
+      tabindex="-1"
+      title={t("explorer.eject")}
+      aria-label={t("explorer.eject")}
+      onpointerdown={(e) => e.stopPropagation()}
+      onclick={(e) => {
+        e.stopPropagation();
+        onEject();
+      }}>⏏</button
+    >
+  {/if}
 </div>
 
 {#if open && kids}
@@ -143,5 +160,17 @@
     .row.sel {
       background: color-mix(in srgb, var(--vf-accent) 25%, transparent);
     }
+  }
+  .eject {
+    border: 0;
+    background: none;
+    color: var(--vf-text-muted);
+    padding: 0 var(--vf-space-1);
+    border-radius: var(--vf-radius-sm);
+    line-height: 1;
+  }
+  .eject:hover {
+    color: var(--vf-accent);
+    background: var(--vf-surface-hover);
   }
 </style>
