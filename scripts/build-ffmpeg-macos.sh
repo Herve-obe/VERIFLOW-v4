@@ -29,8 +29,10 @@ PREFIX="$WORK/prefix"
 mkdir -p "$SRC" "$PREFIX"
 
 FFMPEG_VERSION="9.0.2"
-FFMPEG_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
-FFMPEG_SHA="8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
+# Miroir officiel sur GitHub, au commit de l'étiquette n9.0.2 : ffmpeg.org
+# refusait les connexions des machines macOS de GitHub (build du 24/10/2026).
+FFMPEG_REPO="https://github.com/FFmpeg/FFmpeg.git"
+FFMPEG_COMMIT="946fcce07b6dcd0331c8cc609192aeff5e1924f8"
 
 # nom|dépôt|commit (ceux de BtbN/FFmpeg-Builds, autobuild-2026-09-30-13-08).
 GIT_SOURCES="
@@ -153,7 +155,8 @@ fetch_all() {
       tar -xJf "$FFBUILD_SOURCES/$name-$commit.tar.xz" -C "$SRC/$name" --strip-components 1
     done
     [ -d "$SRC/lame" ] || { mkdir -p "$SRC/lame" && tar -xJf "$FFBUILD_SOURCES/lame-r$LAME_REV.tar.xz" -C "$SRC/lame" --strip-components 1; }
-    [ -d "$SRC/ffmpeg" ] || { mkdir -p "$SRC/ffmpeg" && tar -xJf "$FFBUILD_SOURCES/ffmpeg-$FFMPEG_VERSION.tar.xz" -C "$SRC/ffmpeg" --strip-components 1; }
+    [ -d "$SRC/ffmpeg" ] || { mkdir -p "$SRC/ffmpeg" && tar -xJf "$FFBUILD_SOURCES/ffmpeg-$FFMPEG_VERSION-$FFMPEG_COMMIT.tar.xz" -C "$SRC/ffmpeg" --strip-components 1; }
+    echo "$FFMPEG_VERSION" >"$SRC/ffmpeg/VERSION"
     return 0
   fi
   for line in $GIT_SOURCES; do
@@ -165,15 +168,10 @@ fetch_all() {
     log "source lame (r$LAME_REV)"
     svn_get checkout "$SRC/lame"
   fi
-  if [ ! -d "$SRC/ffmpeg" ]; then
-    log "source ffmpeg $FFMPEG_VERSION"
-    curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
-    local got
-    got="$(sha256 "$WORK/ffmpeg.tar.xz")"
-    [ "$got" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte $got, attendue $FFMPEG_SHA"
-    mkdir -p "$SRC/ffmpeg"
-    tar -xJf "$WORK/ffmpeg.tar.xz" -C "$SRC/ffmpeg" --strip-components 1
-  fi
+  log "source ffmpeg $FFMPEG_VERSION ($FFMPEG_COMMIT)"
+  fetch_git ffmpeg "$FFMPEG_REPO" "$FFMPEG_COMMIT"
+  # Comme l'archive officielle : version lue par configure dans VERSION.
+  echo "$FFMPEG_VERSION" >"$SRC/ffmpeg/VERSION"
 }
 
 cmake_build() { # dossier source, options...
@@ -353,9 +351,8 @@ case "$MODE" in
     rm -rf "$WORK/lame-export"
     svn_get export "$WORK/lame-export/lame-r$LAME_REV"
     tar -C "$WORK/lame-export" -cJf "$OUT/lame-r$LAME_REV.tar.xz" "lame-r$LAME_REV"
-    [ -f "$WORK/ffmpeg.tar.xz" ] || curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
-    [ "$(sha256 "$WORK/ffmpeg.tar.xz")" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte incorrecte"
-    cp "$WORK/ffmpeg.tar.xz" "$OUT/ffmpeg-$FFMPEG_VERSION.tar.xz"
+    log "archive ffmpeg"
+    git -C "$SRC/ffmpeg" archive --format=tar --prefix="ffmpeg-$FFMPEG_VERSION/" "$FFMPEG_COMMIT" | xz -T0 >"$OUT/ffmpeg-$FFMPEG_VERSION-$FFMPEG_COMMIT.tar.xz"
     cp "$SCRIPT" "$OUT/"
     ;;
   build)
@@ -372,7 +369,7 @@ case "$MODE" in
       echo "FFmpeg $FFMPEG_VERSION pour $OS $ARCH${MIN:+ (macOS $MIN et plus)}, compilé par VERIFLOW."
       echo "Script : scripts/build-ffmpeg-macos.sh ; sources : archive ffmpeg-sources de la Release."
       echo
-      echo "ffmpeg-$FFMPEG_VERSION.tar.xz sha256 $FFMPEG_SHA"
+      echo "ffmpeg|$FFMPEG_REPO|$FFMPEG_COMMIT (n$FFMPEG_VERSION)"
       for line in $GIT_SOURCES; do echo "$line"; done
       echo "lame|$LAME_REPO|r$LAME_REV"
       echo
