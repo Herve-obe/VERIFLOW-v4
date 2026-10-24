@@ -27,10 +27,27 @@ fn subdirs(dir: &Path) -> impl Iterator<Item = (PathBuf, String)> {
         .flatten()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !hidden_by_system(e))
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             (!hidden(&name)).then(|| (e.path(), name))
         })
+}
+
+/// Dossier masqué ou « système » pour Windows : FOUND.000 de chkdsk, par
+/// exemple, que l'Explorateur n'affiche jamais (retour d'Hervé du 24/10/2026).
+#[cfg(windows)]
+fn hidden_by_system(e: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const HIDDEN: u32 = 0x2;
+    const SYSTEM: u32 = 0x4;
+    e.metadata()
+        .is_ok_and(|m| m.file_attributes() & (HIDDEN | SYSTEM) != 0)
+}
+
+#[cfg(not(windows))]
+fn hidden_by_system(_e: &std::fs::DirEntry) -> bool {
+    false
 }
 
 /// Sous-dossiers d'un dossier, triés sans tenir compte de la casse.

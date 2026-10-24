@@ -762,5 +762,8 @@
   "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)",
   "player.tracks.count": "Tracks",
   "player.samplerate": "Sample rate",
-  "player.bitdepth": "Bit depth"
+  "player.bitdepth": "Bit depth",
+  "explorer.eject": "Safely eject",
+  "explorer.ejecting": "Ejecting:",
+  "explorer.ejected": "Ejected, you can unplug it:"
 }

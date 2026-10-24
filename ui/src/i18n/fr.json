@@ -762,5 +762,8 @@
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)",
   "player.tracks.count": "Pistes",
   "player.samplerate": "Fréquence",
-  "player.bitdepth": "Résolution"
+  "player.bitdepth": "Résolution",
+  "explorer.eject": "Éjecter en toute sécurité",
+  "explorer.ejecting": "Éjection en cours :",
+  "explorer.ejected": "Éjecté, tu peux le débrancher :"
 }

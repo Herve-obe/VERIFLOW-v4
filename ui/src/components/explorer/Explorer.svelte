@@ -8,6 +8,19 @@
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
   import { norm, projectRoots, watch } from "../../lib/explorer";
+  import { eject } from "../../lib/offload";
+
+  // Éjection d'un support depuis l'explorateur (même retrait sécurisé
+  // qu'après une copie).
+  async function ejectVolume(mount: string, name: string) {
+    app.status = `${t("explorer.ejecting")} ${name}`;
+    try {
+      await eject(mount);
+      app.status = `${t("explorer.ejected")} ${name}`;
+    } catch (e) {
+      app.status = `${t("offload.eject.error")} : ${e}`;
+    }
+  }
 
   export interface ExplorerAction {
     label: string;
@@ -113,7 +126,8 @@
         <TreeNode
           entry={entry(v.mount_point)}
           label={v.name}
-          detail={`${bytes(v.available)}${v.kind === "hdd" ? " · HDD" : ""}${v.removable ? " ⏏" : ""}`}
+          detail={`${bytes(v.available)}${v.kind === "hdd" ? " · HDD" : ""}`}
+          onEject={v.removable ? () => ejectVolume(v.mount_point, v.name) : null}
           {expanded}
           {selected}
           {toggle}
