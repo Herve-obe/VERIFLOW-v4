@@ -167,7 +167,7 @@ fetch_all() {
   fi
   if [ ! -d "$SRC/ffmpeg" ]; then
     log "source ffmpeg $FFMPEG_VERSION"
-    curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
+    curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
     local got
     got="$(sha256 "$WORK/ffmpeg.tar.xz")"
     [ "$got" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte $got, attendue $FFMPEG_SHA"
@@ -353,7 +353,7 @@ case "$MODE" in
     rm -rf "$WORK/lame-export"
     svn_get export "$WORK/lame-export/lame-r$LAME_REV"
     tar -C "$WORK/lame-export" -cJf "$OUT/lame-r$LAME_REV.tar.xz" "lame-r$LAME_REV"
-    [ -f "$WORK/ffmpeg.tar.xz" ] || curl -fsSL --retry 4 -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
+    [ -f "$WORK/ffmpeg.tar.xz" ] || curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors -o "$WORK/ffmpeg.tar.xz" "$FFMPEG_URL"
     [ "$(sha256 "$WORK/ffmpeg.tar.xz")" = "$FFMPEG_SHA" ] || fail "ffmpeg-$FFMPEG_VERSION.tar.xz : empreinte incorrecte"
     cp "$WORK/ffmpeg.tar.xz" "$OUT/ffmpeg-$FFMPEG_VERSION.tar.xz"
     cp "$SCRIPT" "$OUT/"
