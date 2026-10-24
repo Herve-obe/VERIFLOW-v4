@@ -42,7 +42,8 @@
     "windows": {
       "nsis": {
         "languages": ["French", "English"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installMode": "perMachine"
       }
     },
     "macOS": {
