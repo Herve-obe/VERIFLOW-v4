@@ -677,12 +677,16 @@
     border-radius: var(--vf-radius-sm);
     cursor: pointer;
   }
-  .solo.on {
+  /* Même précision que « .buttons button », sinon son fond l'emporte et
+     seul le texte change (bouton noirci, test d'Hervé du 24/10/2026). */
+  .buttons button.solo.on {
     background: var(--vf-warning);
+    border-color: var(--vf-warning);
     color: var(--vf-on-accent);
   }
-  .mute.on {
+  .buttons button.mute.on {
     background: var(--vf-error);
+    border-color: var(--vf-error);
     color: var(--vf-on-accent);
   }
   /* Même hauteur que les pistes : nom, vumètres et fader sur les mêmes
