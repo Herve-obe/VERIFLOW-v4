@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
     WebviewWindowBuilder, WindowEvent,
 };
 
@@ -29,13 +29,18 @@ pub struct QuickMedia {
     pub name: String,
 }
 
-/// Position et taille mémorisées (points logiques).
+/// Position et taille mémorisées, en pixels physiques : avec deux écrans à
+/// des échelles différentes (portable à 150 %, téléviseur à 100 %), des
+/// points logiques tombaient sur le mauvais écran (test d'Hervé du 24/10/2026).
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Geometry {
     x: f64,
     y: f64,
     width: f64,
     height: f64,
+    /// Fenêtre agrandie sur l'écran qui contient (x, y).
+    #[serde(default)]
+    maximized: bool,
 }
 
 /// Média demandé, relu par la fenêtre à son chargement.
@@ -46,14 +51,13 @@ pub struct QuickState(Mutex<Option<QuickMedia>>);
 fn on_screen(app: &AppHandle, g: &Geometry) -> bool {
     app.available_monitors().is_ok_and(|screens| {
         screens.iter().any(|s| {
-            let scale = s.scale_factor();
-            let p = s.position().to_logical::<f64>(scale);
-            let z = s.size().to_logical::<f64>(scale);
+            let (px, py) = (f64::from(s.position().x), f64::from(s.position().y));
+            let (w, h) = (f64::from(s.size().width), f64::from(s.size().height));
             // Barre de titre visible : le haut de la fenêtre est sur l'écran.
-            g.x + g.width > p.x + 40.0
-                && g.x < p.x + z.width - 40.0
-                && g.y >= p.y - 10.0
-                && g.y < p.y + z.height - 40.0
+            g.x + g.width > px + 40.0
+                && g.x < px + w - 40.0
+                && g.y >= py - 10.0
+                && g.y < py + h - 40.0
         })
     })
 }
@@ -83,20 +87,23 @@ pub async fn quick_open(
     let builder =
         WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html?quick=1".into()))
             .title(&title)
-            .min_inner_size(480.0, 320.0);
-    let builder = match geometry {
-        Some(g) => builder
-            .inner_size(g.width.max(480.0), g.height.max(320.0))
-            .position(g.x, g.y),
-        None => builder.inner_size(1200.0, 800.0).center(),
+            .min_inner_size(480.0, 320.0)
+            .inner_size(1200.0, 800.0);
+    let window = match geometry {
+        // Créée cachée, placée en pixels physiques sur son écran, puis montrée.
+        Some(g) => {
+            let w = builder.visible(false).build().map_err(text)?;
+            let _ = w.set_position(PhysicalPosition::new(g.x, g.y));
+            let _ = w.set_size(PhysicalSize::new(g.width.max(480.0), g.height.max(320.0)));
+            if g.maximized {
+                let _ = w.maximize();
+            }
+            let _ = w.show();
+            let _ = w.set_focus();
+            w
+        }
+        None => builder.center().build().map_err(text)?,
     };
-    let window = builder.build().map_err(text)?;
-    if let Some(g) = geometry {
-        // Deux passes : la taille et la position suivent l'échelle de l'écran
-        // visé, connue seulement une fois la fenêtre placée.
-        let _ = window.set_position(LogicalPosition::new(g.x, g.y));
-        let _ = window.set_size(LogicalSize::new(g.width, g.height));
-    }
     let handle = app.clone();
     window.on_window_event(move |e| {
         if let WindowEvent::Destroyed = e {

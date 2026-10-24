@@ -692,7 +692,7 @@
           class:on={monitorScreen >= 0}
           value={monitorScreen}
           onfocus={loadScreens}
-          onchange={(e) => chooseMonitor(Number(e.currentTarget.value))}
+          onchange={(e) => (chooseMonitor(Number(e.currentTarget.value)), e.currentTarget.blur())}
           title={t("player.monitor.hint")}
           aria-label={t("player.monitor")}
         >

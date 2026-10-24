@@ -8,7 +8,7 @@
   import { t } from "./i18n/index.svelte";
   import { isTyping } from "./shortcuts";
   import { setMode } from "./stores/app.svelte";
-  import { onQuickLoad, pendingQuick, saveGeometry, sendToPlayer, type QuickMedia } from "./lib/quick";
+  import { loadGeometry, onQuickLoad, pendingQuick, saveGeometry, sendToPlayer, type QuickMedia } from "./lib/quick";
 
   const win = getCurrentWindow();
   let media = $state<QuickMedia | null>(null);
@@ -18,14 +18,21 @@
     if (media) setMode(media.kind);
   });
 
-  /** Mémorise la place de la fenêtre (rouverte au même endroit, même écran). */
+  /** Mémorise la place de la fenêtre (rouverte au même endroit, même écran),
+   *  en pixels physiques : les écrans n'ont pas forcément la même échelle.
+   *  Agrandie, elle garde sa taille normale et note l'écran où elle l'est. */
   async function remember() {
     try {
-      const scale = await win.scaleFactor();
-      const pos = (await win.outerPosition()).toLogical(scale);
-      const size = (await win.innerSize()).toLogical(scale);
-      if (!(await win.isMinimized()) && !(await win.isMaximized())) {
-        saveGeometry({ x: pos.x, y: pos.y, width: size.width, height: size.height });
+      if (await win.isMinimized()) return;
+      const pos = await win.outerPosition();
+      const size = await win.innerSize();
+      if (await win.isMaximized()) {
+        const last = loadGeometry();
+        // Un point bien à l'intérieur de l'écran (le bord d'une fenêtre
+        // agrandie déborde un peu de l'écran sous Windows).
+        saveGeometry({ x: pos.x + 32, y: pos.y + 32, width: last?.width ?? size.width, height: last?.height ?? size.height, maximized: true });
+      } else {
+        saveGeometry({ x: pos.x, y: pos.y, width: size.width, height: size.height, maximized: false });
       }
     } catch {
       /* fenêtre en cours de fermeture */

@@ -13,10 +13,12 @@ interface Geometry {
   y: number;
   width: number;
   height: number;
+  /** Fenêtre agrandie sur l'écran qui contient (x, y). */
+  maximized?: boolean;
 }
 
-/** Dernière place de la fenêtre (points logiques), partagée par les fenêtres. */
-const GEOMETRY_KEY = "veriflow.quick.geometry";
+/** Dernière place de la fenêtre (pixels physiques), partagée par les fenêtres. */
+const GEOMETRY_KEY = "veriflow.quick.geometry.px";
 
 export function saveGeometry(g: Geometry) {
   try {
@@ -26,7 +28,7 @@ export function saveGeometry(g: Geometry) {
   }
 }
 
-function loadGeometry(): Geometry | null {
+export function loadGeometry(): Geometry | null {
   try {
     const g = JSON.parse(localStorage.getItem(GEOMETRY_KEY) ?? "null");
     return g && [g.x, g.y, g.width, g.height].every(Number.isFinite) ? g : null;

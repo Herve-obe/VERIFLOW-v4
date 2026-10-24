@@ -214,7 +214,7 @@
 </script>
 
 <div class="scopes">
-  <select bind:value={kind} aria-label={t("player.scope")}>
+  <select bind:value={kind} onchange={(e) => e.currentTarget.blur()} aria-label={t("player.scope")}>
     <option value="waveform">{t("player.scope.waveform")}</option>
     <option value="parade">{t("player.scope.parade")}</option>
     <option value="vectorscope">{t("player.scope.vectorscope")}</option>
