@@ -259,16 +259,19 @@ pub fn describe(path: &Path) -> SyncFile {
         }
         f.tracks = (0..w.channels as usize).map(|c| w.track_name(c)).collect();
     }
-    // LTC : heure de début si les métadonnées n'en donnent pas, et canal à
-    // exclure dans tous les cas.
+    // LTC : il prime sur le timecode des métadonnées, et son canal est exclu
+    // dans tous les cas. Une caméra peut écrire son horloge interne dans le
+    // fichier alors que le LTC vient du boîtier synchronisé avec
+    // l'enregistreur (Panasonic, retour d'Hervé du 24/10/2026).
     if f.channels > 0 {
-        if let Some((c, start, tc)) = find_ltc(path) {
+        if let Some((c, start, _)) = find_ltc(path) {
             f.ltc_channel = Some(c);
-            if f.start.is_none() {
-                f.start = Some(start);
-                f.source = TimeSource::Ltc;
-                f.timecode = Some(tc);
-            }
+            f.start = Some(start);
+            f.source = TimeSource::Ltc;
+            // Timecode du début du fichier (la première trame lue commence
+            // un peu après).
+            let rate = f.rate.unwrap_or(FrameRate::new(25, 1));
+            f.timecode = Some(timecode_at(start, rate, false));
         }
     }
     if f.timecode.is_none() {
