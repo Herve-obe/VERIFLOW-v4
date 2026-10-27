@@ -193,12 +193,15 @@
       <div class="main">
         <div class="block drop" class:over={drag.over === "sync"} role="region" aria-label={t("sync.files")} use:dropZone={zone}>
           <div class="row">
-            <h3>{t("sync.videos")} ({sync.videos.length}) · {t("sync.sounds")} ({sync.audios.length})</h3>
+            <h3>{t("sync.files")}</h3>
             {#if sync.videos.length || sync.audios.length}
               <button class="tc-btn" onclick={() => ((sync.videos = []), (sync.audios = []), (sync.analysis = null))}>{t("transcode.clear")}</button>
             {/if}
           </div>
+          <!-- Titre au-dessus de chaque liste (retour d'Hervé du 26/10/2026). -->
           <div class="lists">
+            <h4>{t("sync.videos")} ({sync.videos.length})</h4>
+            <h4>{t("sync.sounds")} ({sync.audios.length})</h4>
             <ul>
               {#each sync.videos as v (v)}
                 <li title={v}><span>{name(v)}</span><button class="x" onclick={() => (sync.videos = sync.videos.filter((x) => x !== v))} aria-label={t("transcode.remove")}>×</button></li>
@@ -315,7 +318,8 @@
           {/if}
           {#if error}<p class="error small">{error}</p>{/if}
         </div>
-        {#if a}
+        <!-- Toujours visible : la destination se règle avant l'analyse
+             (retour d'Hervé du 26/10/2026 : réglages introuvables). -->
         <div class="block export">
           <h3>{t("sync.export")} ({exportCount})</h3>
           <label class="tc-check"><input type="checkbox" bind:checked={cfg.validatedOnly} /> {t("sync.validated.only")}</label>
@@ -360,9 +364,9 @@
               {r.error ?? ""}
             </p>
           {/each}
+          {#if !a}<p class="muted small">{t("sync.export.after")}</p>{/if}
           <p class="tc-hint">{t("sync.export.hint")}</p>
         </div>
-        {/if}
       </div>
     </div>
   </div>
@@ -455,7 +459,15 @@
   .lists {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--vf-space-2);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--vf-space-1) var(--vf-space-2);
+  }
+  .lists h4 {
+    margin: 0;
+    font-size: var(--vf-text-xs);
+    color: var(--vf-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .lists ul {
     list-style: none;
@@ -476,7 +488,6 @@
   .sync:not(.analysed) .lists {
     flex: 1 1 0;
     min-height: 0;
-    grid-template-rows: minmax(0, 1fr);
   }
   .analysed .lists ul {
     max-height: max(150px, 25vh);

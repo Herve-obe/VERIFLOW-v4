@@ -896,5 +896,6 @@
   "sync.timelines": "Timelines pour le montage",
   "explorer.eject": "Éjecter en toute sécurité",
   "explorer.ejecting": "Éjection en cours :",
-  "explorer.ejected": "Éjecté, tu peux le débrancher :"
+  "explorer.ejected": "Éjecté, tu peux le débrancher :",
+  "sync.export.after": "Disponible après l'analyse : règle la destination et les options dès maintenant."
 }

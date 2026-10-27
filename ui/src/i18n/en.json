@@ -896,5 +896,6 @@
   "sync.timelines": "Editing timelines",
   "explorer.eject": "Safely eject",
   "explorer.ejecting": "Ejecting:",
-  "explorer.ejected": "Ejected, you can unplug it:"
+  "explorer.ejected": "Ejected, you can unplug it:",
+  "sync.export.after": "Available after the analysis: set the destination and options now."
 }
