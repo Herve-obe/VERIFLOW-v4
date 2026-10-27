@@ -60,7 +60,11 @@ pub fn monitor_screens(app: AppHandle) -> CmdResult<Vec<Screen>> {
 /// pas forcément à celui demandé. macOS garde son plein écran, une fois la
 /// fenêtre sur le bon écran.
 #[tauri::command]
-pub async fn monitor_open(index: usize, app: AppHandle) -> CmdResult<()> {
+pub async fn monitor_open(
+    index: usize,
+    app: AppHandle,
+    caller: tauri::WebviewWindow,
+) -> CmdResult<()> {
     let screens = app.available_monitors().map_err(text)?;
     let screen = screens.get(index).ok_or("écran introuvable")?;
     let pos = *screen.position();
@@ -102,6 +106,10 @@ pub async fn monitor_open(index: usize, app: AppHandle) -> CmdResult<()> {
     } else {
         window.set_always_on_top(true).map_err(text)?;
     }
+    // Le clavier reste au lecteur qui a demandé le moniteur (Espace, J/K/L) :
+    // la fenêtre plein écran le prenait (test d'Hervé du 26/10/2026). Un clic
+    // sur le moniteur lui rend le clavier (Échap pour le fermer).
+    let _ = caller.set_focus();
     Ok(())
 }
 

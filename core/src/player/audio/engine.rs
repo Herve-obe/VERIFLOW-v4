@@ -48,17 +48,42 @@ pub struct OutputChoice {
     pub first_channel: u16,
 }
 
-/// Exécute `f` sur un fil neuf. Sous Windows, cpal initialise COM en mode
-/// multithread sur le fil appelant ; un fil réutilisé, déjà passé en mode
-/// « appartement » (sélecteur de fichiers, par exemple), le refuse : « Failed
-/// to get audio client: Impossible de modifier le mode thread » (test d'Hervé
-/// du 24/10/2026).
+/// Exécute `f` sur un fil neuf (état de COM connu, voir [`com_for_wasapi`]).
 fn on_fresh_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
     thread::scope(|s| {
         s.spawn(f)
             .join()
             .unwrap_or_else(|e| std::panic::resume_unwind(e))
     })
+}
+
+/// Sous Windows, la sortie WASAPI « par défaut du système » est activée par
+/// `ActivateAudioInterfaceAsync`, qui échoue sur un fil COM « appartement »
+/// (celui que cpal choisit) : « Failed to get audio client : impossible de
+/// modifier le mode thread » (tests d'Hervé des 24 et 26/10/2026). Les fils
+/// audio passent donc COM en mode multithread avant cpal, sauf pour ASIO,
+/// dont les pilotes veulent le mode appartement.
+fn com_for_wasapi(asio: bool) {
+    #[cfg(windows)]
+    if !asio {
+        use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+        // SAFETY : initialisation de COM du fil courant, jamais libérée (le
+        // fil se termine avec elle) ; un échec laisse cpal faire comme avant.
+        unsafe {
+            CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED as u32);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = asio;
+}
+
+/// Le choix désigne-t-il une sortie ASIO ?
+fn is_asio(choice: &OutputChoice) -> bool {
+    choice
+        .device
+        .as_deref()
+        .and_then(|d| d.parse::<cpal::DeviceId>().ok())
+        .is_some_and(|id| id.host().name().eq_ignore_ascii_case("asio"))
 }
 
 /// Liste les sorties audio de tous les pilotes disponibles.
@@ -220,10 +245,15 @@ impl AudioEngine {
 
     /// Ouvre une session sur la sortie choisie.
     pub fn open_with(paths: &[PathBuf], choice: &OutputChoice) -> Result<Self> {
-        on_fresh_thread(|| Self::open_on_this_thread(paths, choice))
+        let asio = is_asio(choice);
+        on_fresh_thread(|| {
+            com_for_wasapi(asio);
+            Self::open_on_this_thread(paths, choice)
+        })
     }
 
     fn open_on_this_thread(paths: &[PathBuf], choice: &OutputChoice) -> Result<Self> {
+        let asio = is_asio(choice);
         // Lecture préalable pour connaître la fréquence des fichiers.
         let file_rate = Producer::open(paths, 48_000)?.info().sample_rate;
 
@@ -266,6 +296,7 @@ impl AudioEngine {
         thread::Builder::new()
             .name("veriflow-audio-out".into())
             .spawn(move || {
+                com_for_wasapi(asio);
                 let stream = match format {
                     cpal::SampleFormat::F32 => {
                         build::<f32>(&device, &config, rx, stream_shared, first_channel)
