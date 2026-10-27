@@ -763,5 +763,6 @@
   "sync.correct.drift": "Corriger la dérive mesurée (son rééchantillonné, calé au milieu du plan)",
   "player.tracks.count": "Pistes",
   "player.samplerate": "Fréquence",
-  "player.bitdepth": "Résolution"
+  "player.bitdepth": "Résolution",
+  "sync.export.after": "Disponible après l'analyse : règle la destination et les options dès maintenant."
 }

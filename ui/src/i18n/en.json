@@ -763,5 +763,6 @@
   "sync.correct.drift": "Correct the measured drift (sound resampled, aligned at the middle of the clip)",
   "player.tracks.count": "Tracks",
   "player.samplerate": "Sample rate",
-  "player.bitdepth": "Bit depth"
+  "player.bitdepth": "Bit depth",
+  "sync.export.after": "Available after the analysis: set the destination and options now."
 }
