@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
+# Taille, place et état agrandi de la fenêtre principale retenus (MIT ou Apache 2.0).
+tauri-plugin-window-state = "2"
 notify = "8"
 tokio = { version = "1", features = ["sync"] }
 

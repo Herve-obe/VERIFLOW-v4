@@ -33,6 +33,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // Taille, place et état agrandi de la fenêtre principale retenus d'une
+        // ouverture à l'autre (les fenêtres moniteur et lecteur rapide gèrent
+        // leur place elles-mêmes).
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[monitor::LABEL, "quick"])
+                .build(),
+        )
         .manage(AppState::default())
         .manage(player::PlayerState::default())
         .manage(media::MediaState::default())
@@ -44,6 +52,18 @@ pub fn run() {
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
             menu::listen(app.handle());
+            // Première ouverture (aucune place retenue) : fenêtre agrandie à
+            // l'écran (demande d'Hervé du 26/10/2026).
+            let remembered = app
+                .path()
+                .app_config_dir()
+                .map(|d| d.join(tauri_plugin_window_state::DEFAULT_FILENAME).exists())
+                .unwrap_or(false);
+            if !remembered {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.maximize();
+                }
+            }
             // Windows : barre de titre dessinée par l'interface (menus,
             // projet, boutons de la fenêtre), à la place de celle du système.
             #[cfg(windows)]

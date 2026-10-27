@@ -897,5 +897,8 @@
   "explorer.eject": "Éjecter en toute sécurité",
   "explorer.ejecting": "Éjection en cours :",
   "explorer.ejected": "Éjecté, tu peux le débrancher :",
-  "sync.export.after": "Disponible après l'analyse : règle la destination et les options dès maintenant."
+  "sync.export.after": "Disponible après l'analyse : règle la destination et les options dès maintenant.",
+  "prefs.more": "Les autres réglages (raccourcis modifiables, OFFLOAD, PLAYER, TRANSCODE) arrivent dans une prochaine version.",
+  "licenses.others.title": "Autres composants",
+  "sound.solo": "Solo (la coupure M reste prioritaire)"
 }

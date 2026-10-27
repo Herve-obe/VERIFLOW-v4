@@ -120,11 +120,10 @@ pub fn mix(input: &[f32], channels: usize, controls: &MixerControls, out: &mut [
         .any(|t| t.solo.load(Ordering::Relaxed));
 
     for (ch, track) in controls.tracks.iter().enumerate().take(channels) {
-        let audible = if any_solo {
-            track.solo.load(Ordering::Relaxed)
-        } else {
-            !track.mute.load(Ordering::Relaxed)
-        };
+        // MUTE prime sur SOLO : une piste à la fois en solo et coupée reste
+        // coupée (comme sur une console, retour d'Hervé du 26/10/2026).
+        let audible = !track.mute.load(Ordering::Relaxed)
+            && (!any_solo || track.solo.load(Ordering::Relaxed));
         let gain = track.gain.get();
         // Crête avant le volume (niveau enregistré) : visible même sur une
         // piste coupée ou baissée à l'écoute, par exemple une piste LTC.
@@ -201,6 +200,12 @@ mod tests {
         c.tracks[1].gain.set(db_to_gain(-6.0206));
         mix(&input, 3, &c, &mut out);
         assert!(approx(out[0], 0.0) && approx(out[1], 0.125));
+
+        // MUTE prime sur SOLO : la piste 1, en solo et coupée, se tait.
+        c.tracks[1].mute.store(true, Ordering::Relaxed);
+        mix(&input, 3, &c, &mut out);
+        assert!(approx(out[0], 0.0) && approx(out[1], 0.0));
+        c.tracks[1].mute.store(false, Ordering::Relaxed);
 
         // Gain master.
         c.master_gain.set(2.0);

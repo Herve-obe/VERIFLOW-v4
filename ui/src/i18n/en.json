@@ -897,5 +897,8 @@
   "explorer.eject": "Safely eject",
   "explorer.ejecting": "Ejecting:",
   "explorer.ejected": "Ejected, you can unplug it:",
-  "sync.export.after": "Available after the analysis: set the destination and options now."
+  "sync.export.after": "Available after the analysis: set the destination and options now.",
+  "prefs.more": "Other settings (editable shortcuts, OFFLOAD, PLAYER, TRANSCODE) are coming in a later version.",
+  "licenses.others.title": "Other components",
+  "sound.solo": "Solo (mute M takes precedence)"
 }
