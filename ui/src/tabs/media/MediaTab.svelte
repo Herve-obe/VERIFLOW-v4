@@ -5,7 +5,7 @@
   import Thumb from "./Thumb.svelte";
   import Wave from "./Wave.svelte";
   import Inspector from "./Inspector.svelte";
-  import QuickPlayer from "./QuickPlayer.svelte";
+  import { openQuick, onToPlayer } from "../../lib/quick";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { explorer } from "../../stores/explorer.svelte";
   import { watch, norm } from "../../lib/explorer";
@@ -27,7 +27,12 @@
   let search = $state("");
   let circledOnly = $state(false);
   let loading = $state(false);
-  let quick = $state<MediaEntry | null>(null);
+  /** Lecteur rapide, dans sa propre fenêtre (déplaçable sur un autre écran). */
+  function quick(m: MediaEntry) {
+    openQuick({ path: m.path, kind: m.kind === "audio" ? "audio" : "video", name: m.name }).catch((e) => (app.status = String(e)));
+  }
+  // « Ouvrir dans le PLAYER » depuis la fenêtre du lecteur rapide.
+  onToPlayer((m) => openInPlayer(m.path, m.kind));
   let status = $state("");
 
   const modeKinds = $derived(app.mode === "audio" ? ["audio"] : ["video", "image"]);
@@ -117,7 +122,7 @@
     lastClick = isDouble ? null : { path, at: now, x: e.clientX, y: e.clientY };
     if (isDouble) {
       const m = visible[index];
-      if (m) quick = m;
+      if (m) quick(m);
       return;
     }
     const next = new Set(e.ctrlKey || e.metaKey ? selected : []);
@@ -134,10 +139,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (app.tab !== "media" || quick || isTyping(e.target)) return;
+    if (app.tab !== "media" || isTyping(e.target)) return;
     if (e.key === " " && selection.length > 0) {
       e.preventDefault();
-      quick = selection[0];
+      quick(selection[0]);
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       selected = new Set(visible.map((m) => m.path));
@@ -319,9 +324,6 @@
 </div>
 </div>
 
-{#if quick}
-  <QuickPlayer media={quick} onClose={() => (quick = null)} />
-{/if}
 
 <style>
   .layout {

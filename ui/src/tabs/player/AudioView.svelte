@@ -116,8 +116,13 @@
     ltcNotice = false;
   }
 
+  // Erreur d'ouverture, affichée dans la vue : le lecteur rapide n'a pas
+  // de barre d'état (test d'Hervé du 26/10/2026 : vue vide sans explication).
+  let openError = $state("");
+
   async function load(paths: string[], scan = true) {
     loading = true;
+    openError = "";
     try {
       await close();
       session = await audioOpen(paths, slot, currentOutput());
@@ -139,6 +144,7 @@
       if (scan) scanLtc(paths);
     } catch (err) {
       app.status = String(err);
+      openError = String(err);
     } finally {
       loading = false;
     }
@@ -281,6 +287,7 @@
   <div class="empty">
     <button class="open" onclick={open} disabled={loading}>{loading ? t("player.loading") : t("player.open.audio")}</button>
     <p>{t("player.open.audio.hint")}</p>
+    {#if openError}<p class="open-error">{openError}</p>{/if}
     <p class="hint">{t("player.shortcuts")}</p>
   </div>
 {:else}
@@ -703,5 +710,10 @@
   .lufs dd {
     margin: 0;
     text-align: right;
+  }
+  .open-error {
+    max-width: 640px;
+    color: var(--vf-error);
+    text-align: center;
   }
 </style>
