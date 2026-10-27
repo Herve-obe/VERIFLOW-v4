@@ -823,5 +823,6 @@
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
-  "window.close": "Close"
+  "window.close": "Close",
+  "sound.solo": "Solo (mute M takes precedence)"
 }
