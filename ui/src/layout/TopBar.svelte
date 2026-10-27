@@ -28,10 +28,12 @@
 <header>
   {#if !isMac}
     <div class="titlebar" data-tauri-drag-region>
-      {@render brand()}
-      <MenuBar />
+      <div class="left" data-tauri-drag-region>
+        {@render brand()}
+        <MenuBar />
+      </div>
       <div class="project" data-tauri-drag-region><ProjectMenu /></div>
-      {#if ownTitleBar}<WindowControls />{/if}
+      <div class="right" data-tauri-drag-region>{#if ownTitleBar}<WindowControls />{/if}</div>
     </div>
   {/if}
   <div class="tabsrow">
@@ -51,9 +53,12 @@
     display: flex;
     flex-direction: column;
   }
+  /* Trois colonnes : le projet est centré sur la fenêtre (retour d'Hervé du
+     24/10/2026), sans jamais passer sur les menus en fenêtre étroite. */
   .titlebar {
     position: relative;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
     align-items: center;
     gap: var(--vf-space-4);
     height: var(--vf-titlebar-height);
@@ -74,14 +79,20 @@
   .brand span {
     pointer-events: none;
   }
-  /* Projet au centre de l'espace libre entre les menus et les boutons de la
-     fenêtre (jamais par-dessus les menus, même en fenêtre étroite). */
+  .left,
+  .right {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-4);
+    height: 100%;
+  }
+  .right {
+    justify-content: flex-end;
+  }
   .project {
-    flex: 1;
     min-width: 0;
     display: flex;
     justify-content: center;
-    padding: 0 var(--vf-space-4);
   }
   /* Onglets centrés : deux colonnes égales de part et d'autre. */
   .tabsrow {
