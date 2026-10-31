@@ -1,5 +1,6 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { onNotice, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { t } from "../i18n/index.svelte";
+import { onNotice, powerStatus, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "running" | "done" | "failed";
 
@@ -31,7 +32,75 @@ export const offload = $state({
   requests: {} as Record<number, OffloadRequest>,
   /** Copie à reprendre : le formulaire est rempli avec cette demande. */
   resume: null as OffloadRequest | null,
+  /** Alerte batterie pendant une copie (texte déjà traduit). */
+  batteryAlert: null as string | null,
 });
+
+export function dismissBatteryAlert() {
+  offload.batteryAlert = null;
+}
+
+const LOW_PERCENT = 20;
+let timer: ReturnType<typeof setInterval> | null = null;
+let wasOnBattery: boolean | null = null;
+let alerted = false;
+
+function fill(key: string, percent: number | null, left: number | null): string {
+  return t(key)
+    .replace("{percent}", String(percent ?? ""))
+    .replace("{left}", String(left ?? ""));
+}
+
+async function pollPower() {
+  let p;
+  try {
+    p = await powerStatus();
+  } catch {
+    return;
+  }
+  if (!p) return;
+  const before = wasOnBattery;
+  wasOnBattery = p.on_battery;
+  if (!p.on_battery) {
+    alerted = false;
+    offload.batteryAlert = null;
+    return;
+  }
+  if (alerted) return;
+  const unplugged = before === false;
+  const low = p.percent !== null && p.percent <= LOW_PERCENT;
+  if (unplugged || low) {
+    const key = p.percent === null ? "offload.battery.unplugged_nopercent" : "offload.battery.unplugged";
+    offload.batteryAlert = fill(key, p.percent, p.minutes_left);
+    alerted = true;
+    return;
+  }
+  if (p.minutes_left !== null) {
+    const left = p.minutes_left;
+    const short = offload.jobs.some((j) => j.state === "running" && j.rate > 0 && (j.total - j.done) / j.rate / 60 > left);
+    if (short) {
+      offload.batteryAlert = fill("offload.battery.running_short", p.percent, left);
+      alerted = true;
+    }
+  }
+}
+
+/** Interroge l'alimentation tant qu'une copie tourne, et seulement alors. */
+function syncPowerWatch() {
+  const running = offload.jobs.some((j) => j.state === "running");
+  if (running && !timer) {
+    wasOnBattery = null;
+    alerted = false;
+    void pollPower();
+    timer = setInterval(pollPower, 60_000);
+  } else if (!running && timer) {
+    clearInterval(timer);
+    timer = null;
+    wasOnBattery = null;
+    alerted = false;
+    offload.batteryAlert = null;
+  }
+}
 
 /** Retire une fiche de la file (les fichiers sur les disques ne sont pas touchés). */
 export function removeJob(id: number) {
@@ -51,6 +120,11 @@ function job(id: number): Job | undefined {
 }
 
 function apply(n: Notice) {
+  applyNotice(n);
+  syncPowerWatch();
+}
+
+function applyNotice(n: Notice) {
   if (n.kind === "queued") {
     offload.jobs.unshift({
       id: n.job,

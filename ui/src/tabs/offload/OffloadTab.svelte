@@ -9,10 +9,10 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
-  import { offload, listenOffload } from "../../stores/offload.svelte";
+  import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -198,6 +198,14 @@
   const noSpace = $derived(pre?.missing_space.some((m) => m !== null) ?? false);
   const canStart = $derived(!!pre && !noSpace && !checking);
 
+  function batteryText(w: BatteryWarning): string {
+    const key = w.reason === "short" ? "offload.battery.short" : w.reason === "low" ? "offload.battery.low" : w.percent === null ? "offload.battery.long_nopercent" : "offload.battery.long";
+    return t(key)
+      .replace("{percent}", String(w.percent ?? ""))
+      .replace("{minutes}", String(w.estimated_minutes))
+      .replace("{left}", String(w.minutes_left ?? ""));
+  }
+
   async function launch() {
     if (!pre) return;
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
@@ -208,6 +216,7 @@
     const warnings: string[] = [];
     if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
     pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
+    if (pre.battery) warnings.push(batteryText(pre.battery));
     if (warnings.length > 0) {
       const go = await ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
         title: t("offload.warn.title"),
@@ -369,6 +378,7 @@
         {/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}
         {#if pre.source_hdd || pre.hdd.some((h) => h)}<p class="warn">{t("offload.hdd")}</p>{/if}
+        {#if pre.battery}<p class="warn">{batteryText(pre.battery)}</p>{/if}
       {:else}
         <p class="muted">{t("offload.howto")}</p>
       {/if}
@@ -378,6 +388,12 @@
 
   <section class="queue">
     <h2>{t("offload.queue")}</h2>
+    {#if offload.batteryAlert}
+      <p class="warn alert">
+        <span>{offload.batteryAlert}</span>
+        <button onclick={dismissBatteryAlert}>{t("offload.battery.dismiss")}</button>
+      </p>
+    {/if}
     {#each offload.jobs as job (job.id)}
       <JobCard {job} />
     {:else}
@@ -598,6 +614,11 @@
     color: var(--vf-warning);
     font-size: var(--vf-text-xs);
     font-weight: 600;
+  }
+  .alert {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .error {
     color: var(--vf-error);

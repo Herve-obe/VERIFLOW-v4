@@ -76,6 +76,22 @@ export interface PreflightView {
   hdd: boolean[];
   source_hdd: boolean;
   previous: { finished_at: string; source_name: string; destinations: string[] }[];
+  /** Durée estimée de la copie (secondes). */
+  estimated_secs: number;
+  battery: BatteryWarning | null;
+}
+
+export interface BatteryWarning {
+  reason: "low" | "long" | "short";
+  percent: number | null;
+  minutes_left: number | null;
+  estimated_minutes: number;
+}
+
+export interface PowerStatus {
+  on_battery: boolean;
+  percent: number | null;
+  minutes_left: number | null;
 }
 
 export type DestStatus =
@@ -134,3 +150,4 @@ export const cancel = (job: number) => invoke<void>("offload_cancel", { job });
 export const eject = (mountPoint: string) => invoke<void>("offload_eject", { mountPoint });
 export const reveal = (path: string) => invoke<void>("reveal", { path });
 export const onNotice = (cb: (n: Notice) => void): Promise<UnlistenFn> => listen<Notice>("offload", (e) => cb(e.payload));
+export const powerStatus = () => invoke<PowerStatus | null>("power_status");
