@@ -1,9 +1,16 @@
-//! Sous-titres : lecture et écriture SRT et WebVTT, contrôles de lisibilité.
+//! Sous-titres : lecture et écriture SRT, WebVTT et ASS/SSA, contrôles de
+//! lisibilité.
+//!
+//! ASS : seules les lignes `Dialogue:` sont éditées (temps et texte, `\N`
+//! devenant un saut de ligne). Les autres champs de chaque ligne (style,
+//! calque, marges...) sont gardés avec le sous-titre ; le reste du fichier
+//! (Script Info, styles, polices, commentaires) est recopié à l'identique.
 //!
 //! Les temps sont en secondes depuis le début du média. Les contrôles suivent
 //! les usages courants du sous-titrage (42 caractères par ligne, 2 lignes,
 //! 17 caractères par seconde, 5/6 s à 7 s par sous-titre, 2 images d'écart).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +22,10 @@ pub struct Cue {
     pub start: f64,
     pub end: f64,
     pub text: String,
+    /// ASS : autres champs de la ligne `Dialogue:` (nom du champ en
+    /// minuscules : layer, style, name, marginl...). Absent en SRT et WebVTT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ass: Option<BTreeMap<String, String>>,
 }
 
 /// Lit un fichier .srt ou .vtt.
@@ -24,25 +35,179 @@ pub fn load(path: &Path) -> Result<Vec<Cue>> {
     let text = text.trim_start_matches('\u{feff}');
     match ext(path).as_str() {
         "srt" | "vtt" => Ok(parse(text)),
+        "ass" | "ssa" => Ok(parse_ass(text)),
         other => Err(Error::Unsupported(format!(
-            "sous-titres .{other} : l'éditeur lit les fichiers SRT et WebVTT"
+            "sous-titres .{other} : l'éditeur lit les fichiers SRT, WebVTT et ASS"
         ))),
     }
 }
 
-/// Enregistre en SRT ou WebVTT selon l'extension.
-pub fn save(path: &Path, cues: &[Cue]) -> Result<()> {
+/// Enregistre en SRT, WebVTT ou ASS selon l'extension. En ASS, `template`
+/// (le fichier ASS ouvert dans l'éditeur) fournit tout ce qui n'est pas une
+/// ligne `Dialogue:` ; sans lui, en-tête et style par défaut.
+pub fn save(path: &Path, cues: &[Cue], template: Option<&Path>) -> Result<()> {
     let content = match ext(path).as_str() {
         "vtt" => to_vtt(cues),
         "srt" => to_srt(cues),
+        "ass" | "ssa" => {
+            let base = template
+                .filter(|t| matches!(ext(t).as_str(), "ass" | "ssa"))
+                .and_then(|t| std::fs::read(t).ok())
+                .map(|b| {
+                    String::from_utf8_lossy(&b)
+                        .trim_start_matches('\u{feff}')
+                        .to_owned()
+                });
+            to_ass(cues, base.as_deref())
+        }
         other => {
             return Err(Error::Unsupported(format!(
-                "sous-titres .{other} : enregistrer en .srt ou .vtt"
+                "sous-titres .{other} : enregistrer en .srt, .vtt ou .ass"
             )))
         }
     };
     std::fs::write(path, content)?;
     Ok(())
+}
+
+/// Champs d'une ligne `Dialogue:` en ASS (v4+) quand le fichier n'a pas de
+/// ligne `Format:`.
+const ASS_FORMAT: [&str; 10] = [
+    "layer", "start", "end", "style", "name", "marginl", "marginr", "marginv", "effect", "text",
+];
+
+/// Ligne `Format:` de la section [Events] (noms en minuscules).
+fn ass_format(text: &str) -> Vec<String> {
+    let mut in_events = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            in_events = l.eq_ignore_ascii_case("[events]");
+        } else if in_events {
+            if let Some(f) = l.strip_prefix("Format:") {
+                return f.split(',').map(|s| s.trim().to_lowercase()).collect();
+            }
+        }
+    }
+    ASS_FORMAT.iter().map(|s| s.to_string()).collect()
+}
+
+/// Lit les lignes `Dialogue:` d'un fichier ASS ou SSA.
+pub fn parse_ass(text: &str) -> Vec<Cue> {
+    let format = ass_format(text);
+    let mut cues = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("Dialogue:") else {
+            continue;
+        };
+        // Le texte, dernier champ, peut contenir des virgules.
+        let values: Vec<&str> = rest.trim_start().splitn(format.len(), ',').collect();
+        if values.len() != format.len() {
+            continue;
+        }
+        let mut fields = BTreeMap::new();
+        let (mut start, mut end, mut body) = (None, None, String::new());
+        for (name, value) in format.iter().zip(values) {
+            match name.as_str() {
+                "start" => start = parse_time(value),
+                "end" => end = parse_time(value),
+                "text" => body = value.replace("\\N", "\n"),
+                _ => {
+                    fields.insert(name.clone(), value.trim().to_owned());
+                }
+            }
+        }
+        if let (Some(start), Some(end)) = (start, end) {
+            cues.push(Cue {
+                start,
+                end,
+                text: body,
+                ass: Some(fields),
+            });
+        }
+    }
+    cues
+}
+
+/// « H:MM:SS.cc » (centièmes de seconde, format ASS).
+pub fn format_ass_time(seconds: f64) -> String {
+    let cs = (seconds.max(0.0) * 100.0).round() as u64;
+    format!(
+        "{}:{:02}:{:02}.{:02}",
+        cs / 360_000,
+        cs / 6000 % 60,
+        cs / 100 % 60,
+        cs % 100
+    )
+}
+
+/// En-tête d'un fichier ASS créé de zéro : 1920 × 1080, style « Default »
+/// (Inter 64, blanc, contour noir, en bas au centre).
+const ASS_HEADER: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Inter,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,1,2,60,60,60,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+
+/// Écrit un ASS : `base` (le fichier d'origine) privé de ses lignes
+/// `Dialogue:`, qui sont remplacées par `cues` à la place de la première
+/// (sinon en fin de section [Events]).
+pub fn to_ass(cues: &[Cue], base: Option<&str>) -> String {
+    let base = base.unwrap_or(ASS_HEADER);
+    let format = ass_format(base);
+    // Champs d'un sous-titre ajouté dans l'éditeur : ceux du premier
+    // sous-titre ASS (style, calque, marges), sans nom ni effet.
+    let mut fallback: BTreeMap<String, String> =
+        cues.iter().find_map(|c| c.ass.clone()).unwrap_or_default();
+    fallback.remove("name");
+    fallback.remove("effect");
+    let dialogue = |c: &Cue| -> String {
+        let fields = c.ass.as_ref().unwrap_or(&fallback);
+        let values: Vec<String> = format
+            .iter()
+            .map(|name| match name.as_str() {
+                "start" => format_ass_time(c.start),
+                "end" => format_ass_time(c.end),
+                "text" => c.text.trim().replace("\r\n", "\n").replace('\n', "\\N"),
+                "layer" | "marginl" | "marginr" | "marginv" => {
+                    fields.get(name).cloned().unwrap_or_else(|| "0".into())
+                }
+                "style" => fields
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| "Default".into()),
+                _ => fields.get(name).cloned().unwrap_or_default(),
+            })
+            .collect();
+        format!("Dialogue: {}\n", values.join(","))
+    };
+    let lines: String = cues.iter().map(dialogue).collect();
+    let mut out = String::new();
+    let mut placed = false;
+    let mut in_events = false;
+    for line in base.replace("\r\n", "\n").lines() {
+        let l = line.trim_start();
+        if l.starts_with('[') {
+            if in_events && !placed {
+                out += &lines;
+                out.push('\n');
+                placed = true;
+            }
+            in_events = l.trim().eq_ignore_ascii_case("[events]");
+        }
+        if l.starts_with("Dialogue:") {
+            if !placed {
+                out += &lines;
+                placed = true;
+            }
+            continue;
+        }
+        out += line;
+        out.push('\n');
+    }
+    if !placed {
+        if !in_events {
+            out += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+        }
+        out += &lines;
+    }
+    out
 }
 
 fn ext(path: &Path) -> String {
@@ -74,6 +239,7 @@ pub fn parse(text: &str) -> Vec<Cue> {
             start,
             end,
             text: body,
+            ass: None,
         });
     }
     cues
@@ -311,16 +477,19 @@ mod tests {
                 start: 0.0,
                 end: 0.5,
                 text: "Trop court".into(),
+                ass: None,
             },
             Cue {
                 start: 0.52,
                 end: 1.52,
                 text: "Une ligne vraiment beaucoup trop longue pour un sous-titre".into(),
+                ass: None,
             },
             Cue {
                 start: 1.4,
                 end: 9.0,
                 text: "a\nb\nc".into(),
+                ass: None,
             },
         ];
         let issues = check(&cues, &Rules::default());
@@ -344,8 +513,95 @@ mod tests {
             start: 0.0,
             end: 1.0,
             text: "{\\an8}<i>abc</i>".into(),
+            ass: None,
         };
         assert_eq!(cps(&c), 3.0);
+    }
+
+    const ASS: &str = "\u{feff}[Script Info]\r\n; Script de test\r\nScriptType: v4.00+\r\nPlayResX: 1920\r\nPlayResY: 1080\r\n\r\n[V4+ Styles]\r\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\r\nStyle: Default,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,40,40,40,1\r\nStyle: Haut,Arial,50,&H0000FFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,8,40,40,40,1\r\n\r\n[Events]\r\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\nComment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,note de l'auteur\r\nDialogue: 0,0:00:01.00,0:00:03.50,Default,Marie,0,0,0,,Bonjour, toi.\\NDeuxième ligne\r\nDialogue: 1,0:00:04.00,0:00:05.25,Haut,,10,10,80,,{\\i1}Au-dessus{\\i0}\r\n\r\n[Fonts]\r\n";
+
+    #[test]
+    fn reads_ass_dialogue_lines() {
+        let cues = parse_ass(ASS.trim_start_matches('\u{feff}'));
+        assert_eq!(cues.len(), 2, "le commentaire n'est pas un sous-titre");
+        assert_eq!((cues[0].start, cues[0].end), (1.0, 3.5));
+        assert_eq!(cues[0].text, "Bonjour, toi.\nDeuxième ligne");
+        let f = cues[1].ass.as_ref().unwrap();
+        assert_eq!(f["style"], "Haut");
+        assert_eq!(f["layer"], "1");
+        assert_eq!(f["marginv"], "80");
+        assert_eq!(cues[1].text, "{\\i1}Au-dessus{\\i0}");
+        assert_eq!(cues[1].end, 5.25);
+        // Balises non comptées dans les contrôles.
+        assert!((cps(&cues[1]) - 9.0 / 1.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn writes_ass_keeping_everything_else() {
+        let base = ASS.trim_start_matches('\u{feff}');
+        let mut cues = parse_ass(base);
+        cues[0].text = "Bonjour, vous.\nLigne deux".into();
+        cues[0].end = 3.0;
+        // Sous-titre ajouté dans l'éditeur (sans champs ASS).
+        cues.push(Cue {
+            start: 6.0,
+            end: 7.5,
+            text: "Nouveau".into(),
+            ass: None,
+        });
+        let out = to_ass(&cues, Some(base));
+        // En-tête, styles, commentaire et section [Fonts] recopiés.
+        for keep in [
+            "; Script de test",
+            "Style: Haut,Arial,50",
+            "Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,note de l'auteur",
+            "[Fonts]",
+        ] {
+            assert!(out.contains(keep), "{keep} manquant :\n{out}");
+        }
+        assert!(out.contains(
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,Marie,0,0,0,,Bonjour, vous.\\NLigne deux\n"
+        ));
+        assert!(out
+            .contains("Dialogue: 1,0:00:04.00,0:00:05.25,Haut,,10,10,80,,{\\i1}Au-dessus{\\i0}\n"));
+        // Le nouveau prend le style du premier, sans son nom.
+        assert!(out.contains("Dialogue: 0,0:00:06.00,0:00:07.50,Default,,0,0,0,,Nouveau\n"));
+        // Les dialogues restent dans [Events], avant [Fonts].
+        assert!(out.find("Nouveau").unwrap() < out.find("[Fonts]").unwrap());
+        assert_eq!(parse_ass(&out).len(), 3);
+        assert_eq!(parse_ass(&out)[0].text, "Bonjour, vous.\nLigne deux");
+    }
+
+    #[test]
+    fn ass_from_scratch_and_with_ffmpeg() {
+        let cues = parse(SRT.trim_start_matches('\u{feff}'));
+        let out = to_ass(&cues, None);
+        assert!(out.starts_with("[Script Info]\n") && out.contains("Style: Default,Inter,64"));
+        assert!(out.contains("Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,Bonjour.\n"));
+        assert_eq!(parse_ass(&out).len(), 2);
+        assert_eq!(format_ass_time(3723.456), "1:02:03.46");
+        // Fichiers enregistrés (modèle ASS, puis de zéro), relus par FFmpeg.
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("orig.ass");
+        std::fs::write(&template, ASS).unwrap();
+        let edited = dir.path().join("edit.ass");
+        let cues = load(&template).unwrap();
+        save(&edited, &cues, Some(&template)).unwrap();
+        assert_eq!(load(&edited).unwrap(), cues);
+        if crate::tools::locate("ffmpeg").is_some() {
+            for f in [&edited, &template] {
+                let o = crate::tools::command("ffmpeg")
+                    .unwrap()
+                    .args(["-v", "error", "-i"])
+                    .arg(f)
+                    .args(["-f", "srt", "-"])
+                    .output()
+                    .unwrap();
+                assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+                let srt = String::from_utf8_lossy(&o.stdout);
+                assert!(srt.contains("00:00:01,000 --> 00:00:03,500"), "{srt}");
+            }
+        }
     }
 
     #[test]

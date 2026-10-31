@@ -16,8 +16,8 @@ pub fn subtitles_load(path: PathBuf) -> CmdResult<Vec<Cue>> {
 }
 
 #[tauri::command]
-pub fn subtitles_save(path: PathBuf, cues: Vec<Cue>) -> CmdResult<()> {
-    subtitles::save(&path, &cues).map_err(text)
+pub fn subtitles_save(path: PathBuf, cues: Vec<Cue>, template: Option<PathBuf>) -> CmdResult<()> {
+    subtitles::save(&path, &cues, template.as_deref()).map_err(text)
 }
 
 #[tauri::command]
