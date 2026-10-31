@@ -58,6 +58,8 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64, f64),
 ) -> Result<String> {
+    // Pas de mise en veille (ni d'App Nap sous macOS) pendant le travail.
+    let _awake = crate::power::keep_awake();
     let work = WorkDir::new(&plan.assets)?;
     let mut cmd = tools::command("ffmpeg")?;
     cmd.current_dir(&work.path)

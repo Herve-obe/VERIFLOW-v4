@@ -125,6 +125,35 @@ pub fn find_elsewhere(inv: &SourceInventory, base: &Path, root: &Path) -> Vec<El
     found
 }
 
+/// Comme [`find_elsewhere`], en ajoutant les dossiers des copies précédentes
+/// du projet situés sur cette destination : la même carte, réutilisée sans
+/// formatage, est retrouvée quel que soit le nom du dossier du jour.
+pub fn find_elsewhere_with_history(
+    inv: &SourceInventory,
+    base: &Path,
+    root: &Path,
+    history: &[PathBuf],
+) -> Vec<Elsewhere> {
+    let mut found = find_elsewhere(inv, base, root);
+    for h in history {
+        let h = crate::absolute_path(h);
+        if h.as_path() == root
+            || !h.starts_with(base)
+            || !h.is_dir()
+            || found.iter().any(|e| e.root == h)
+        {
+            continue;
+        }
+        let present = present(inv, &h);
+        if present.files > 0 || present.partial > 0 {
+            found.push(Elsewhere { root: h, present });
+        }
+    }
+    found.sort_by_key(|e| std::cmp::Reverse(e.present.files));
+    found.truncate(5);
+    found
+}
+
 /// Résultat de la vérification d'une destination.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DestCheck {

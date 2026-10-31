@@ -49,6 +49,12 @@ pub struct OffloadRequest {
     /// reprise d'une copie trouvée dans un autre dossier.
     #[serde(default)]
     pub roots: Option<Vec<PathBuf>>,
+    /// Dossiers des copies précédentes du projet (rempli par l'application,
+    /// pas par l'interface) : une carte réutilisée sans formatage (copiée
+    /// lundi, recopiée mardi avec de nouveaux plans) y est retrouvée même si
+    /// le dossier du jour porte un autre nom.
+    #[serde(default)]
+    pub history: Vec<PathBuf>,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -159,7 +165,12 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
             if p.files > 0 || p.partial > 0 {
                 Vec::new()
             } else {
-                existing::find_elsewhere(&inv, &crate::absolute_path(base), root)
+                existing::find_elsewhere_with_history(
+                    &inv,
+                    &crate::absolute_path(base),
+                    root,
+                    &req.history,
+                )
             }
         })
         .collect();
@@ -201,6 +212,8 @@ pub fn execute(
     project: Option<&str>,
     known: Option<Known>,
 ) -> Result<JobResult> {
+    // Pas de mise en veille (ni d'App Nap sous macOS) pendant le travail.
+    let _awake = crate::power::keep_awake();
     let inv = match pre.inventory {
         Some(inv) => inv,
         None => scan(&crate::absolute_path(&req.source))?,
@@ -319,6 +332,7 @@ mod tests {
             existing: ExistingMode::Verify,
             date: None,
             roots: None,
+            history: Vec::new(),
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);
@@ -344,5 +358,50 @@ mod tests {
             preflight(&req).unwrap().already_in_destination,
             vec![true, true]
         );
+    }
+
+    /// Carte copiée lundi, réutilisée mardi sans formatage : les plans du
+    /// lundi sont retrouvés dans le dossier de la veille, même si le dossier
+    /// du jour porte un autre nom (retour d'Hervé du 31/10/2026).
+    #[test]
+    fn reused_card_found_in_previous_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        std::fs::create_dir_all(src.join("CLIP")).unwrap();
+        std::fs::write(src.join("CLIP/C0001.MP4"), b"lundi").unwrap();
+        let request = |jour: &str, history: Vec<PathBuf>| OffloadRequest {
+            source: src.clone(),
+            destinations: vec![dir.path().join("SSD1")],
+            template: "{jour}_{carte}".into(),
+            vars: TemplateVars {
+                jour: Some(jour.into()),
+                ..Default::default()
+            },
+            algorithms: vec![HashAlgo::Xxh128],
+            operator: None,
+            notes: None,
+            existing: ExistingMode::Verify,
+            date: None,
+            roots: None,
+            history,
+        };
+        let monday = request("J01", Vec::new());
+        let pre = preflight(&monday).unwrap();
+        let monday_root = pre.roots[0].clone();
+        execute(&monday, pre, &AtomicBool::new(false), |_| {}, None, None).unwrap();
+
+        // Mardi : nouveau plan sur la même carte, dossier du jour « J02_A001 ».
+        std::fs::write(src.join("CLIP/C0002.MP4"), b"mardi").unwrap();
+        let without = preflight(&request("J02", Vec::new())).unwrap();
+        assert!(
+            without.elsewhere[0].is_empty(),
+            "nom différent : rien sans l'historique"
+        );
+        let tuesday = preflight(&request("J02", vec![monday_root.clone()])).unwrap();
+        assert_eq!(tuesday.present[0].files, 0);
+        let found = &tuesday.elsewhere[0];
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].root, monday_root);
+        assert_eq!(found[0].present.files, 1, "le plan du lundi est retrouvé");
     }
 }

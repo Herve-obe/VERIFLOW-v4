@@ -6438,6 +6438,8 @@ dependencies = [
  "gethostname",
  "libc",
  "md-5",
+ "objc2",
+ "objc2-foundation",
  "pdf-writer 0.14.0",
  "quick-xml 0.38.4",
  "realfft",
@@ -6457,6 +6459,7 @@ dependencies = [
  "typst-layout",
  "typst-pdf",
  "walkdir",
+ "windows-sys 0.60.2",
  "xxhash-rust",
 ]
 
