@@ -1,6 +1,6 @@
 <!-- Pistes son d'une vidéo, en tranches verticales à côté de l'image : nom,
-     vumètre crête (avant le volume, donc visible même coupé), fader et
-     coupure. Une piste qui porte un timecode LTC (générateur sur l'entrée
+     vumètre crête (avant le volume, donc visible même coupé), fader, solo
+     et coupure (la coupure prime sur le solo). Une piste qui porte un timecode LTC (générateur sur l'entrée
      droite de la caméra, par exemple) est coupée d'office pour protéger
      l'écoute ; un message propose de la laisser coupée, la baisser ou la
      réactiver. -->
@@ -31,6 +31,7 @@
   interface Track {
     gain: number;
     mute: boolean;
+    solo: boolean;
     level: number | null;
     hold: number | null;
     holdAt: number;
@@ -41,7 +42,7 @@
 
   // Nouvelles pistes (nouveau clip) : réglages remis à zéro.
   $effect(() => {
-    tracks = names.map(() => ({ gain: 0, mute: false, level: null, hold: null, holdAt: 0 }));
+    tracks = names.map(() => ({ gain: 0, mute: false, solo: false, level: null, hold: null, holdAt: 0 }));
     notice = true;
   });
 
@@ -106,7 +107,7 @@
   function send(i: number) {
     const tr = tracks[i];
     if (!tr) return;
-    audioTrack(i, tr.gain <= -60 ? -200 : tr.gain, 0, tr.mute, false, slot).catch(() => {});
+    audioTrack(i, tr.gain <= -60 ? -200 : tr.gain, 0, tr.mute, tr.solo, slot).catch(() => {});
   }
 
   function setLtc(mode: "mute" | "low" | "on") {
@@ -136,9 +137,10 @@
           <Fader bind:value={tr.gain} label={names[i]} onchange={() => send(i)} />
         </div>
         <span class="db mono">{fmtDb(tr.gain)}</span>
-        <button class="mute" class:on={tr.mute} onclick={() => ((tr.mute = !tr.mute), send(i))} title={t("sound.mute")}>
-          M
-        </button>
+        <div class="buttons">
+          <button class="solo" class:on={tr.solo} onclick={() => ((tr.solo = !tr.solo), send(i))} title={t("sound.solo")}>S</button>
+          <button class="mute" class:on={tr.mute} onclick={() => ((tr.mute = !tr.mute), send(i))} title={t("sound.mute")}>M</button>
+        </div>
       </div>
     {/each}
   </div>
@@ -197,8 +199,13 @@
     font-size: var(--vf-text-xs);
     color: var(--vf-text-muted);
   }
+  .buttons {
+    display: flex;
+    gap: 2px;
+  }
+  .solo,
   .mute {
-    width: 28px;
+    width: 22px;
     height: 22px;
     background: var(--vf-surface-high);
     color: var(--vf-text);
@@ -207,6 +214,11 @@
     font-size: var(--vf-text-xs);
     font-weight: 700;
     cursor: pointer;
+  }
+  .solo.on {
+    background: var(--vf-warning);
+    border-color: var(--vf-warning);
+    color: var(--vf-on-accent);
   }
   .mute.on {
     background: var(--vf-error);
