@@ -39,6 +39,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "languages": ["French", "English"],
+        "displayLanguageSelector": false,
+        "installMode": "perMachine"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "10.15"
     }

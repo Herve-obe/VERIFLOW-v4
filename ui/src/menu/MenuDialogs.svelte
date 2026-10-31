@@ -6,6 +6,8 @@
   import { MENUS, command, menuState, shortcutLabel, type Entry } from "./commands.svelte";
   import { i18n, setLanguage, t, LANGUAGES, type Language } from "../i18n/index.svelte";
   import { appInfo, type AppInfo } from "../lib/api";
+  import { clearAllData, resetSession, setStartupMode, startupMode, type StartupMode } from "../lib/appdata";
+  import { ask } from "../stores/confirm.svelte";
 
   let info = $state<AppInfo | null>(null);
   onMount(() => {
@@ -19,6 +21,27 @@
   const PREF_TABS = ["general"] as const;
   type PrefTab = (typeof PREF_TABS)[number];
   let prefTab = $state<PrefTab>("general");
+
+  // Données de l'application sur ce poste.
+  let startup = $state<StartupMode>(startupMode());
+  function changeStartup(mode: StartupMode) {
+    startup = mode;
+    setStartupMode(mode);
+  }
+  // La fenêtre des préférences est fermée avant la confirmation (qui
+  // s'affiche alors seule), puis l'interface est rechargée.
+  async function wipe(all: boolean) {
+    close();
+    const ok = await ask(t(all ? "prefs.data.clear.confirm" : "prefs.data.reset.confirm"), {
+      title: t(all ? "prefs.data.clear" : "prefs.data.reset"),
+      ok: t(all ? "prefs.data.clear.ok" : "prefs.data.reset.ok"),
+      kind: "danger",
+    });
+    if (!ok) return;
+    if (all) clearAllData();
+    else resetSession();
+    location.reload();
+  }
 
   // Raccourcis : tirés des menus, dans leur ordre.
   const flat = (items: Entry[]): string[] =>
@@ -53,6 +76,24 @@
               {/each}
             </select>
           </label>
+          <label class="row">
+            <span>{t("prefs.startup")}</span>
+            <select value={startup} onchange={(e) => changeStartup(e.currentTarget.value as StartupMode)}>
+              <option value="resume">{t("prefs.startup.resume")}</option>
+              <option value="fresh">{t("prefs.startup.fresh")}</option>
+            </select>
+          </label>
+          <p class="note">{t("prefs.startup.note")}</p>
+          <h3 class="spaced">{t("prefs.data")}</h3>
+          <div class="row">
+            <span>{t("prefs.data.reset.hint")}</span>
+            <button class="ghost" onclick={() => wipe(false)}>{t("prefs.data.reset")}</button>
+          </div>
+          <div class="row">
+            <span>{t("prefs.data.clear.hint")}</span>
+            <button class="danger" onclick={() => wipe(true)}>{t("prefs.data.clear")}</button>
+          </div>
+          <p class="note">{t("prefs.data.note")}</p>
           <p class="note">{t("prefs.more")}</p>
         {/if}
       </section>
@@ -158,6 +199,36 @@
     gap: var(--vf-space-4);
     padding: var(--vf-space-2) 0;
     font-size: var(--vf-text-sm);
+  }
+  h3.spaced {
+    margin-top: var(--vf-space-6);
+  }
+  .row > span {
+    flex: 1;
+  }
+  .row button {
+    flex-shrink: 0;
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-3);
+    font-size: var(--vf-text-sm);
+    cursor: pointer;
+  }
+  .ghost {
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+  }
+  .ghost:hover {
+    background: var(--vf-surface-hover);
+  }
+  .danger {
+    background: none;
+    color: var(--vf-error);
+    border: 1px solid var(--vf-error);
+  }
+  .danger:hover {
+    background: var(--vf-error);
+    color: var(--vf-on-error);
   }
   select {
     min-width: 180px;
