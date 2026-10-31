@@ -1,6 +1,6 @@
 ---
 name: developpe
-description: Développement automatique d'une demande d'Hervé pour VERIFLOW par l'équipe d'agents (architecte, dev-coeur, dev-ui, testeur, relecteur, doc-i18n, ci-build), de la demande à la PR et à l'installeur de test, sans intervention d'Hervé avant la fin. À utiliser quand Hervé écrit /developpe suivi de sa demande, ou demande un développement automatique.
+description: Développement automatique d'une demande d'Hervé pour VERIFLOW par l'équipe d'agents (architecte, dev-coeur, dev-ui, testeur, relecteur, doc-i18n, ci-build), de la demande à la PR et à l'installeur de test, sans intervention d'Hervé avant la fin. À utiliser pour toute demande de développement d'Hervé (nouvelle fonction, correction, retour de test à corriger), qu'il écrive /developpe ou non ; pas pour les questions, explications ou mises à jour de documents seuls.
 ---
 
 # Développement automatique de VERIFLOW
