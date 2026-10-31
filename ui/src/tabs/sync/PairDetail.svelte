@@ -2,7 +2,7 @@
      l'enregistreur superposées, décalage réglable, autre son, validation. -->
 <script lang="ts">
   import { t } from "../../i18n/index.svelte";
-  import { fps, refine, timecodeAt, waveforms, type Analysis, type Pair, type Waves } from "../../lib/sync";
+  import { fps, noteText, refine, timecodeAt, waveforms, type Analysis, type Pair, type Waves } from "../../lib/sync";
 
   let { analysis = $bindable(), index }: { analysis: Analysis; index: number } = $props();
 
@@ -178,7 +178,7 @@
     {/if}
     <label class="tc-check"><input type="checkbox" bind:checked={pair.validated} /> {t("sync.validate")}</label>
   {:else}
-    <p class="muted">{pair.note ?? t("sync.no.sound.hint")}</p>
+    <p class="muted">{noteText(pair) || t("sync.no.sound.hint")}</p>
   {/if}
 </div>
 

@@ -50,7 +50,7 @@ impl Default for RewrapOptions {
             dest: None,
             format: s("mov"),
             keep_camera_audio: true,
-            mono_tracks: false,
+            mono_tracks: true,
             correct_drift: true,
             suffix: s("_sync"),
             existing: Existing::Rename,

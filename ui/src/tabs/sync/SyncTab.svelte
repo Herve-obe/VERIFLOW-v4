@@ -28,13 +28,15 @@
     type Options,
     type Pair,
     type RewrapOptions,
+    noteText,
   } from "../../lib/sync";
 
   const KEY = "veriflow.sync.settings";
   function load() {
     const d = {
       options: { mode: "auto", refine: true, waveform_search: true, drift: true, window: 2 } as Options,
-      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: false, correct_drift: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
+      // Une piste mono par canal par défaut : chaque micro sur sa piste au montage (retour d'Hervé du 24/10/2026).
+      rewrap: { dest: null, format: "mov", keep_camera_audio: true, mono_tracks: true, correct_drift: true, suffix: "_sync", existing: "rename" } as RewrapOptions,
       validatedOnly: false,
       nextToVideo: true,
     };
@@ -247,7 +249,7 @@
                         <td class="num mono">{row ? offsetText(row.p) : ""}</td>
                         <td class="num">{row ? conf(row.p) : ""}</td>
                         <td class="num" class:warn={row && Math.abs(row.p.drift_frames ?? 0) >= 1}>{row && row.p.drift_frames !== null ? row.p.drift_frames.toFixed(1).replace(".", ",") : ""}</td>
-                        <td class="note" title={row?.p.note ?? ""}><span>{row?.p.note ?? ""}</span></td>
+                        <td class="note" title={row ? noteText(row.p) : ""}><span>{row ? noteText(row.p) : ""}</span></td>
                       </tr>
                     {/each}
                   {/each}
@@ -263,7 +265,7 @@
                       <td class="num mono">{offsetText(p)}</td>
                       <td class="num" class:warn={p.confidence !== null && p.confidence < 0.25}>{conf(p)}</td>
                       <td class="num" class:warn={Math.abs(p.drift_frames ?? 0) >= 1}>{p.drift_frames !== null ? p.drift_frames.toFixed(1).replace(".", ",") : ""}</td>
-                      <td class="note" title={p.note ?? ""}><span>{p.note ?? ""}</span></td>
+                      <td class="note" title={noteText(p)}><span>{noteText(p)}</span></td>
                     </tr>
                   {/each}
                 {/if}

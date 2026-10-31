@@ -9,7 +9,7 @@ Objectif (charte §7.5) : synchroniser par lot les plans vidéo et les sons de l
 
 | Source | Détail |
 |---|---|
-| Métadonnées | Timecode de la piste tmcd QuickTime, du MXF ou du conteneur ; référence temporelle BWF (bext) des WAV |
+| Métadonnées | Timecode de la piste tmcd QuickTime, du MXF ou du conteneur ; référence temporelle BWF (bext) des WAV. Un LTC trouvé sur une piste prime sur ce timecode depuis le 24/10/2026 (une Panasonic écrit son horloge interne, non synchronisée, alors que le LTC vient du boîtier) |
 | LTC | Cherché sur chaque canal pendant les 4 premières secondes quand le fichier n'a pas de timecode. Le canal LTC est ensuite exclu de la corrélation et du re-wrap. Cadences NTSC : heure corrigée de 1,001 |
 | Aucune | Le plan peut être trouvé par la forme d'onde (option « Chercher par la forme d'onde ») |
 
@@ -75,14 +75,14 @@ Deux plans MPEG-2 (l'un à 10:00:00:00, l'autre sans timecode) et un WAV BWF cou
 - FCPXML : son attaché à 36 000,3 s dans le BWF pour le premier plan, soit 10 s après son début (valeur attendue).
 
 Cas « jam sync oublié » : un plan à 10:00:00:00, un son leurre à la même heure, le vrai son (stéréo) daté de 08:00:00 :
-- méthode Automatique : leurre choisi, confiance 11 % signalée en orange, remarque « forme d'onde peu ressemblante » ;
+- méthode Automatique : jusqu'au 24/10/2026, leurre choisi (confiance 11 %, signalée en orange). Depuis (retour d'Hervé : rushes Panasonic sans LTC, horloge non synchronisée, mauvais son retenu), un calage par timecode que la forme d'onde ne confirme pas déclenche la recherche dans tous les sons : vrai son trouvé, remarque « timecode sans rapport avec le son : son retrouvé par la forme d'onde » (test automatique) ;
 - méthode Forme d'onde seule : vrai son trouvé, −10,000 s, confiance 99 % ;
 - re-wrap MOV « une piste mono par canal » : 3 pistes mono (enregistreur gauche et droite, caméra), timecode 10:00:00:00, décalage résiduel 0 échantillon.
 
 ## Limites connues
 - Correction de la dérive : au re-wrap seulement, pas dans les timelines FCPXML et OTIO.
 - AAF : V2 (charte).
-- Les remarques produites par le cœur (« timecode corrigé de … ») sont en français quelle que soit la langue de l'interface.
+- Remarques des paires traduites dans la langue de l'interface depuis le 20/10/2026 (clé `note_key` et valeur `note_value` fournies par le cœur). Restent en français les messages d'erreur des outils (FFmpeg, lecture de fichiers).
 - Son témoin très faible ou absent : seule la méthode par timecode est possible (message dans le détail de la paire).
 - Plusieurs plans dans un même son : bien gérés ; un plan à cheval sur deux sons : associé au son qui le recouvre le plus.
 

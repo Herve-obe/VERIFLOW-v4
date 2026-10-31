@@ -94,7 +94,24 @@ pub struct Pair {
     /// Dérive exprimée en images de la vidéo.
     pub drift_frames: Option<f64>,
     pub validated: bool,
+    /// Remarque en français (journaux, tests) ; l'interface affiche plutôt
+    /// `note_key`, traduite dans la langue choisie.
     pub note: Option<String>,
+    /// Remarque à traduire : clé (« no_match », « tc_corrected »...) et
+    /// valeur éventuelle (secondes).
+    #[serde(default)]
+    pub note_key: Option<String>,
+    #[serde(default)]
+    pub note_value: Option<f64>,
+}
+
+impl Pair {
+    /// Remarque traduisible (clé et valeur) et son texte en français.
+    fn set_note(&mut self, key: &str, value: Option<f64>, french: String) {
+        self.note = Some(french);
+        self.note_key = Some(key.to_owned());
+        self.note_value = value;
+    }
 }
 
 /// Méthode d'appariement choisie pour le lot.
@@ -242,16 +259,19 @@ pub fn describe(path: &Path) -> SyncFile {
         }
         f.tracks = (0..w.channels as usize).map(|c| w.track_name(c)).collect();
     }
-    // LTC : heure de début si les métadonnées n'en donnent pas, et canal à
-    // exclure dans tous les cas.
+    // LTC : il prime sur le timecode des métadonnées, et son canal est exclu
+    // dans tous les cas. Une caméra peut écrire son horloge interne dans le
+    // fichier alors que le LTC vient du boîtier synchronisé avec
+    // l'enregistreur (Panasonic, retour d'Hervé du 24/10/2026).
     if f.channels > 0 {
-        if let Some((c, start, tc)) = find_ltc(path) {
+        if let Some((c, start, _)) = find_ltc(path) {
             f.ltc_channel = Some(c);
-            if f.start.is_none() {
-                f.start = Some(start);
-                f.source = TimeSource::Ltc;
-                f.timecode = Some(tc);
-            }
+            f.start = Some(start);
+            f.source = TimeSource::Ltc;
+            // Timecode du début du fichier (la première trame lue commence
+            // un peu après).
+            let rate = f.rate.unwrap_or(FrameRate::new(25, 1));
+            f.timecode = Some(timecode_at(start, rate, false));
         }
     }
     if f.timecode.is_none() {
@@ -307,6 +327,8 @@ pub fn match_by_time(videos: &[SyncFile], audios: &[SyncFile]) -> Vec<Pair> {
                 drift_frames: None,
                 validated: false,
                 note: None,
+                note_key: None,
+                note_value: None,
             }
         })
         .collect()
@@ -396,6 +418,20 @@ pub fn search(
 }
 
 /// Analyse un lot : lecture du temps, appariement, affinage, dérive.
+/// La forme d'onde confirme-t-elle le calage par timecode (au milieu de la
+/// zone commune, dans la tolérance) ?
+fn timecode_confirmed(video: &SyncFile, audio: &SyncFile, offset: f64, window: f64) -> bool {
+    let from = offset.max(0.0);
+    let to = (offset + audio.duration).min(video.duration);
+    let common = to - from;
+    if common < 2.0 {
+        return false;
+    }
+    let length = common.min(10.0);
+    let at = from + (common - length) / 2.0;
+    refine_at(video, audio, offset, window, at, length).is_ok_and(|(_, c)| c >= MIN_CONFIDENCE)
+}
+
 pub fn analyze(
     videos: &[PathBuf],
     audios: &[PathBuf],
@@ -456,23 +492,59 @@ pub fn analyze(
                     pair.refined = true;
                     pair.confidence = Some(conf);
                 }
-                Ok(None) => pair.note = Some("aucun son correspondant".into()),
+                Ok(None) => pair.set_note("no_match", None, "aucun son correspondant".into()),
                 Err(Error::Cancelled) => return Err(Error::Cancelled),
                 Err(e) => pair.note = Some(e.to_string()),
             }
         }
         let Some(ai) = pair.audio else {
             if pair.note.is_none() {
-                pair.note = Some(if opts.mode == Mode::Waveform {
-                    "pas de son témoin".into()
+                if opts.mode == Mode::Waveform {
+                    pair.set_note("no_guide", None, "pas de son témoin".into());
                 } else if video.start.is_none() {
-                    "pas de timecode ni de son témoin".into()
+                    pair.set_note(
+                        "no_tc_no_guide",
+                        None,
+                        "pas de timecode ni de son témoin".into(),
+                    );
                 } else {
-                    "aucun son à la même heure".into()
-                });
+                    pair.set_note("no_same_time", None, "aucun son à la même heure".into());
+                }
             }
             continue;
         };
+        // Automatique : un calage par timecode que la forme d'onde ne confirme
+        // pas (horloges de la caméra et de l'enregistreur non synchronisées
+        // au tournage) est remplacé par une recherche dans tous les sons
+        // (retour d'Hervé du 24/10/2026 : mauvais son retenu).
+        let mut ai = ai;
+        if search_all
+            && opts.mode == Mode::Auto
+            && pair.method != Method::Waveform
+            && has_sound
+            && a[ai].channels > 0
+            && !timecode_confirmed(video, &a[ai], pair.offset, opts.window)
+        {
+            match search(video, &a, cancel) {
+                Ok(Some((found, offset, conf))) => {
+                    ai = found;
+                    pair.audio = Some(found);
+                    pair.offset = offset;
+                    pair.method = Method::Waveform;
+                    pair.refined = true;
+                    pair.confidence = Some(conf);
+                    pair.set_note(
+                        "tc_wrong",
+                        None,
+                        "timecode sans rapport avec le son : son retrouvé par la forme d'onde"
+                            .into(),
+                    );
+                }
+                Ok(None) => {}
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(_) => {}
+            }
+        }
         let audio = &a[ai];
         if audio.channels == 0 || !has_sound {
             continue;
@@ -508,15 +580,21 @@ pub fn analyze(
                     if moved.abs() > 1.0 / video.rate.map(|r| r.as_f64()).unwrap_or(25.0)
                         && pair.method != Method::Waveform
                     {
-                        pair.note = Some(format!(
-                            "timecode corrigé de {} s par la forme d'onde",
-                            format!("{moved:+.3}").replace('.', ",")
-                        ));
+                        pair.set_note(
+                            "tc_corrected",
+                            Some(moved),
+                            format!(
+                                "timecode corrigé de {} s par la forme d'onde",
+                                format!("{moved:+.3}").replace('.', ",")
+                            ),
+                        );
                     }
                 }
                 Ok((_, conf)) => {
                     pair.confidence = Some(conf);
-                    pair.note = Some(
+                    pair.set_note(
+                        "weak_waveform",
+                        None,
                         "forme d'onde peu ressemblante : décalage du timecode conservé".into(),
                     );
                 }
