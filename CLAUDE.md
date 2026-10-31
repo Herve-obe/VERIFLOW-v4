@@ -25,3 +25,9 @@
 - Tests cœur : `cargo test -p veriflow-core`
 - Vérification UI : `npm run check`
 - Build : `npm run tauri build`
+
+## Développement automatique (agents)
+- `/developpe <demande>` : l'agent principal (skill `.claude/skills/developpe/`) répartit le travail entre les agents de `.claude/agents/`, vérifie, relance ce qui échoue, ouvre la PR et lance l'installeur de test. Hervé n'intervient qu'à la fin (tests sur poste réel, validation de la PR).
+- Agents : `architecte` (plan, opus), `dev-coeur` (Rust, sonnet), `dev-ui` (Svelte, sonnet), `testeur` (contrôles, haiku), `relecteur` (relecture et pièges connus, opus), `doc-i18n` (documentation, haiku), `ci-build` (build GitHub, haiku).
+- Les pièges rencontrés sur ce projet sont listés dans `.claude/agents/relecteur.md` : à compléter à chaque nouveau piège.
+
