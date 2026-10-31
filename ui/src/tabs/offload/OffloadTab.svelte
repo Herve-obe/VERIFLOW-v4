@@ -12,7 +12,7 @@
   import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, batteryWarning, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -206,6 +206,12 @@
       .replace("{left}", String(w.minutes_left ?? ""));
   }
 
+  function alertText(a: { key: string; vars: Record<string, string> }): string {
+    let s = t(a.key);
+    for (const [k, v] of Object.entries(a.vars)) s = s.replace(`{${k}}`, v);
+    return s;
+  }
+
   async function launch() {
     if (!pre) return;
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
@@ -216,7 +222,14 @@
     const warnings: string[] = [];
     if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
     pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
-    if (pre.battery) warnings.push(batteryText(pre.battery));
+    // Relevé frais : pre.battery peut être périmé si l'utilisateur a tardé.
+    let battery: BatteryWarning | null = pre.battery;
+    try {
+      battery = await batteryWarning(pre.estimated_secs);
+    } catch {
+      /* repli sur le relevé du contrôle préalable */
+    }
+    if (battery) warnings.push(batteryText(battery));
     if (warnings.length > 0) {
       const go = await ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
         title: t("offload.warn.title"),
@@ -390,7 +403,7 @@
     <h2>{t("offload.queue")}</h2>
     {#if offload.batteryAlert}
       <p class="warn alert">
-        <span>{offload.batteryAlert}</span>
+        <span>{alertText(offload.batteryAlert)}</span>
         <button onclick={dismissBatteryAlert}>{t("offload.battery.dismiss")}</button>
       </p>
     {/if}
@@ -618,7 +631,7 @@
   .alert {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--vf-space-2);
   }
   .error {
     color: var(--vf-error);

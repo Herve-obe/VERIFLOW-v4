@@ -1,6 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { t } from "../i18n/index.svelte";
-import { onNotice, powerStatus, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "running" | "done" | "failed";
 
@@ -32,23 +31,27 @@ export const offload = $state({
   requests: {} as Record<number, OffloadRequest>,
   /** Copie à reprendre : le formulaire est rempli avec cette demande. */
   resume: null as OffloadRequest | null,
-  /** Alerte batterie pendant une copie (texte déjà traduit). */
-  batteryAlert: null as string | null,
+  /** Alerte batterie pendant une copie (clé i18n et variables, traduites à l'affichage). */
+  batteryAlert: null as { key: string; vars: Record<string, string> } | null,
 });
 
 export function dismissBatteryAlert() {
   offload.batteryAlert = null;
 }
 
-const LOW_PERCENT = 20;
 let timer: ReturnType<typeof setInterval> | null = null;
 let wasOnBattery: boolean | null = null;
-let alerted = false;
+let lastReason: PowerReason | null = null;
 
-function fill(key: string, percent: number | null, left: number | null): string {
-  return t(key)
-    .replace("{percent}", String(percent ?? ""))
-    .replace("{left}", String(left ?? ""));
+/** Fin estimée (secondes) de la copie en cours la plus longue, null si inconnue. */
+function runningEta(): number | null {
+  let max: number | null = null;
+  for (const j of offload.jobs) {
+    if (j.state !== "running") continue;
+    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length);
+    if (Number.isFinite(s) && (max === null || s > max)) max = s;
+  }
+  return max;
 }
 
 async function pollPower() {
@@ -58,30 +61,19 @@ async function pollPower() {
   } catch {
     return;
   }
+  if (!timer) return; // la surveillance s'est arrêtée pendant l'attente
   if (!p) return;
   const before = wasOnBattery;
   wasOnBattery = p.on_battery;
   if (!p.on_battery) {
-    alerted = false;
+    lastReason = null;
     offload.batteryAlert = null;
     return;
   }
-  if (alerted) return;
-  const unplugged = before === false;
-  const low = p.percent !== null && p.percent <= LOW_PERCENT;
-  if (unplugged || low) {
-    const key = p.percent === null ? "offload.battery.unplugged_nopercent" : "offload.battery.unplugged";
-    offload.batteryAlert = fill(key, p.percent, p.minutes_left);
-    alerted = true;
-    return;
-  }
-  if (p.minutes_left !== null) {
-    const left = p.minutes_left;
-    const short = offload.jobs.some((j) => j.state === "running" && j.rate > 0 && (j.total - j.done) / j.rate / 60 > left);
-    if (short) {
-      offload.batteryAlert = fill("offload.battery.running_short", p.percent, left);
-      alerted = true;
-    }
+  const alert = decidePower(before, p, runningEta(), lastReason);
+  if (alert) {
+    offload.batteryAlert = { key: alert.key, vars: alert.vars };
+    lastReason = alert.reason;
   }
 }
 
@@ -90,14 +82,14 @@ function syncPowerWatch() {
   const running = offload.jobs.some((j) => j.state === "running");
   if (running && !timer) {
     wasOnBattery = null;
-    alerted = false;
+    lastReason = null;
     void pollPower();
     timer = setInterval(pollPower, 60_000);
   } else if (!running && timer) {
     clearInterval(timer);
     timer = null;
     wasOnBattery = null;
-    alerted = false;
+    lastReason = null;
     offload.batteryAlert = null;
   }
 }

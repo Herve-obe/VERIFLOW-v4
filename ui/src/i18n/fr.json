@@ -832,5 +832,8 @@
   "offload.battery.unplugged": "Le portable est passé sur batterie pendant la copie ({percent} %) : rebranche-le sur secteur.",
   "offload.battery.unplugged_nopercent": "Le portable est passé sur batterie pendant la copie : rebranche-le sur secteur.",
   "offload.battery.running_short": "Autonomie restante ({left} min) inférieure à la fin estimée de la copie : rebranche le portable sur secteur.",
+  "offload.battery.running_low": "Batterie faible ({percent} %) pendant la copie : branche le portable sur secteur.",
+  "offload.battery.running_long": "Copie en cours sur batterie ({percent} %), fin estimée dans {minutes} min : branche le portable sur secteur.",
+  "offload.battery.running_long_nopercent": "Copie en cours sur batterie, fin estimée dans {minutes} min : branche le portable sur secteur.",
   "offload.battery.dismiss": "Fermer"
 }
