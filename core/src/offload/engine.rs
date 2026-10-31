@@ -26,7 +26,7 @@ use std::time::{Instant, SystemTime};
 use serde::Serialize;
 
 use super::existing::Known;
-use super::hash::{HashAlgo, MultiHasher};
+use super::hash::{HashAlgo, ParallelHasher};
 use super::io::{drop_cache, open_uncached, read_full, AlignedBuf};
 use super::scan::{SourceFile, SourceInventory};
 use crate::{Error, Result};
@@ -223,7 +223,7 @@ fn hash_uncached(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
-    let mut hasher = MultiHasher::new(algos);
+    let hasher = ParallelHasher::new(algos);
     let mut done = 0u64;
     while done < size {
         if cancel.load(Ordering::Relaxed) {
@@ -239,7 +239,7 @@ fn hash_uncached(
         if n == 0 {
             break; // fichier raccourci pendant la lecture : l'empreinte différera
         }
-        hasher.update(&buf[..n]);
+        hasher.update(&Arc::new(buf[..n].to_vec()));
         done += n as u64;
     }
     Ok(hasher.finish())
@@ -340,7 +340,7 @@ fn offload_file(
     }
 
     // Lecture unique de la source.
-    let mut hasher = MultiHasher::new(&spec.algorithms);
+    let hasher = ParallelHasher::new(&spec.algorithms);
     let read_result = (|| -> std::io::Result<()> {
         let mut src = File::open(&file.path)?;
         loop {
@@ -353,8 +353,8 @@ fn offload_file(
                 break;
             }
             buf.truncate(got);
-            hasher.update(&buf);
             let chunk = Arc::new(buf);
+            hasher.update(&chunk);
             // Un disque en échec ferme son canal : on continue avec les autres.
             senders.retain(|(_, tx)| tx.send(chunk.clone()).is_ok());
             counter.add(got as u64, true, emit);

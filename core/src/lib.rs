@@ -8,6 +8,7 @@ pub mod explorer;
 pub mod media;
 pub mod offload;
 pub mod player;
+pub mod power;
 pub mod project;
 pub mod report;
 pub mod subtitles;

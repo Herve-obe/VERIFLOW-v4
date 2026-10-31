@@ -229,6 +229,58 @@ impl MultiHasher {
     }
 }
 
+/// Empreintes calculées à côté de la lecture : un fil par méthode reçoit les
+/// blocs lus. La lecture du disque n'attend plus le calcul (MD5 et SHA-256
+/// sont bien plus lents que XXH128 et qu'un SSD rapide), et plusieurs
+/// méthodes cochées se calculent en même temps au lieu de s'additionner.
+pub struct ParallelHasher {
+    workers: Vec<HashWorker>,
+}
+
+/// Fil de calcul d'une méthode : canal des blocs et résultat attendu.
+type HashWorker = (
+    std::sync::mpsc::SyncSender<std::sync::Arc<Vec<u8>>>,
+    std::thread::JoinHandle<(HashAlgo, String)>,
+);
+
+impl ParallelHasher {
+    pub fn new(algos: &[HashAlgo]) -> Self {
+        let workers = algos
+            .iter()
+            .map(|&a| {
+                // Quatre blocs d'avance au plus par méthode (mémoire bornée).
+                let (tx, rx) = std::sync::mpsc::sync_channel::<std::sync::Arc<Vec<u8>>>(4);
+                let handle = std::thread::spawn(move || {
+                    let mut state = State::new(a);
+                    for chunk in rx {
+                        state.update(&chunk);
+                    }
+                    (a, state.finish())
+                });
+                (tx, handle)
+            })
+            .collect();
+        Self { workers }
+    }
+
+    pub fn update(&self, chunk: &std::sync::Arc<Vec<u8>>) {
+        for (tx, _) in &self.workers {
+            let _ = tx.send(chunk.clone());
+        }
+    }
+
+    /// Empreintes, dans l'ordre des méthodes demandées.
+    pub fn finish(self) -> Vec<(HashAlgo, String)> {
+        self.workers
+            .into_iter()
+            .map(|(tx, handle)| {
+                drop(tx);
+                handle.join().expect("fil de calcul d'empreinte")
+            })
+            .collect()
+    }
+}
+
 /// Empreinte de données en mémoire.
 pub fn hash_data(algo: HashAlgo, data: &[u8]) -> String {
     let mut s = State::new(algo);
@@ -283,6 +335,19 @@ mod tests {
         m.update(&DATA[..5]);
         m.update(&DATA[5..]);
         for (algo, digest) in m.finish() {
+            assert_eq!(digest, hash_data(algo, DATA));
+        }
+    }
+
+    #[test]
+    fn parallel_hasher_equals_single() {
+        let p = ParallelHasher::new(&HashAlgo::ALL);
+        p.update(&std::sync::Arc::new(DATA[..5].to_vec()));
+        p.update(&std::sync::Arc::new(DATA[5..].to_vec()));
+        let got = p.finish();
+        assert_eq!(got.len(), HashAlgo::ALL.len());
+        for ((algo, digest), want) in got.into_iter().zip(HashAlgo::ALL) {
+            assert_eq!(algo, want, "ordre des méthodes conservé");
             assert_eq!(digest, hash_data(algo, DATA));
         }
     }

@@ -364,6 +364,7 @@
               {/if}
             {/each}
             <button onclick={useElsewhere}>{t("offload.elsewhere.use")}</button>
+            <p class="note small">{t("offload.elsewhere.hint")}</p>
           </div>
         {/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}

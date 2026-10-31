@@ -197,9 +197,22 @@ pub struct PreflightView {
 
 #[tauri::command]
 pub async fn offload_preflight(
-    request: OffloadRequest,
+    mut request: OffloadRequest,
     app: AppHandle,
 ) -> CmdResult<PreflightView> {
+    // Copies précédentes du projet : une carte réutilisée sans formatage y
+    // est retrouvée (plans du lundi déjà copiés quand elle revient mardi).
+    request.history = {
+        let state = app.state::<AppState>();
+        let guard = state.project.lock().map_err(text)?;
+        guard
+            .as_ref()
+            .and_then(|p| p.offload_roots().ok())
+            .unwrap_or_default()
+            .into_iter()
+            .map(std::path::PathBuf::from)
+            .collect()
+    };
     let pre =
         tauri::async_runtime::spawn_blocking(move || preflight(&request).map(|p| (p, request)))
             .await

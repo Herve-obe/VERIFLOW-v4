@@ -23,6 +23,8 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 | Éjection | Option « éjecter la source après une copie conforme » (macOS diskutil, Windows, Linux gio/umount) |
 | Arborescence | Modèle `{date}/{carte}` par défaut ; variables `{projet}`, `{jour}`, `{camera}`, `{carte}`, `{date}` |
 | Historique | Chaque offload est enregistré dans le fichier projet (détection des cartes déjà copiées) |
+| Carte réutilisée (31/10/2026) | Carte copiée lundi, recopiée mardi sans formatage : les rushes déjà copiés sont cherchés dans les dossiers des copies précédentes du projet (historique), en plus des dossiers de même nom, même si le dossier du jour porte un autre nom. « Reprendre dans ce dossier » puis, au lancement, « Compléter la copie » (nouveaux rushes seulement, les autres revérifiés) ou « Effacer et tout recopier » ; « Revenir au modèle » copie toute la carte dans le dossier du jour |
+| Débit (31/10/2026) | Empreintes calculées à côté de la lecture, un fil par méthode (copie et vérification) : la lecture n'attend plus MD5 ou SHA-256, et plusieurs méthodes se calculent en même temps. Pas de mise en veille pendant une copie, une conversion ou une synchronisation : Windows SetThreadExecutionState, macOS NSProcessInfo (évite aussi App Nap), Linux systemd-inhibit ; rendu dès la fin du travail. Aucun réglage du système n'est modifié (stratégie de retrait des disques, antivirus, signature SMB : au choix de l'utilisateur) |
 
 ### ASC MHL v2
 - Une génération par copie dans `<destination>/ascmhl/NNNN_<carte>_<date>.mhl`, chaînée dans `ascmhl_chain.xml` par empreinte C4.
