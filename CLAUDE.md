@@ -28,6 +28,7 @@
 
 ## Développement automatique (agents)
 - `/developpe <demande>` : l'agent principal (skill `.claude/skills/developpe/`) répartit le travail entre les agents de `.claude/agents/`, vérifie, relance ce qui échoue, ouvre la PR et lance l'installeur de test. Hervé n'intervient qu'à la fin (tests sur poste réel, validation de la PR).
+- **Règle automatique : toute demande de développement d'Hervé passe par l'équipe, même sans `/developpe`.** Est une demande de développement tout ce qui change le comportement ou le code du logiciel : nouvelle fonction, correction de bug, retour de test (classeur de recette, capture, message d'erreur à corriger), modification d'interface, de traduction ou de build. Dans ce cas, lancer le skill `developpe` avec la demande telle quelle, sans attendre la commande. Restent traitées directement : les questions et explications, les avis, les recherches, la mise à jour du classeur de recette ou des documents sans changement de code, la surveillance des PR et des builds. En cas de doute sur une demande courte (une ligne, un seul fichier évident), l'équipe reste la règle ; Hervé peut écrire « sans l'équipe » pour qu'elle soit traitée directement.
 - Agents : `architecte` (plan, opus), `dev-coeur` (Rust, sonnet), `dev-ui` (Svelte, sonnet), `testeur` (contrôles, haiku), `relecteur` (relecture et pièges connus, opus), `doc-i18n` (documentation, haiku), `ci-build` (build GitHub, haiku).
 - Les pièges rencontrés sur ce projet sont listés dans `.claude/agents/relecteur.md` : à compléter à chaque nouveau piège.
 
