@@ -76,6 +76,22 @@ export interface PreflightView {
   hdd: boolean[];
   source_hdd: boolean;
   previous: { finished_at: string; source_name: string; destinations: string[] }[];
+  /** Durée estimée de la copie (secondes). */
+  estimated_secs: number;
+  battery: BatteryWarning | null;
+}
+
+export interface BatteryWarning {
+  reason: "low" | "long" | "short";
+  percent: number | null;
+  minutes_left: number | null;
+  estimated_minutes: number;
+}
+
+export interface PowerStatus {
+  on_battery: boolean;
+  percent: number | null;
+  minutes_left: number | null;
 }
 
 export type DestStatus =
@@ -134,3 +150,67 @@ export const cancel = (job: number) => invoke<void>("offload_cancel", { job });
 export const eject = (mountPoint: string) => invoke<void>("offload_eject", { mountPoint });
 export const reveal = (path: string) => invoke<void>("reveal", { path });
 export const onNotice = (cb: (n: Notice) => void): Promise<UnlistenFn> => listen<Notice>("offload", (e) => cb(e.payload));
+export const powerStatus = () => invoke<PowerStatus | null>("power_status");
+
+/** Avertissement batterie recalculé à l'instant du lancement (null si rien à signaler). */
+export const batteryWarning = (estimatedSecs: number) =>
+  invoke<BatteryWarning | null>("battery_warning", { estimatedSecs });
+
+/**
+ * Secondes restantes d'une copie. `total` compte les octets lus et écrits
+ * (octets × (1 + nb destinations)) alors que `rate` est le débit de lecture de la source.
+ * NaN si le débit ou le total est inconnu.
+ */
+export function remainingSecs(total: number, done: number, rate: number, destinations: number): number {
+  if (!(rate > 0) || !(total > 0)) return NaN;
+  return (total - done) / (rate * (1 + destinations));
+}
+
+export type PowerReason = "unplugged" | "low" | "running_short" | "running_long";
+
+export interface PowerAlert {
+  key: string;
+  vars: Record<string, string>;
+  reason: PowerReason;
+}
+
+const LOW_PERCENT = 20;
+const LONG_MINUTES = 10;
+/** Gravité : une alerte ne réapparaît que si la raison s'aggrave. */
+const RANK: Record<PowerReason, number> = { running_long: 1, unplugged: 1, low: 2, running_short: 3 };
+
+export function powerRank(r: PowerReason | null): number {
+  return r ? RANK[r] : 0;
+}
+
+/**
+ * Décide s'il faut alerter pendant une copie (fonction pure).
+ * `before` : sur batterie au relevé précédent (null au premier relevé).
+ * `etaSecs` : fin estimée de la copie la plus longue (NaN/null si inconnue).
+ * `last` : raison de la dernière alerte depuis le passage sur batterie.
+ * `startedOnBattery` : la surveillance a démarré sur batterie (et n'est pas repassée sur secteur).
+ * Retourne l'alerte à afficher, ou null.
+ */
+export function decidePower(before: boolean | null, p: PowerStatus, etaSecs: number | null, last: PowerReason | null, startedOnBattery: boolean): PowerAlert | null {
+  if (!p.on_battery) return null;
+  const eta = etaSecs !== null && Number.isFinite(etaSecs) ? etaSecs / 60 : null;
+  let reason: PowerReason | null = null;
+  if (p.minutes_left !== null && eta !== null && eta > p.minutes_left) reason = "running_short";
+  else if (p.percent !== null && p.percent <= LOW_PERCENT) reason = "low";
+  else if (before === false) reason = "unplugged";
+  else if (startedOnBattery && eta !== null && eta > LONG_MINUTES) reason = "running_long";
+  if (!reason || RANK[reason] <= powerRank(last)) return null;
+  const np = p.percent === null ? "_nopercent" : "";
+  const vars = {
+    percent: String(p.percent ?? ""),
+    left: String(p.minutes_left ?? ""),
+    minutes: String(eta === null ? "" : Math.round(eta)),
+  };
+  const key =
+    reason === "low"
+      ? "offload.battery.running_low"
+      : reason === "running_short"
+        ? "offload.battery.running_short"
+        : `offload.battery.${reason === "unplugged" ? "unplugged" : "running_long"}${np}`;
+  return { key, vars, reason };
+}

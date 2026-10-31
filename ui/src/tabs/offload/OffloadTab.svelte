@@ -9,10 +9,10 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
-  import { offload, listenOffload } from "../../stores/offload.svelte";
+  import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, volumes, preflight, start, batteryWarning, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -198,24 +198,75 @@
   const noSpace = $derived(pre?.missing_space.some((m) => m !== null) ?? false);
   const canStart = $derived(!!pre && !noSpace && !checking);
 
+  function batteryText(w: BatteryWarning): string {
+    const key = w.reason === "short" ? "offload.battery.short" : w.reason === "low" ? "offload.battery.low" : w.percent === null ? "offload.battery.long_nopercent" : "offload.battery.long";
+    return t(key)
+      .replace("{percent}", String(w.percent ?? ""))
+      .replace("{minutes}", String(w.estimated_minutes))
+      .replace("{left}", String(w.minutes_left ?? ""));
+  }
+
+  function alertText(a: { key: string; vars: Record<string, string> }): string {
+    let s = t(a.key);
+    for (const [k, v] of Object.entries(a.vars)) s = s.replace(`{${k}}`, v);
+    return s;
+  }
+
+  let launching = $state(false);
+
+  /** Relevé frais : pre.battery peut être périmé si l'utilisateur a tardé. */
+  async function freshBattery(): Promise<BatteryWarning | null> {
+    try {
+      return await batteryWarning(pre?.estimated_secs ?? 0);
+    } catch {
+      return pre?.battery ?? null; // repli sur le relevé du contrôle préalable
+    }
+  }
+
+  async function confirm(warnings: string[]): Promise<boolean> {
+    if (warnings.length === 0) return true;
+    return ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
+      title: t("offload.warn.title"),
+      ok: t("dialog.continue"),
+    });
+  }
+
   async function launch() {
-    if (!pre) return;
+    if (!pre || launching) return;
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
     if (pre.present.some((p) => p.files > 0 || p.partial > 0)) {
       existingFor = { ...request(), date: pre.date };
       return;
     }
-    const warnings: string[] = [];
-    if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
-    pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
-    if (warnings.length > 0) {
-      const go = await ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
-        title: t("offload.warn.title"),
-        ok: t("dialog.continue"),
-      });
-      if (!go) return;
+    launching = true;
+    try {
+      const warnings: string[] = [];
+      if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
+      pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
+      const battery = await freshBattery();
+      if (!pre) return;
+      if (battery) warnings.push(batteryText(battery));
+      if (!(await confirm(warnings))) return;
+      if (!pre) return;
+      await launchWith({ ...request(), date: pre.date }, "verify", null);
+    } finally {
+      launching = false;
     }
-    await launchWith({ ...request(), date: pre.date }, "verify", null);
+  }
+
+  async function chooseExisting(r: OffloadRequest, mode: ExistingMode, check: number | null) {
+    if (launching) return;
+    existingFor = null;
+    launching = true;
+    try {
+      const battery = await freshBattery();
+      if (!pre) return;
+      if (!(await confirm(battery ? [batteryText(battery)] : []))) return;
+      if (!pre) return;
+      await launchWith(r, mode, check);
+    } finally {
+      launching = false;
+    }
   }
 
   async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
@@ -242,7 +293,7 @@
 {#if existingFor}
   <ExistingDialog
     request={existingFor}
-    onChoose={(mode, check) => existingFor && launchWith(existingFor, mode, check)}
+    onChoose={(mode, check) => existingFor && chooseExisting(existingFor, mode, check)}
     onClose={() => (existingFor = null)}
   />
 {/if}
@@ -369,15 +420,22 @@
         {/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}
         {#if pre.source_hdd || pre.hdd.some((h) => h)}<p class="warn">{t("offload.hdd")}</p>{/if}
+        {#if pre.battery}<p class="warn">{batteryText(pre.battery)}</p>{/if}
       {:else}
         <p class="muted">{t("offload.howto")}</p>
       {/if}
-      <button class="start" disabled={!canStart} onclick={launch}>{t("offload.start")}</button>
+      <button class="start" disabled={!canStart || launching} onclick={launch}>{t("offload.start")}</button>
     </div>
   </section>
 
   <section class="queue">
     <h2>{t("offload.queue")}</h2>
+    {#if offload.batteryAlert}
+      <p class="warn alert">
+        <span>{alertText(offload.batteryAlert)}</span>
+        <button onclick={dismissBatteryAlert}>{t("offload.battery.dismiss")}</button>
+      </p>
+    {/if}
     {#each offload.jobs as job (job.id)}
       <JobCard {job} />
     {:else}
@@ -598,6 +656,11 @@
     color: var(--vf-warning);
     font-size: var(--vf-text-xs);
     font-weight: 600;
+  }
+  .alert {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-2);
   }
   .error {
     color: var(--vf-error);

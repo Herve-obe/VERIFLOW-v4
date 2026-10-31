@@ -3,7 +3,7 @@
   import ProgressBar from "../../components/ProgressBar.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
-  import { cancel, reveal, type DestStatus } from "../../lib/offload";
+  import { cancel, remainingSecs, reveal, type DestStatus } from "../../lib/offload";
   import { ask } from "../../stores/confirm.svelte";
   import { offload, interrupted, removeJob, type Job } from "../../stores/offload.svelte";
 
@@ -17,7 +17,7 @@
   };
 
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
-  const eta = $derived(job.rate > 0 && job.total > 0 ? ((job.total - job.done) / (job.rate * (1 + job.roots.length))) : NaN);
+  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
   const barState = $derived(job.state === "failed" || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));

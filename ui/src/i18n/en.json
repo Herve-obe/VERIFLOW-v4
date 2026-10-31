@@ -824,5 +824,16 @@
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.restore": "Restore",
-  "window.close": "Close"
+  "window.close": "Close",
+  "offload.battery.low": "Low battery ({percent}%): plug the laptop in before starting the copy.",
+  "offload.battery.long": "Laptop on battery ({percent}%) and copy estimated at {minutes} min: plug it in so it does not shut down mid-copy.",
+  "offload.battery.long_nopercent": "Laptop on battery and copy estimated at {minutes} min: plug it in so it does not shut down mid-copy.",
+  "offload.battery.short": "Estimated battery life is {left} min for a copy of about {minutes} min: plug the laptop in.",
+  "offload.battery.unplugged": "The laptop switched to battery during the copy ({percent}%): plug it back in.",
+  "offload.battery.unplugged_nopercent": "The laptop switched to battery during the copy: plug it back in.",
+  "offload.battery.running_short": "Remaining battery life ({left} min) is shorter than the estimated end of the copy: plug the laptop back in.",
+  "offload.battery.running_low": "Low battery ({percent}%) during the copy: plug the laptop in.",
+  "offload.battery.running_long": "Copy running on battery ({percent}%), estimated to end in {minutes} min: plug the laptop in.",
+  "offload.battery.running_long_nopercent": "Copy running on battery, estimated to end in {minutes} min: plug the laptop in.",
+  "offload.battery.dismiss": "Close"
 }
