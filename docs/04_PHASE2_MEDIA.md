@@ -62,5 +62,5 @@ Essai réel (Linux) : arbre des volumes, dossier créé pendant que l'applicatio
 
 ## Reste à faire (hors de cette PR)
 1. Lecture des fichiers XML de métadonnées des caméras (Sony `M01.XML`, Panasonic P2, Blackmagic) pour préremplir objectif, ISO, obturateur...
-2. Copie de travail des WAV RF64 (plus de 4 Go).
+2. Copie de travail des WAV RF64 (plus de 4 Go) : fait le 20/10/2026. Source RIFF, RF64 ou BW64 ; taille réelle des données lue dans le bloc `ds64`. La copie est écrite en RF64 (EBU Tech 3306 : `ds64` en premier bloc, tailles 64 bits, bloc `data` à 0xFFFFFFFF) si la source l'est déjà ou si elle dépasse 4 Gio ; sinon en RIFF comme avant. Tests : RF64 produit relu par VERIFLOW et FFprobe, échantillons identiques, iXML mis à jour, RF64 recopié en RF64. Pas d'essai sur un vrai fichier de plus de 4 Gio ici (seuil abaissé dans le test).
 3. Vue arborescente des volumes à gauche de la liste.

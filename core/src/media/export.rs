@@ -414,57 +414,142 @@ fn ixml_for(r: &MediaRecord, channels: u16) -> String {
     x
 }
 
-/// Recopie un WAV (RIFF) en remplaçant son bloc iXML ; les autres blocs
-/// (fmt, bext, données...) sont conservés à l'identique.
+/// Taille au-delà de laquelle la copie de travail est écrite en RF64 : la
+/// taille d'un fichier RIFF tient sur 32 bits (4 Gio).
+const RIFF_LIMIT: u64 = u32::MAX as u64;
+
+/// Recopie un WAV (RIFF, RF64 ou BW64) en remplaçant son bloc iXML ; les
+/// autres blocs (fmt, bext, données...) sont conservés à l'identique.
 fn wav_working_copy(r: &MediaRecord, target: &Path) -> Result<()> {
+    wav_copy_with_limit(r, target, RIFF_LIMIT)
+}
+
+/// Copie de travail WAV ; au-delà de `limit` octets (ou si la source est
+/// déjà en RF64), le fichier produit est un RF64 (EBU Tech 3306) : bloc
+/// `ds64` en tête, tailles 64 bits, taille du bloc `data` à 0xFFFFFFFF.
+fn wav_copy_with_limit(r: &MediaRecord, target: &Path, limit: u64) -> Result<()> {
     let mut src = fs::File::open(&r.path)?;
     let mut header = [0u8; 12];
     src.read_exact(&mut header)?;
-    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" {
+    let src_rf64 = match &header[0..4] {
+        b"RIFF" => false,
+        b"RF64" | b"BW64" => true,
+        _ => {
+            return Err(Error::Unsupported(format!(
+                "{} : ce n'est pas un fichier WAV",
+                r.path.display()
+            )))
+        }
+    };
+    if &header[8..12] != b"WAVE" {
         return Err(Error::Unsupported(format!(
-            "{} : copie de travail possible uniquement pour les WAV RIFF de moins de 4 Go (RF64 : à venir)",
+            "{} : ce n'est pas un fichier WAV",
             r.path.display()
         )));
     }
     let len = src.metadata()?.len();
-    let channels = r.details.wav.as_ref().map(|w| w.channels).unwrap_or(1);
-    let ixml = ixml_for(r, channels);
-    let tmp = target.with_extension("vfpart");
-    let mut out = std::io::BufWriter::new(fs::File::create(&tmp)?);
-    out.write_all(b"RIFF\0\0\0\0WAVE")?;
-    let mut written: u64 = 4;
+
+    // Inventaire des blocs à recopier (ds64 et iXML exceptés), taille réelle
+    // du bloc data lue dans ds64 pour un RF64.
+    let mut chunks: Vec<([u8; 4], u64, u64)> = Vec::new();
+    let mut ds64_data: Option<u64> = None;
+    let mut block_align = 0u64;
     let mut pos = 12u64;
-    let mut buf = vec![0u8; 1 << 20];
     while pos + 8 <= len {
         src.seek(SeekFrom::Start(pos))?;
         let mut ch = [0u8; 8];
         src.read_exact(&mut ch)?;
-        let size = u32::from_le_bytes([ch[4], ch[5], ch[6], ch[7]]) as u64;
-        let padded = size + (size & 1);
-        if &ch[0..4] != b"iXML" && &ch[0..4] != b"IXML" {
-            out.write_all(&ch)?;
-            let mut left = padded.min(len - pos - 8);
-            while left > 0 {
-                let n = left.min(buf.len() as u64) as usize;
-                src.read_exact(&mut buf[..n])?;
-                out.write_all(&buf[..n])?;
-                left -= n as u64;
+        let id = [ch[0], ch[1], ch[2], ch[3]];
+        let mut size = u32::from_le_bytes([ch[4], ch[5], ch[6], ch[7]]) as u64;
+        let body = pos + 8;
+        match &id {
+            b"ds64" => {
+                let mut b = [0u8; 16];
+                if size >= 16 {
+                    src.read_exact(&mut b)?;
+                    ds64_data = Some(u64::from_le_bytes(b[8..16].try_into().unwrap()));
+                }
             }
-            written += 8 + padded;
+            b"fmt " => {
+                let mut b = [0u8; 14];
+                if size >= 14 {
+                    src.read_exact(&mut b)?;
+                    block_align = u16::from_le_bytes([b[12], b[13]]) as u64;
+                }
+            }
+            b"data" if src_rf64 && size == 0xFFFF_FFFF => {
+                size = ds64_data.unwrap_or(len - body);
+            }
+            _ => {}
         }
-        pos += 8 + padded;
+        let size = size.min(len - body);
+        if &id != b"ds64" && &id != b"iXML" && &id != b"IXML" {
+            chunks.push((id, body, size));
+        }
+        pos = body + size + (size & 1);
     }
-    let body = ixml.as_bytes();
+
+    let channels = r.details.wav.as_ref().map(|w| w.channels).unwrap_or(1);
+    let ixml = ixml_for(r, channels);
+    let ixml_len = ixml.len() as u64;
+    let padded = |s: u64| s + (s & 1);
+    let payload: u64 =
+        chunks.iter().map(|(_, _, s)| 8 + padded(*s)).sum::<u64>() + 8 + padded(ixml_len);
+    let data_size = chunks
+        .iter()
+        .find(|(id, _, _)| id == b"data")
+        .map(|(_, _, s)| *s)
+        .unwrap_or(0);
+    let rf64 = src_rf64 || 4 + payload > limit;
+
+    let tmp = target.with_extension("vfpart");
+    let mut out = std::io::BufWriter::new(fs::File::create(&tmp)?);
+    if rf64 {
+        // RF64 : taille du fichier dans ds64 (riffSize, dataSize, sampleCount).
+        let riff_size = 4 + 8 + 28 + payload;
+        out.write_all(b"RF64\xff\xff\xff\xffWAVE")?;
+        out.write_all(b"ds64")?;
+        out.write_all(&28u32.to_le_bytes())?;
+        out.write_all(&riff_size.to_le_bytes())?;
+        out.write_all(&data_size.to_le_bytes())?;
+        let samples = data_size.checked_div(block_align).unwrap_or(0);
+        out.write_all(&samples.to_le_bytes())?;
+        out.write_all(&0u32.to_le_bytes())?; // aucune autre taille 64 bits
+    } else {
+        out.write_all(b"RIFF")?;
+        out.write_all(&((4 + payload) as u32).to_le_bytes())?;
+        out.write_all(b"WAVE")?;
+    }
+    let mut buf = vec![0u8; 1 << 20];
+    for (id, body, size) in &chunks {
+        let field = if rf64 && id == b"data" {
+            0xFFFF_FFFF
+        } else {
+            u32::try_from(*size).map_err(|_| {
+                Error::Unsupported(format!("{} : bloc trop grand", r.path.display()))
+            })?
+        };
+        out.write_all(id)?;
+        out.write_all(&field.to_le_bytes())?;
+        src.seek(SeekFrom::Start(*body))?;
+        let mut left = *size;
+        while left > 0 {
+            let n = left.min(buf.len() as u64) as usize;
+            src.read_exact(&mut buf[..n])?;
+            out.write_all(&buf[..n])?;
+            left -= n as u64;
+        }
+        if size & 1 == 1 {
+            out.write_all(&[0])?;
+        }
+    }
     out.write_all(b"iXML")?;
-    out.write_all(&(body.len() as u32).to_le_bytes())?;
-    out.write_all(body)?;
-    if body.len() % 2 == 1 {
+    out.write_all(&(ixml_len as u32).to_le_bytes())?;
+    out.write_all(ixml.as_bytes())?;
+    if ixml_len & 1 == 1 {
         out.write_all(&[0])?;
     }
-    written += 8 + body.len() as u64 + (body.len() as u64 & 1);
-    let mut f = out.into_inner().map_err(|e| e.into_error())?;
-    f.seek(SeekFrom::Start(4))?;
-    f.write_all(&(written as u32).to_le_bytes())?;
+    let f = out.into_inner().map_err(|e| e.into_error())?;
     f.sync_all()?;
     drop(f);
     fs::rename(&tmp, target)?;
@@ -618,6 +703,73 @@ mod tests {
         // Une deuxième copie au même endroit est refusée (rien n'est écrasé).
         let again = working_copies(&[r], &dir.path().join("in"), &dir.path().join("out"));
         assert!(again[0].1.is_err());
+    }
+
+    #[test]
+    fn wav_working_copy_rf64() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("in/BIG.WAV");
+        fs::create_dir_all(src.parent().unwrap()).unwrap();
+        write_test_wav(&src, 3, 48_000, 24, false, 9_601, None, |n, c| {
+            ((n * 7 + c as u64) % 97) as f64 / 120.0
+        })
+        .unwrap();
+        let samples = |p: &Path| {
+            let mut v = Vec::new();
+            WavReader::open(p).unwrap().read(0, 9_601, &mut v).unwrap();
+            v
+        };
+        // Copie « trop grande » pour un RIFF (seuil abaissé) : écrite en RF64.
+        let r = record(&src, &[("scene", "40"), ("track.3", "Ambiance")]);
+        let rf64 = dir.path().join("out/BIG.WAV");
+        fs::create_dir_all(rf64.parent().unwrap()).unwrap();
+        wav_copy_with_limit(&r, &rf64, 1000).unwrap();
+        let bytes = fs::read(&rf64).unwrap();
+        assert_eq!(&bytes[0..4], b"RF64");
+        assert_eq!(&bytes[4..8], &[0xff; 4]);
+        assert_eq!(&bytes[12..16], b"ds64", "ds64 en premier bloc");
+        let riff_size = u64::from_le_bytes(bytes[20..28].try_into().unwrap());
+        assert_eq!(riff_size, bytes.len() as u64 - 8);
+        let data_size = u64::from_le_bytes(bytes[28..36].try_into().unwrap());
+        assert_eq!(data_size, 9_601 * 9);
+        assert_eq!(u64::from_le_bytes(bytes[36..44].try_into().unwrap()), 9_601);
+        let info = read_info(&rf64).unwrap();
+        assert_eq!((info.channels, info.frames), (3, 9_601));
+        assert_eq!(info.ixml.scene.as_deref(), Some("40"));
+        assert_eq!(info.track_name(2), "Ambiance");
+        assert_eq!(samples(&rf64), samples(&src), "échantillons identiques");
+        // FFmpeg lit le RF64 produit (si présent).
+        if crate::tools::locate("ffprobe").is_some() {
+            let out = crate::tools::command("ffprobe")
+                .unwrap()
+                .args([
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "stream=channels,duration_ts",
+                ])
+                .args(["-of", "csv=p=0"])
+                .arg(&rf64)
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "3,9601");
+        }
+
+        // Source RF64 : la copie reste en RF64, données identiques.
+        let r2 = record(&rf64, &[("take", "7")]);
+        let again = dir.path().join("out2/BIG.WAV");
+        fs::create_dir_all(again.parent().unwrap()).unwrap();
+        wav_working_copy(&r2, &again).unwrap();
+        assert_eq!(&fs::read(&again).unwrap()[0..4], b"RF64");
+        let info = read_info(&again).unwrap();
+        assert_eq!(info.ixml.take.as_deref(), Some("7"));
+        assert_eq!(info.ixml.scene.as_deref(), Some("40"));
+        assert_eq!(samples(&again), samples(&src));
+        // Sous le seuil, une source RIFF reste un RIFF.
+        let small = dir.path().join("out3/BIG.WAV");
+        fs::create_dir_all(small.parent().unwrap()).unwrap();
+        wav_working_copy(&r, &small).unwrap();
+        assert_eq!(&fs::read(&small).unwrap()[0..4], b"RIFF");
     }
 
     #[test]
