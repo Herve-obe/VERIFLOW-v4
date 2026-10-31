@@ -212,32 +212,61 @@
     return s;
   }
 
+  let launching = $state(false);
+
+  /** Relevé frais : pre.battery peut être périmé si l'utilisateur a tardé. */
+  async function freshBattery(): Promise<BatteryWarning | null> {
+    try {
+      return await batteryWarning(pre?.estimated_secs ?? 0);
+    } catch {
+      return pre?.battery ?? null; // repli sur le relevé du contrôle préalable
+    }
+  }
+
+  async function confirm(warnings: string[]): Promise<boolean> {
+    if (warnings.length === 0) return true;
+    return ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
+      title: t("offload.warn.title"),
+      ok: t("dialog.continue"),
+    });
+  }
+
   async function launch() {
-    if (!pre) return;
+    if (!pre || launching) return;
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
     if (pre.present.some((p) => p.files > 0 || p.partial > 0)) {
       existingFor = { ...request(), date: pre.date };
       return;
     }
-    const warnings: string[] = [];
-    if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
-    pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
-    // Relevé frais : pre.battery peut être périmé si l'utilisateur a tardé.
-    let battery: BatteryWarning | null = pre.battery;
+    launching = true;
     try {
-      battery = await batteryWarning(pre.estimated_secs);
-    } catch {
-      /* repli sur le relevé du contrôle préalable */
+      const warnings: string[] = [];
+      if (pre.previous.length > 0) warnings.push(`${t("offload.warn.previous")} (${pre.previous.map((p) => p.finished_at).join(", ")})`);
+      pre.already_in_destination.forEach((a, i) => a && warnings.push(`${t("offload.warn.existing")} ${pre!.roots[i]}`));
+      const battery = await freshBattery();
+      if (!pre) return;
+      if (battery) warnings.push(batteryText(battery));
+      if (!(await confirm(warnings))) return;
+      if (!pre) return;
+      await launchWith({ ...request(), date: pre.date }, "verify", null);
+    } finally {
+      launching = false;
     }
-    if (battery) warnings.push(batteryText(battery));
-    if (warnings.length > 0) {
-      const go = await ask(`${warnings.join("\n")}\n\n${t("offload.warn.continue")}`, {
-        title: t("offload.warn.title"),
-        ok: t("dialog.continue"),
-      });
-      if (!go) return;
+  }
+
+  async function chooseExisting(r: OffloadRequest, mode: ExistingMode, check: number | null) {
+    if (launching) return;
+    existingFor = null;
+    launching = true;
+    try {
+      const battery = await freshBattery();
+      if (!pre) return;
+      if (!(await confirm(battery ? [batteryText(battery)] : []))) return;
+      if (!pre) return;
+      await launchWith(r, mode, check);
+    } finally {
+      launching = false;
     }
-    await launchWith({ ...request(), date: pre.date }, "verify", null);
   }
 
   async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
@@ -264,7 +293,7 @@
 {#if existingFor}
   <ExistingDialog
     request={existingFor}
-    onChoose={(mode, check) => existingFor && launchWith(existingFor, mode, check)}
+    onChoose={(mode, check) => existingFor && chooseExisting(existingFor, mode, check)}
     onClose={() => (existingFor = null)}
   />
 {/if}
@@ -395,7 +424,7 @@
       {:else}
         <p class="muted">{t("offload.howto")}</p>
       {/if}
-      <button class="start" disabled={!canStart} onclick={launch}>{t("offload.start")}</button>
+      <button class="start" disabled={!canStart || launching} onclick={launch}>{t("offload.start")}</button>
     </div>
   </section>
 

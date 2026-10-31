@@ -42,6 +42,9 @@ export function dismissBatteryAlert() {
 let timer: ReturnType<typeof setInterval> | null = null;
 let wasOnBattery: boolean | null = null;
 let lastReason: PowerReason | null = null;
+let startedOnBattery = false;
+/** Génération de la surveillance : un relevé d'une génération révolue est ignoré. */
+let generation = 0;
 
 /** Fin estimée (secondes) de la copie en cours la plus longue, null si inconnue. */
 function runningEta(): number | null {
@@ -55,22 +58,25 @@ function runningEta(): number | null {
 }
 
 async function pollPower() {
+  const gen = generation;
   let p;
   try {
     p = await powerStatus();
   } catch {
     return;
   }
-  if (!timer) return; // la surveillance s'est arrêtée pendant l'attente
+  if (gen !== generation) return; // la surveillance a été arrêtée ou relancée pendant l'attente
   if (!p) return;
   const before = wasOnBattery;
   wasOnBattery = p.on_battery;
   if (!p.on_battery) {
     lastReason = null;
+    startedOnBattery = false;
     offload.batteryAlert = null;
     return;
   }
-  const alert = decidePower(before, p, runningEta(), lastReason);
+  if (before === null) startedOnBattery = true;
+  const alert = decidePower(before, p, runningEta(), lastReason, startedOnBattery);
   if (alert) {
     offload.batteryAlert = { key: alert.key, vars: alert.vars };
     lastReason = alert.reason;
@@ -81,15 +87,19 @@ async function pollPower() {
 function syncPowerWatch() {
   const running = offload.jobs.some((j) => j.state === "running");
   if (running && !timer) {
+    generation++;
     wasOnBattery = null;
     lastReason = null;
+    startedOnBattery = false;
     void pollPower();
     timer = setInterval(pollPower, 60_000);
   } else if (!running && timer) {
     clearInterval(timer);
     timer = null;
+    generation++;
     wasOnBattery = null;
     lastReason = null;
+    startedOnBattery = false;
     offload.batteryAlert = null;
   }
 }

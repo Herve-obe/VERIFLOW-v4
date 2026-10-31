@@ -188,16 +188,17 @@ export function powerRank(r: PowerReason | null): number {
  * `before` : sur batterie au relevé précédent (null au premier relevé).
  * `etaSecs` : fin estimée de la copie la plus longue (NaN/null si inconnue).
  * `last` : raison de la dernière alerte depuis le passage sur batterie.
+ * `startedOnBattery` : la surveillance a démarré sur batterie (et n'est pas repassée sur secteur).
  * Retourne l'alerte à afficher, ou null.
  */
-export function decidePower(before: boolean | null, p: PowerStatus, etaSecs: number | null, last: PowerReason | null): PowerAlert | null {
+export function decidePower(before: boolean | null, p: PowerStatus, etaSecs: number | null, last: PowerReason | null, startedOnBattery: boolean): PowerAlert | null {
   if (!p.on_battery) return null;
   const eta = etaSecs !== null && Number.isFinite(etaSecs) ? etaSecs / 60 : null;
   let reason: PowerReason | null = null;
   if (p.minutes_left !== null && eta !== null && eta > p.minutes_left) reason = "running_short";
   else if (p.percent !== null && p.percent <= LOW_PERCENT) reason = "low";
   else if (before === false) reason = "unplugged";
-  else if (before === null && eta !== null && eta > LONG_MINUTES) reason = "running_long";
+  else if (startedOnBattery && eta !== null && eta > LONG_MINUTES) reason = "running_long";
   if (!reason || RANK[reason] <= powerRank(last)) return null;
   const np = p.percent === null ? "_nopercent" : "";
   const vars = {
