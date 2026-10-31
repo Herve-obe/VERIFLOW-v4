@@ -27,6 +27,18 @@ pub struct PlayerState {
     audio: Mutex<HashMap<String, AudioEngine>>,
 }
 
+impl PlayerState {
+    /// Libère la vidéo et le son d'un emplacement (fenêtre fermée).
+    pub fn release(&self, slot: &str) {
+        if let Ok(mut v) = self.video.lock() {
+            v.remove(slot);
+        }
+        if let Ok(mut a) = self.audio.lock() {
+            a.remove(slot);
+        }
+    }
+}
+
 type CmdResult<T> = Result<T, String>;
 
 fn text<E: std::fmt::Display>(e: E) -> String {

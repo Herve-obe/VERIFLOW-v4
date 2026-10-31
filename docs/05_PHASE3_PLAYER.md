@@ -133,3 +133,14 @@ Captures : `docs/captures/phase3_lecteur_rapide_pistes_ltc.png`, `phase3_projet_
 - Pop-up de saisie vers REPORT (phase REPORT).
 - Scopes et sortie moniteur externe (V2, charte §7.3).
 - Compensation du décalage de départ entre pistes son et image.
+
+## Lecteur rapide dans une vraie fenêtre (ajout du 20/10/2026)
+
+- Le lecteur rapide de MEDIA (double-clic ou Espace) s'ouvre dans sa propre fenêtre du système, et non plus dans un pop-up : barre de titre du système, déplaçable sur un autre écran, redimensionnable, réductible. Titre : nom du fichier.
+- Une seule fenêtre, réutilisée : ouvrir un autre média la recharge et la passe au premier plan.
+- Place et taille mémorisées (rouverte au même endroit, même écran) ; si cet écran n'est plus branché, la fenêtre s'ouvre au centre.
+- Échap ferme la fenêtre ; « Ouvrir dans le PLAYER » ferme la fenêtre et ouvre le média dans l'onglet PLAYER. Fermer VERIFLOW ferme aussi le lecteur rapide.
+- En se fermant, la fenêtre libère le lecteur (vidéo et son).
+- Sortie moniteur : possible depuis le lecteur rapide comme depuis le PLAYER ; un seul lecteur l'alimente à la fois (le dernier qui l'a choisie).
+- Correction du 23/10/2026 (test d'Hervé sous Windows : fenêtre blanche, figée, à fermer par le gestionnaire des tâches) : `quick_open` est une commande asynchrone. Sous Windows, créer une fenêtre depuis une commande synchrone bloque l'application ; la fenêtre moniteur l'était déjà.
+- Essai (Linux, Xvfb, sans gestionnaire de fenêtres) : fenêtre « A001C001.mov : VERIFLOW » séparée, image et son chargés ; déplacée en 350,150 et réduite à 900 × 600, fermée par Échap, rouverte à la même place et à la même taille ; « Ouvrir dans le PLAYER » ferme la fenêtre et charge le clip dans le PLAYER. Capture : `docs/captures/media_lecteur_rapide_fenetre.png`. Pas d'essai sur deux écrans réels ici.
