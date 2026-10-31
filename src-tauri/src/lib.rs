@@ -89,6 +89,7 @@ pub fn run() {
             player::audio_status,
             offload::offload_volumes,
             offload::power_status,
+            offload::battery_warning,
             offload::offload_preflight,
             offload::offload_start,
             offload::offload_check_existing,

@@ -193,6 +193,19 @@ pub async fn power_status() -> Option<veriflow_core::battery::PowerStatus> {
         .flatten()
 }
 
+/// Réévalue l'avertissement batterie au moment de lancer la copie : le
+/// préflight a pu être fait sur secteur.
+#[tauri::command]
+pub async fn battery_warning(
+    estimated_secs: u64,
+) -> Option<veriflow_core::battery::BatteryWarning> {
+    let status = tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
+        .await
+        .ok()
+        .flatten();
+    veriflow_core::battery::assess(status.as_ref(), estimated_secs)
+}
+
 #[derive(Serialize)]
 pub struct PreflightView {
     #[serde(flatten)]

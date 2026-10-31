@@ -88,12 +88,10 @@ fn from_windows(ac: u8, flag: u8, percent: u8, life_secs: u32) -> Option<PowerSt
     if ac == 255 || flag & 128 != 0 {
         return None;
     }
-    if percent == 255 {
-        return None;
-    }
+    // Sur batterie sans niveau connu : on avertit quand même (durée seule).
     Some(PowerStatus {
         on_battery: ac == 0,
-        percent: Some(percent.min(100)),
+        percent: (percent != 255).then_some(percent.min(100)),
         minutes_left: (life_secs != u32::MAX).then_some(life_secs / 60),
     })
 }
@@ -120,11 +118,15 @@ fn parse_pmset(text: &str) -> Option<PowerStatus> {
         .rev()
         .collect();
     let percent = digits.parse::<u8>().ok().filter(|p| *p <= 100)?;
-    let minutes_left = line.split(';').find_map(|part| {
-        let t = part.trim().split(" remaining").next()?.trim();
-        let (h, m) = t.split_once(':')?;
-        Some(h.trim().parse::<u32>().ok()? * 60 + m.trim().parse::<u32>().ok()?)
-    });
+    let minutes_left = line
+        .split(';')
+        .find_map(|part| {
+            let t = part.trim().split(" remaining").next()?.trim();
+            let (h, m) = t.split_once(':')?;
+            Some(h.trim().parse::<u32>().ok()? * 60 + m.trim().parse::<u32>().ok()?)
+        })
+        // « 0:00 remaining » : estimation pas encore calculée, donc inconnue.
+        .filter(|m| *m > 0);
     Some(PowerStatus {
         on_battery,
         percent: Some(percent),
@@ -142,9 +144,13 @@ fn read_sysfs(dir: &std::path::Path) -> Option<PowerStatus> {
     };
     let num = |p: &std::path::Path, name: &str| read(p, name).and_then(|s| s.parse::<u64>().ok());
     let (mut mains, mut discharging) = (false, false);
+    // Par batterie : niveau et capacité pleine (énergie ou charge).
     let mut caps: Vec<u64> = Vec::new();
-    // Sommes pour l'autonomie : (énergie, puissance) puis (charge, courant).
+    let mut fulls: Vec<Option<(bool, u64)>> = Vec::new();
+    // Sommes pour l'autonomie : (énergie, puissance) puis (charge, courant),
+    // avec le nombre de batteries qui ont fourni chaque paire.
     let (mut energy, mut power, mut charge, mut current) = (0u64, 0u64, 0u64, 0u64);
+    let (mut n_energy, mut n_charge) = (0, 0);
     let mut batteries = 0;
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let p = entry.path();
@@ -165,14 +171,22 @@ fn read_sysfs(dir: &std::path::Path) -> Option<PowerStatus> {
                 }
                 if let Some(c) = num(&p, "capacity") {
                     caps.push(c.min(100));
+                    // (vrai : énergie, faux : charge), jamais mélangées.
+                    fulls.push(
+                        num(&p, "energy_full")
+                            .map(|f| (true, f))
+                            .or_else(|| num(&p, "charge_full").map(|f| (false, f))),
+                    );
                 }
                 if let (Some(e), Some(w)) = (num(&p, "energy_now"), num(&p, "power_now")) {
                     energy += e;
                     power += w;
+                    n_energy += 1;
                 }
                 if let (Some(c), Some(i)) = (num(&p, "charge_now"), num(&p, "current_now")) {
                     charge += c;
                     current += i;
+                    n_charge += 1;
                 }
             }
             _ => {}
@@ -181,11 +195,33 @@ fn read_sysfs(dir: &std::path::Path) -> Option<PowerStatus> {
     if batteries == 0 {
         return None;
     }
-    let percent = (!caps.is_empty())
-        .then(|| (caps.iter().sum::<u64>() as f64 / caps.len() as f64).round() as u8);
-    let hours = if power > 0 {
+    // Niveau pondéré par la capacité pleine quand elle est connue pour toutes
+    // les batteries dans la même unité ; sinon moyenne simple.
+    let weights: Option<Vec<u64>> = match fulls.first() {
+        Some(Some((kind, _)))
+            if fulls.len() == caps.len()
+                && fulls.iter().all(|f| f.is_some_and(|(k, _)| k == *kind)) =>
+        {
+            Some(fulls.iter().flatten().map(|(_, f)| *f).collect())
+        }
+        _ => None,
+    }
+    .filter(|w: &Vec<u64>| w.iter().sum::<u64>() > 0);
+    let percent = if caps.is_empty() {
+        None
+    } else if let Some(w) = weights {
+        let total: u64 = w.iter().sum();
+        let weighted: u64 = caps.iter().zip(&w).map(|(c, f)| c * f).sum();
+        Some((weighted as f64 / total as f64).round() as u8)
+    } else {
+        Some((caps.iter().sum::<u64>() as f64 / caps.len() as f64).round() as u8)
+    };
+    // Autonomie : seulement si toutes les batteries donnent la même paire.
+    // Dans un parc mixte (une en énergie, une en charge), les unités ne
+    // s'additionnent pas et une somme partielle surestimerait l'autonomie.
+    let hours = if n_energy == batteries && power > 0 {
         Some(energy as f64 / power as f64)
-    } else if current > 0 {
+    } else if n_charge == batteries && current > 0 {
         Some(charge as f64 / current as f64)
     } else {
         None
@@ -299,6 +335,12 @@ mod tests {
     fn pmset_no_estimate() {
         let t = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t60%; discharging; (no estimate) present: true\n";
         assert_eq!(parse_pmset(t), Some(batt(true, Some(60), None)));
+    }
+
+    #[test]
+    fn pmset_zero_remaining_unknown() {
+        let t = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t70%; discharging; 0:00 remaining present: true\n";
+        assert_eq!(parse_pmset(t), Some(batt(true, Some(70), None)));
     }
 
     #[test]
@@ -422,10 +464,63 @@ mod tests {
     }
 
     #[test]
+    fn sysfs_two_batteries_weighted() {
+        let t = tempfile::tempdir().unwrap();
+        for (n, cap, full) in [("BAT0", "100", "10000"), ("BAT1", "50", "30000")] {
+            put(
+                t.path(),
+                n,
+                &[
+                    ("type", "Battery"),
+                    ("status", "Discharging"),
+                    ("capacity", cap),
+                    ("energy_full", full),
+                ],
+            );
+        }
+        // (100*10000 + 50*30000) / 40000 = 62,5 arrondi à 63.
+        assert_eq!(read_sysfs(t.path()).unwrap().percent, Some(63));
+    }
+
+    #[test]
+    fn sysfs_mixed_units_simple_average_no_autonomy() {
+        let t = tempfile::tempdir().unwrap();
+        put(
+            t.path(),
+            "BAT0",
+            &[
+                ("type", "Battery"),
+                ("status", "Discharging"),
+                ("capacity", "100"),
+                ("energy_full", "10000"),
+                ("energy_now", "10000"),
+                ("power_now", "5000"),
+            ],
+        );
+        put(
+            t.path(),
+            "BAT1",
+            &[
+                ("type", "Battery"),
+                ("status", "Discharging"),
+                ("capacity", "50"),
+                ("charge_full", "30000"),
+            ],
+        );
+        let s = read_sysfs(t.path()).unwrap();
+        assert_eq!(s.percent, Some(75));
+        assert_eq!(s.minutes_left, None);
+    }
+
+    #[test]
     fn windows_unknown_values() {
         assert_eq!(from_windows(255, 0, 50, 100), None);
         assert_eq!(from_windows(0, 128, 50, 100), None);
-        assert_eq!(from_windows(0, 0, 255, 100), None);
+        assert_eq!(
+            from_windows(0, 0, 255, 100),
+            Some(batt(true, None, Some(1)))
+        );
+        assert!(!from_windows(1, 0, 255, u32::MAX).unwrap().on_battery);
         assert_eq!(
             from_windows(0, 0, 50, u32::MAX),
             Some(batt(true, Some(50), None))
