@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { onNotice, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "running" | "done" | "failed";
 
@@ -31,7 +31,78 @@ export const offload = $state({
   requests: {} as Record<number, OffloadRequest>,
   /** Copie à reprendre : le formulaire est rempli avec cette demande. */
   resume: null as OffloadRequest | null,
+  /** Alerte batterie pendant une copie (clé i18n et variables, traduites à l'affichage). */
+  batteryAlert: null as { key: string; vars: Record<string, string> } | null,
 });
+
+export function dismissBatteryAlert() {
+  offload.batteryAlert = null;
+}
+
+let timer: ReturnType<typeof setInterval> | null = null;
+let wasOnBattery: boolean | null = null;
+let lastReason: PowerReason | null = null;
+let startedOnBattery = false;
+/** Génération de la surveillance : un relevé d'une génération révolue est ignoré. */
+let generation = 0;
+
+/** Fin estimée (secondes) de la copie en cours la plus longue, null si inconnue. */
+function runningEta(): number | null {
+  let max: number | null = null;
+  for (const j of offload.jobs) {
+    if (j.state !== "running") continue;
+    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length);
+    if (Number.isFinite(s) && (max === null || s > max)) max = s;
+  }
+  return max;
+}
+
+async function pollPower() {
+  const gen = generation;
+  let p;
+  try {
+    p = await powerStatus();
+  } catch {
+    return;
+  }
+  if (gen !== generation) return; // la surveillance a été arrêtée ou relancée pendant l'attente
+  if (!p) return;
+  const before = wasOnBattery;
+  wasOnBattery = p.on_battery;
+  if (!p.on_battery) {
+    lastReason = null;
+    startedOnBattery = false;
+    offload.batteryAlert = null;
+    return;
+  }
+  if (before === null) startedOnBattery = true;
+  const alert = decidePower(before, p, runningEta(), lastReason, startedOnBattery);
+  if (alert) {
+    offload.batteryAlert = { key: alert.key, vars: alert.vars };
+    lastReason = alert.reason;
+  }
+}
+
+/** Interroge l'alimentation tant qu'une copie tourne, et seulement alors. */
+function syncPowerWatch() {
+  const running = offload.jobs.some((j) => j.state === "running");
+  if (running && !timer) {
+    generation++;
+    wasOnBattery = null;
+    lastReason = null;
+    startedOnBattery = false;
+    void pollPower();
+    timer = setInterval(pollPower, 60_000);
+  } else if (!running && timer) {
+    clearInterval(timer);
+    timer = null;
+    generation++;
+    wasOnBattery = null;
+    lastReason = null;
+    startedOnBattery = false;
+    offload.batteryAlert = null;
+  }
+}
 
 /** Retire une fiche de la file (les fichiers sur les disques ne sont pas touchés). */
 export function removeJob(id: number) {
@@ -51,6 +122,11 @@ function job(id: number): Job | undefined {
 }
 
 function apply(n: Notice) {
+  applyNotice(n);
+  syncPowerWatch();
+}
+
+function applyNotice(n: Notice) {
   if (n.kind === "queued") {
     offload.jobs.unshift({
       id: n.job,

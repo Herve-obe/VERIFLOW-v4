@@ -901,5 +901,16 @@
   "sync.export.after": "Disponible après l'analyse : règle la destination et les options dès maintenant.",
   "prefs.more": "Les autres réglages (raccourcis modifiables, OFFLOAD, PLAYER, TRANSCODE) arrivent dans une prochaine version.",
   "licenses.others.title": "Autres composants",
-  "sound.solo": "Solo (la coupure M reste prioritaire)"
+  "sound.solo": "Solo (la coupure M reste prioritaire)",
+  "offload.battery.low": "Batterie faible ({percent} %) : branche le portable sur secteur avant de lancer la copie.",
+  "offload.battery.long": "Portable sur batterie ({percent} %) et copie estimée à {minutes} min : branche-le sur secteur pour qu'il ne s'éteigne pas en pleine copie.",
+  "offload.battery.long_nopercent": "Portable sur batterie et copie estimée à {minutes} min : branche-le sur secteur pour qu'il ne s'éteigne pas en pleine copie.",
+  "offload.battery.short": "Autonomie estimée à {left} min pour une copie d'environ {minutes} min : branche le portable sur secteur.",
+  "offload.battery.unplugged": "Le portable est passé sur batterie pendant la copie ({percent} %) : rebranche-le sur secteur.",
+  "offload.battery.unplugged_nopercent": "Le portable est passé sur batterie pendant la copie : rebranche-le sur secteur.",
+  "offload.battery.running_short": "Autonomie restante ({left} min) inférieure à la fin estimée de la copie : rebranche le portable sur secteur.",
+  "offload.battery.running_low": "Batterie faible ({percent} %) pendant la copie : branche le portable sur secteur.",
+  "offload.battery.running_long": "Copie en cours sur batterie ({percent} %), fin estimée dans {minutes} min : branche le portable sur secteur.",
+  "offload.battery.running_long_nopercent": "Copie en cours sur batterie, fin estimée dans {minutes} min : branche le portable sur secteur.",
+  "offload.battery.dismiss": "Fermer"
 }

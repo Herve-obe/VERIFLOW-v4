@@ -203,6 +203,28 @@ pub fn offload_volumes() -> Vec<Volume> {
     storage::volumes()
 }
 
+/// État de l'alimentation du poste (`None` : poste fixe ou inconnu).
+#[tauri::command]
+pub async fn power_status() -> Option<veriflow_core::battery::PowerStatus> {
+    tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Réévalue l'avertissement batterie au moment de lancer la copie : le
+/// préflight a pu être fait sur secteur.
+#[tauri::command]
+pub async fn battery_warning(
+    estimated_secs: u64,
+) -> Option<veriflow_core::battery::BatteryWarning> {
+    let status = tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
+        .await
+        .ok()
+        .flatten();
+    veriflow_core::battery::assess(status.as_ref(), estimated_secs)
+}
+
 #[derive(Serialize)]
 pub struct PreflightView {
     #[serde(flatten)]
@@ -210,6 +232,10 @@ pub struct PreflightView {
     /// Destinations sur disque dur mécanique (copie plus lente).
     hdd: Vec<bool>,
     source_hdd: bool,
+    /// Durée estimée de la copie, en secondes.
+    estimated_secs: u64,
+    /// Avertissement si le poste est sur batterie.
+    battery: Option<veriflow_core::battery::BatteryWarning>,
     /// Copies déjà enregistrées dans le projet pour cette carte.
     previous: Vec<PreviousOffload>,
 }
@@ -246,13 +272,28 @@ pub async fn offload_preflight(
             .and_then(|p| p.previous_offloads(&pre.fingerprint).ok())
             .unwrap_or_default()
     };
+    let hdd: Vec<bool> = request
+        .destinations
+        .iter()
+        .map(|d| storage::is_hdd(d))
+        .collect();
+    let source_hdd = storage::is_hdd(&request.source);
+    let estimated_secs = veriflow_core::battery::estimate_secs(
+        pre.total_bytes,
+        request.destinations.len(),
+        source_hdd || hdd.iter().any(|h| *h),
+    );
+    // Une lecture de batterie en échec ne fait jamais échouer le préflight.
+    let status = tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
+        .await
+        .ok()
+        .flatten();
+    let battery = veriflow_core::battery::assess(status.as_ref(), estimated_secs);
     Ok(PreflightView {
-        hdd: request
-            .destinations
-            .iter()
-            .map(|d| storage::is_hdd(d))
-            .collect(),
-        source_hdd: storage::is_hdd(&request.source),
+        hdd,
+        source_hdd,
+        estimated_secs,
+        battery,
         previous,
         pre,
     })
