@@ -21,7 +21,8 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 | File d'attente | Plusieurs cartes à la suite, traitées l'une après l'autre en arrière-plan |
 | Suivi | Progression, débit, temps restant, fichier en cours, tableau fichier par fichier, fichiers en échec avec la cause |
 | Éjection | Option « éjecter la source après une copie conforme » (macOS diskutil, Windows, Linux gio/umount) |
-| Arborescence | Modèle `{date}/{carte}` par défaut ; variables `{projet}`, `{jour}`, `{camera}`, `{carte}`, `{date}` |
+| Arborescence | Modèle `{date}/{carte}` par défaut ; variables `{projet}`, `{jour}`, `{camera}`, `{carte}`, `{bobine}`, `{support}`, `{date}` |
+| Carte reconnue (20/10/2026) | D'après l'arborescence : Sony XAVC (`PRIVATE/M4ROOT`), Sony XDCAM (`XDROOT`), Canon XF (`CONTENTS/CLIPS001`), Panasonic P2 (`CONTENTS/VIDEO`), AVCHD, RED (`.RDM`, `.R3D`), Blackmagic RAW, ARRI (`.ari`, clips `A001C001_AAMMJJ_XXXX`), GoPro, DJI. Bobine d'après le nom des clips (`A001C001`, `A001_C001`, `A001_0101XX.RDM`, `A001_08151230_C001.braw`) et lettre de caméra (première lettre). Affiché sous la source. `{bobine}` vaut le nom de la carte si rien n'est reconnu ; `{camera}` prend la lettre reconnue si le champ Caméra est vide. Seuls les noms de dossiers et de fichiers sont lus |
 | Historique | Chaque offload est enregistré dans le fichier projet (détection des cartes déjà copiées) |
 
 ### ASC MHL v2
@@ -55,5 +56,5 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 ## Reste à faire (prévu, hors de cette PR)
 1. Logo de la production et vignettes vidéo dans le rapport PDF.
 2. Horodatage certifié RFC 3161 optionnel quand le poste est connecté.
-3. Modèles de dossiers propres à chaque caméra (noms de bobine Sony, Panasonic P2, Blackmagic) et lecture des métadonnées de carte.
+3. Modèles de dossiers propres à chaque caméra : fait le 20/10/2026 (variables `{bobine}` et `{support}`, voir plus haut). Reste la lecture des métadonnées de carte (XML Sony, P2, Canon), avec des cartes exemples.
 4. Éjection et détection HDD à vérifier sur de vrais supports Windows et macOS.
