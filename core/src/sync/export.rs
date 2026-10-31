@@ -95,6 +95,8 @@ pub fn rewrap(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64, f64),
 ) -> Result<PathBuf> {
+    // Pas de mise en veille (ni d'App Nap sous macOS) pendant le travail.
+    let _awake = crate::power::keep_awake();
     let format = if opts.format == "mxf" { "mxf" } else { "mov" };
     let vinfo = probe(&video.path)?;
     let ainfo = probe(&audio.path)?;

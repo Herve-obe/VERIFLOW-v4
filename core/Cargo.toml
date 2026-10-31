@@ -46,8 +46,14 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 cpal = { version = "0.18", features = ["asio"] }
 # Bus des disques (USB, FireWire, cartes) pour l'éjection des disques externes ;
-# initialisation de COM des fils audio (sortie WASAPI).
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_RestartManager", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_Com"] }
+# initialisation de COM des fils audio (sortie WASAPI) ; pas de mise en veille
+# pendant un travail long (SetThreadExecutionState).
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_RestartManager", "Win32_Devices_DeviceAndDriverInstallation", "Win32_System_Com", "Win32_System_Power"] }
+
+# Pas de mise en veille ni d'App Nap pendant un travail long (NSProcessInfo).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

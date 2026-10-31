@@ -439,6 +439,8 @@ pub fn analyze(
     cancel: &AtomicBool,
     mut on: impl FnMut(Event),
 ) -> Result<Analysis> {
+    // Pas de mise en veille (ni d'App Nap sous macOS) pendant le travail.
+    let _awake = crate::power::keep_awake();
     let total = videos.len() + audios.len();
     let read =
         |paths: &[PathBuf], base: usize, on: &mut dyn FnMut(Event)| -> Result<Vec<SyncFile>> {
