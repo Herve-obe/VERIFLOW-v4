@@ -1,11 +1,19 @@
 <!-- Fenêtres ouvertes depuis la barre de menus : Préférences, Raccourcis
      clavier, Licences, À propos. -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import Modal from "../components/Modal.svelte";
   import { MENUS, command, menuState, shortcutLabel, type Entry } from "./commands.svelte";
   import { i18n, setLanguage, t, LANGUAGES, type Language } from "../i18n/index.svelte";
   import { appInfo, type AppInfo } from "../lib/api";
+  import { clearAllData, resetSession, setStartupMode, startupMode, type StartupMode } from "../lib/appdata";
+  import { ask } from "../stores/confirm.svelte";
+  import { prefs, applyPrefs, DEFAULT_PREFS, type AppliedPrefs } from "../stores/prefs.svelte";
+  import { ALGORITHMS, type HashAlgo } from "../lib/offload";
+  import { MARKER_COLORS, markerCss } from "../lib/logs";
+  import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+  import ShortcutsEditor from "./ShortcutsEditor.svelte";
+  import Guide from "./Guide.svelte";
 
   let info = $state<AppInfo | null>(null);
   onMount(() => {
@@ -14,11 +22,59 @@
 
   const close = () => (menuState.dialog = null);
 
-  // Préférences : une section par onglet (d'autres viendront : raccourcis
-  // modifiables, OFFLOAD, PLAYER, TRANSCODE).
-  const PREF_TABS = ["general"] as const;
+  // Préférences : une section par onglet.
+  const PREF_TABS = ["general", "shortcuts", "offload", "player", "transcode"] as const;
   type PrefTab = (typeof PREF_TABS)[number];
   let prefTab = $state<PrefTab>("general");
+
+  // Rubriques OFFLOAD, PLAYER et TRANSCODE : modifiées dans un brouillon,
+  // appliquées aux onglets par « Valider », abandonnées par « Annuler ».
+  const snapshot = (): AppliedPrefs =>
+    structuredClone({ offload: $state.snapshot(prefs.offload), player: $state.snapshot(prefs.player), transcode: $state.snapshot(prefs.transcode) });
+  let draft = $state<AppliedPrefs>(snapshot());
+  $effect(() => {
+    if (menuState.dialog === "prefs") draft = untrack(snapshot);
+  });
+  function factory(section: keyof AppliedPrefs) {
+    draft[section] = structuredClone(DEFAULT_PREFS[section]) as never;
+  }
+  function validate() {
+    applyPrefs($state.snapshot(draft) as AppliedPrefs);
+    close();
+  }
+
+  function toggleAlgo(id: HashAlgo) {
+    const a = draft.offload.algorithms;
+    draft.offload.algorithms = a.includes(id) ? a.filter((x) => x !== id) : [...a, id];
+  }
+  async function chooseTranscodeDest() {
+    const r = await pickFolder({ directory: true, multiple: false });
+    if (typeof r === "string") {
+      draft.transcode.dest = r;
+      draft.transcode.nextToSource = false;
+    }
+  }
+
+  // Données de l'application sur ce poste.
+  let startup = $state<StartupMode>(startupMode());
+  function changeStartup(mode: StartupMode) {
+    startup = mode;
+    setStartupMode(mode);
+  }
+  // La fenêtre des préférences est fermée avant la confirmation (qui
+  // s'affiche alors seule), puis l'interface est rechargée.
+  async function wipe(all: boolean) {
+    close();
+    const ok = await ask(t(all ? "prefs.data.clear.confirm" : "prefs.data.reset.confirm"), {
+      title: t(all ? "prefs.data.clear" : "prefs.data.reset"),
+      ok: t(all ? "prefs.data.clear.ok" : "prefs.data.reset.ok"),
+      kind: "danger",
+    });
+    if (!ok) return;
+    if (all) clearAllData();
+    else resetSession();
+    location.reload();
+  }
 
   // Raccourcis : tirés des menus, dans leur ordre.
   const flat = (items: Entry[]): string[] =>
@@ -53,10 +109,104 @@
               {/each}
             </select>
           </label>
-          <p class="note">{t("prefs.more")}</p>
+          <label class="row">
+            <span>{t("prefs.startup")}</span>
+            <select value={startup} onchange={(e) => changeStartup(e.currentTarget.value as StartupMode)}>
+              <option value="resume">{t("prefs.startup.resume")}</option>
+              <option value="fresh">{t("prefs.startup.fresh")}</option>
+            </select>
+          </label>
+          <p class="note">{t("prefs.startup.note")}</p>
+          <h3 class="spaced">{t("prefs.data")}</h3>
+          <div class="row">
+            <span>{t("prefs.data.reset.hint")}</span>
+            <button class="ghost" onclick={() => wipe(false)}>{t("prefs.data.reset")}</button>
+          </div>
+          <div class="row">
+            <span>{t("prefs.data.clear.hint")}</span>
+            <button class="danger" onclick={() => wipe(true)}>{t("prefs.data.clear")}</button>
+          </div>
+          <p class="note">{t("prefs.data.note")}</p>
+        {:else if prefTab === "shortcuts"}
+          <h3>{t("prefs.shortcuts")}</h3>
+          <ShortcutsEditor />
+        {:else if prefTab === "offload"}
+          <h3>{t("prefs.offload")}</h3>
+          <p class="note">{t("prefs.defaults.note")}</p>
+          <label class="row">
+            <span>{t("prefs.offload.template")}</span>
+            <input class="text mono" bind:value={draft.offload.template} spellcheck="false" />
+          </label>
+          <label class="row">
+            <span>{t("prefs.offload.operator")}</span>
+            <input class="text" bind:value={draft.offload.operator} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.offload.algorithms")}</span>
+            <div class="checks">
+              {#each ALGORITHMS as a (a.id)}
+                <label><input type="checkbox" checked={draft.offload.algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} /> {a.label}</label>
+              {/each}
+            </div>
+          </div>
+          <label class="row">
+            <span>{t("prefs.offload.eject")}</span>
+            <input type="checkbox" bind:checked={draft.offload.eject} />
+          </label>
+        <div class="factory"><button class="ghost" onclick={() => factory("offload")}>{t("prefs.factory")}</button></div>
+        {:else if prefTab === "player"}
+          <h3>{t("prefs.player")}</h3>
+          <p class="note">{t("prefs.player.note")}</p>
+          <label class="row">
+            <span>{t("prefs.player.tc")}</span>
+            <input type="checkbox" bind:checked={draft.player.tcOverlay} />
+          </label>
+          <label class="row">
+            <span>{t("prefs.player.scopes")}</span>
+            <input type="checkbox" bind:checked={draft.player.scopes} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.player.marker")}</span>
+            <div class="colors">
+              {#each MARKER_COLORS as c (c)}
+                <button
+                  class="dot"
+                  class:on={draft.player.markerColor === c}
+                  style:background={markerCss(c)}
+                  onclick={() => (draft.player.markerColor = c)}
+                  aria-label={c}
+                  title={c}
+                ></button>
+              {/each}
+            </div>
+          </div>
+        <div class="factory"><button class="ghost" onclick={() => factory("player")}>{t("prefs.factory")}</button></div>
+        {:else if prefTab === "transcode"}
+          <h3>{t("prefs.transcode")}</h3>
+          <p class="note">{t("prefs.transcode.note")}</p>
+          <label class="row">
+            <span>{t("prefs.transcode.next")}</span>
+            <input type="checkbox" bind:checked={draft.transcode.nextToSource} />
+          </label>
+          <div class="row">
+            <span>{t("prefs.transcode.dest")}</span>
+            <span class="path" title={draft.transcode.dest}>{draft.transcode.dest || t("transcode.dest.none")}</span>
+            <button class="ghost" onclick={chooseTranscodeDest}>{t("offload.browse")}</button>
+            {#if draft.transcode.dest}<button class="ghost" onclick={() => (draft.transcode.dest = "")}>×</button>{/if}
+          </div>
+          <div class="factory"><button class="ghost" onclick={() => factory("transcode")}>{t("prefs.factory")}</button></div>
         {/if}
       </section>
     </div>
+    <div class="footer">
+      <span class="note">{t("prefs.footer.note")}</span>
+      <button class="ghost" onclick={close}>{t("prefs.cancel")}</button>
+      <button class="primary" onclick={validate}>{t("prefs.validate")}</button>
+    </div>
+  </Modal>
+{:else if menuState.dialog === "guide"}
+  <Modal title={t("menu.help.guide")} onClose={close} width="min(1040px, 96vw)" height="min(760px, 92vh)">
+    <Guide />
   </Modal>
 {:else if menuState.dialog === "shortcuts"}
   <Modal title={t("menu.help.shortcuts")} onClose={close} width="min(720px, 94vw)" height="min(640px, 90vh)">
@@ -103,8 +253,31 @@
   .prefs {
     display: grid;
     grid-template-columns: 180px 1fr;
-    height: 100%;
+    height: calc(100% - 52px);
     min-height: 0;
+  }
+  .footer {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-2);
+    height: 52px;
+    padding: 0 var(--vf-space-4);
+    border-top: 1px solid var(--vf-border);
+  }
+  .footer .note {
+    flex: 1;
+    margin: 0;
+  }
+  .footer .primary {
+    background: var(--vf-accent);
+    color: var(--vf-on-accent);
+    border-color: transparent;
+    font-weight: 600;
+  }
+  .factory {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--vf-space-3);
   }
   .sections {
     display: flex;
@@ -158,6 +331,83 @@
     gap: var(--vf-space-4);
     padding: var(--vf-space-2) 0;
     font-size: var(--vf-text-sm);
+  }
+  .text {
+    width: 260px;
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-2);
+    font-size: var(--vf-text-sm);
+  }
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vf-space-1) var(--vf-space-3);
+    justify-content: flex-end;
+    max-width: 300px;
+  }
+  .checks label {
+    display: flex;
+    align-items: center;
+    gap: var(--vf-space-1);
+  }
+  .colors {
+    display: flex;
+    gap: var(--vf-space-1);
+  }
+  .colors .dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--vf-border);
+    cursor: pointer;
+    padding: 0;
+  }
+  .colors .dot.on {
+    border-color: var(--vf-text);
+  }
+  .path {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--vf-font-mono);
+    font-size: var(--vf-text-xs);
+    color: var(--vf-text-muted);
+  }
+  h3.spaced {
+    margin-top: var(--vf-space-6);
+  }
+  .row > span {
+    flex: 1;
+  }
+  .row button {
+    flex-shrink: 0;
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-3);
+    font-size: var(--vf-text-sm);
+    cursor: pointer;
+  }
+  .ghost {
+    background: var(--vf-surface-high);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+  }
+  .ghost:hover {
+    background: var(--vf-surface-hover);
+  }
+  .danger {
+    background: none;
+    color: var(--vf-error);
+    border: 1px solid var(--vf-error);
+  }
+  .danger:hover {
+    background: var(--vf-error);
+    color: var(--vf-on-error);
   }
   select {
     min-width: 180px;

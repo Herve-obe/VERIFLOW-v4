@@ -20,6 +20,7 @@
   import { reveal } from "../../lib/offload";
   import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type EncoderChoice, type PresetView, type Trim } from "../../lib/transcode";
   import { loadForm, saveForm, toRequest, type Form } from "../../lib/transcodeForm.svelte";
+  import { prefs, onPrefsApplied } from "../../stores/prefs.svelte";
 
   // Extensions acceptées (voir core/src/media/catalog.rs).
   const MEDIA_EXT = ["mov", "mp4", "mxf", "mts", "m2ts", "mkv", "avi", "m4v", "mpg", "mpeg", "webm", "3gp", "wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
@@ -180,6 +181,16 @@
   const startLabel = $derived(preset?.analysis ? "transcode.start.analyze" : "transcode.start");
 
   onMount(() => listenTranscode());
+  // Préférences validées : destination reprise dans les deux modes.
+  onMount(() =>
+    onPrefsApplied(() => {
+      const { dest, nextToSource } = prefs.transcode;
+      form.dest = dest;
+      form.nextToSource = nextToSource;
+      const other = app.mode === "audio" ? "video" : "audio";
+      saveForm(other, { ...loadForm(other), dest, nextToSource });
+    }),
+  );
 </script>
 
 {#if infoFor}<FileInfo path={infoFor} onClose={() => (infoFor = null)} />{/if}
