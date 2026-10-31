@@ -84,6 +84,17 @@ fn rate_of(info: &MediaInfo) -> FrameRate {
         .unwrap_or(FrameRate::new(25, 1))
 }
 
+/// Le format de pixels FFmpeg porte une couche alpha (yuva444p12le, rgba,
+/// bgra, argb, gbrap16le, ya8, ayuv64le...).
+pub fn has_alpha(pix_fmt: &str) -> bool {
+    let p = pix_fmt.to_ascii_lowercase();
+    [
+        "yuva", "rgba", "bgra", "argb", "abgr", "gbrap", "ya8", "ya16", "ayuv", "vuya",
+    ]
+    .iter()
+    .any(|k| p.starts_with(k))
+}
+
 /// Position dans la source, en secondes depuis le début du fichier : timecode
 /// (« 10:00:12:05 », comparé au timecode de début) ou secondes (« 12.5 »).
 pub fn seconds_at(spec: &str, info: &MediaInfo) -> Result<f64> {
@@ -467,6 +478,7 @@ fn build_video(job: &Job) -> Result<Plan> {
     }
 
     let ten_bit = ["10", "12", "16"].iter().any(|b| v.pix_fmt.contains(b));
+    let alpha = has_alpha(&v.pix_fmt);
     let encoder = video_encoder(preset, settings.software).ok_or_else(|| {
         Error::Unsupported("aucun encodeur disponible pour ce format sur ce poste".into())
     })?;
@@ -485,6 +497,7 @@ fn build_video(job: &Job) -> Result<Plan> {
         height: dims.h,
         rate: dims.rate,
         ten_bit,
+        alpha,
     };
     a.extend(codec_args(preset.kind, &encoder, &frame_info, kbps)?);
     plan.encoder = Some(encoder);
