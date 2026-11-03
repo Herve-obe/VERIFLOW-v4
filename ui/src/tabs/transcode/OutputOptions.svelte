@@ -6,7 +6,7 @@
   import type { PresetView } from "../../lib/transcode";
   import type { Form } from "../../lib/transcodeForm.svelte";
 
-  let { form = $bindable(), preset, example }: { form: Form; preset: PresetView; example: string } = $props();
+  let { form = $bindable(), preset, example, simple = false }: { form: Form; preset: PresetView; example: string; simple?: boolean } = $props();
 
   const writes = $derived(!preset.analysis || ["cut_detect", "black_detect", "offline_detect", "silence_detect", "framemd5"].includes(preset.kind));
 
@@ -41,6 +41,7 @@
         <button class="tc-btn" onclick={pickDest}>{t("offload.browse")}</button>
       </div>
     {/if}
+  {#if !simple}
     <p class="tc-sub">{t("transcode.naming")}</p>
     <div class="tc-grid">
       <label class="tc-field">{t("transcode.prefix")}<input class="mono" bind:value={form.prefix} /></label>
@@ -77,8 +78,9 @@
       <label class="tc-check" title={t("transcode.op.atom.hint")}><input type="checkbox" bind:checked={form.settings.op_atom} /> {t("transcode.op.atom")}</label>
     {/if}
     <label class="tc-check"><input type="checkbox" bind:checked={form.report} /> {t("transcode.report")}</label>
+  {/if}
   </Section>
-{:else}
+{:else if !simple}
   <Section id="output" title={t("transcode.section.output")}>
     <label class="tc-check"><input type="checkbox" bind:checked={form.report} /> {t("transcode.report")}</label>
     <p class="tc-hint">{t("transcode.report.next")}</p>

@@ -15,11 +15,12 @@
   import "./form.css";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
+  import { isBeginner } from "../../stores/level.svelte";
   import { transcode, listenTranscode } from "../../stores/transcode.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
   import { reveal } from "../../lib/offload";
-  import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type EncoderChoice, type PresetView, type Trim } from "../../lib/transcode";
-  import { loadForm, saveForm, toRequest, type Form } from "../../lib/transcodeForm.svelte";
+  import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type EncoderChoice, type PresetView, type Trim, defaultSettings } from "../../lib/transcode";
+  import { defaultForm, loadForm, saveForm, toRequest, type Form } from "../../lib/transcodeForm.svelte";
 
   // Extensions acceptées (voir core/src/media/catalog.rs).
   const MEDIA_EXT = ["mov", "mp4", "mxf", "mts", "m2ts", "mkv", "avi", "m4v", "mpg", "mpeg", "webm", "3gp", "wav", "bwf", "rf64", "w64", "aif", "aiff", "flac", "mp3", "m4a", "aac", "ogg", "opus"];
@@ -52,10 +53,10 @@
   });
 
   const domain = $derived(app.mode === "audio" ? "audio" : "video");
-  const shown = $derived(list.filter((p) => p.domain === domain || p.domain === "both"));
+  const shown = $derived(list.filter((p) => (p.domain === domain || p.domain === "both") && !(isBeginner() && (p.category === "analysis" || p.kind === "merge"))));
   const preset = $derived(shown.find((p) => p.id === form.settings.preset) ?? shown.find((p) => !p.unavailable) ?? null);
   const lang = $derived(i18n.lang === "en" ? "en" : "fr");
-  const trimmable = $derived(!!preset && !NO_TRIM.includes(preset.kind));
+  const trimmable = $derived(!!preset && !isBeginner() && !NO_TRIM.includes(preset.kind));
 
   $effect(() => {
     fetchPresets(lang)
@@ -163,7 +164,10 @@
     error = "";
     const used: Record<string, Trim> = {};
     if (trimmable) for (const f of sources) if (hasTrim(f)) used[f] = { ...trims[f] };
-    const req = toRequest(form, preset, [...sources], used);
+    // DÉBUTANT : réglages du preset seuls, destination choisie ; les réglages EXPERT
+    // (incrustation, LUT, loudness, découpe, nommage...) restent dans `form` sans partir.
+    const base = isBeginner() ? { ...defaultForm(app.mode), settings: defaultSettings(preset.id), dest: form.dest, nextToSource: form.nextToSource } : form;
+    const req = toRequest(base, preset, [...sources], used);
     const label = `${preset.label} · ${req.sources.length} ${t(req.sources.length > 1 ? "transcode.files" : "transcode.file")}`;
     try {
       const id = await start(req);
@@ -266,19 +270,25 @@
           </p>
           {#if encoder.uncertified_prores}<p class="warn small">{t("transcode.prores.uncertified")}</p>{/if}
         {/if}
-        <UserPresets {form} onApply={(f) => (form = f)} />
+        {#if isBeginner()}
+          <p class="muted small">{t("level.transcode.simple")}</p>
+        {:else}
+          <UserPresets {form} onApply={(f) => (form = f)} />
+        {/if}
       </div>
 
       {#if preset && !preset.unavailable}
-        {#if preset.video}
-          <ImageOptions bind:form {preset} />
-          <OverlayOptions bind:form {preset} />
+        {#if !isBeginner()}
+          {#if preset.video}
+            <ImageOptions bind:form {preset} />
+            <OverlayOptions bind:form {preset} />
+          {/if}
+          {#if preset.audio || preset.kind === "video" || preset.kind === "loudness"}
+            <SoundOptions bind:form {preset} />
+          {/if}
+          <SpecialOptions bind:form {preset} />
         {/if}
-        {#if preset.audio || preset.kind === "video" || preset.kind === "loudness"}
-          <SoundOptions bind:form {preset} />
-        {/if}
-        <SpecialOptions bind:form {preset} />
-        <OutputOptions bind:form {preset} example={sources[0] ? name(sources[0]) : ""} />
+        <OutputOptions bind:form {preset} example={sources[0] ? name(sources[0]) : ""} simple={isBeginner()} />
       {/if}
 
       <div class="block">
