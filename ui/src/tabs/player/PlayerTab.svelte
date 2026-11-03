@@ -4,10 +4,11 @@
   import { app } from "../../stores/app.svelte";
   import VideoView from "./VideoView.svelte";
   import AudioView from "./AudioView.svelte";
+  import { isBeginner } from "../../stores/level.svelte";
 </script>
 
-<div class="view" class:hidden={app.mode !== "video"}><VideoView path={app.playerVideo} /></div>
-<div class="view" class:hidden={app.mode !== "audio"}><AudioView paths={app.playerAudio} /></div>
+<div class="view" class:hidden={app.mode !== "video"}><VideoView path={app.playerVideo} logs={!isBeginner()} /></div>
+<div class="view" class:hidden={app.mode !== "audio"}><AudioView paths={app.playerAudio} logs={!isBeginner()} /></div>
 
 <style>
   .view {

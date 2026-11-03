@@ -9,6 +9,7 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
+  import { isBeginner } from "../../stores/level.svelte";
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
@@ -51,12 +52,19 @@
   // tant que la source reste celle de la copie reprise.
   let resumeDate = $state<string | null>(null);
   let resumeSource = "";
+  // Demande d'origine d'une reprise : gardée à part, jamais écrite dans les
+  // réglages enregistrés (template, algorithmes, opérateur).
+  let resumeReq = $state<OffloadRequest | null>(null);
+  const resuming = $derived(!!resumeReq && !!source && source === resumeSource);
+  const effTemplate = $derived(resuming && resumeReq ? resumeReq.template : template);
+  const effAlgorithms = $derived(resuming && resumeReq ? resumeReq.algorithms : algorithms);
+  const effOperator = $derived(resuming && resumeReq ? (resumeReq.operator ?? "") : operator);
   // Demande en attente du choix « compléter / tout recopier ».
   let existingFor = $state<OffloadRequest | null>(null);
   // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
   // dossier), valables tant que source, destinations et modèle ne changent pas.
   let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
-  const formKey = () => JSON.stringify([source, destinations, template, jour, camera]);
+  const formKey = () => JSON.stringify([source, destinations, effTemplate, jour, camera, resuming ? null : isBeginner()]);
   let summaryEl = $state<HTMLElement | null>(null);
   let revealSummary = false;
 
@@ -69,16 +77,22 @@
     }
   });
 
+  // Réglages imposés en DÉBUTANT. Appliqués seulement dans la requête : les
+  // valeurs EXPERT enregistrées (SETTINGS_KEY) ne sont jamais écrasées.
+  const BEGINNER: Partial<OffloadRequest> = { template: "{date}/{carte}", algorithms: ["xxh128"], notes: null };
+
   const request = (): OffloadRequest => ({
     source,
     destinations,
-    template,
-    vars: { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
-    algorithms,
-    operator: operator || null,
+    template: effTemplate,
+    vars: resuming && resumeReq ? resumeReq.vars : { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
+    algorithms: effAlgorithms,
+    operator: effOperator || null,
     notes: notes || null,
     date: source && source === resumeSource ? resumeDate : null,
     roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
+    // Une reprise depuis la file garde ses réglages d'origine (même dossier final).
+    ...(isBeginner() && !(source && source === resumeSource) ? BEGINNER : {}),
   });
 
   /** Reprend la copie dans les dossiers où elle a été trouvée. */
@@ -95,7 +109,7 @@
     const card = source.split(/[\\/]/).filter(Boolean).pop() ?? "A001";
     const base = destinations[0] ?? "";
     const sep = base.includes("\\") ? "\\" : "/";
-    const tpl = template;
+    const tpl = effTemplate;
     const date = source && source === resumeSource ? resumeDate : null;
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
@@ -108,6 +122,16 @@
     }, 150);
   });
 
+  // Source changée : la reprise est abandonnée, un retour au même point de
+  // montage ne doit pas la réactiver.
+  $effect(() => {
+    if (resumeReq && source !== resumeSource) {
+      resumeReq = null;
+      resumeSource = "";
+      resumeDate = null;
+    }
+  });
+
   // « Reprendre la copie » depuis la file d'attente : formulaire rempli avec
   // la demande d'origine.
   $effect(() => {
@@ -118,9 +142,7 @@
     resumeSource = r.source;
     resumeDate = r.date ?? null;
     destinations = [...r.destinations];
-    template = r.template;
-    algorithms = [...r.algorithms];
-    operator = r.operator ?? "";
+    resumeReq = { ...r, algorithms: [...r.algorithms] };
     notes = r.notes ?? "";
     jour = r.vars.jour ?? "";
     camera = r.vars.camera ?? "";
@@ -222,12 +244,13 @@
     existingFor = null;
     const req = { ...r, existing };
     try {
-      const id = await start(req, eject, check);
+      const id = await start(req, eject && !isBeginner(), check);
       offload.requests[id] = req;
       source = "";
       notes = "";
       resumeDate = null;
       resumeSource = "";
+      resumeReq = null;
     } catch (e) {
       error = String(e);
     }
@@ -309,14 +332,22 @@
       <p class="muted small">{t("offload.drop.dest")}</p>
     </div>
 
+    {#if isBeginner()}
+      <p class="muted small">{t("level.offload.auto")}</p>
+      <div class="block grid">
+        <label class="wide">{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
+        {#if resuming}<p class="wide muted small">{t("offload.resume.locked")}</p>{/if}
+      </div>
+    {:else}
     <div class="block grid">
-      <label>{t("offload.template")}<input class="mono" bind:value={template} /></label>
+      <label>{t("offload.template")}<input class="mono" value={effTemplate} disabled={resuming} oninput={(e) => (template = e.currentTarget.value)} /></label>
+      {#if resuming}<p class="wide muted small">{t("offload.resume.locked")}</p>{/if}
       {#if preview}
         <p class="wide preview small">{t("offload.template.example")} <span class="mono">{request().roots?.[0] ?? preview}</span></p>
       {/if}
-      <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" /></label>
-      <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" /></label>
-      <label>{t("offload.operator")}<input bind:value={operator} /></label>
+      <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" disabled={resuming} /></label>
+      <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" disabled={resuming} /></label>
+      <label>{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
       <label class="wide">{t("offload.notes")}<input bind:value={notes} /></label>
     </div>
 
@@ -325,7 +356,7 @@
       <div class="algos">
         {#each ALGORITHMS as a (a.id)}
           <label class="check" title={a.mhl ? "" : t("offload.not.mhl")}>
-            <input type="checkbox" checked={algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} />
+            <input type="checkbox" checked={effAlgorithms.includes(a.id)} disabled={resuming} onchange={() => toggleAlgo(a.id)} />
             {a.label}{a.mhl ? "" : " *"}
           </label>
         {/each}
@@ -333,6 +364,7 @@
       <p class="muted small">{t("offload.algo.hint")}</p>
       <label class="check"><input type="checkbox" bind:checked={eject} /> {t("offload.eject.after")}</label>
     </div>
+    {/if}
 
     <div class="block summary" bind:this={summaryEl}>
       {#if checking}

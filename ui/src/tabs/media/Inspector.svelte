@@ -4,6 +4,7 @@
   import { bytes } from "../../lib/format";
   import { clock, setMeta, type Described, type FieldDef, type MediaEntry } from "../../lib/media";
   import { app } from "../../stores/app.svelte";
+  import { isBeginner } from "../../stores/level.svelte";
 
   let {
     selection,
@@ -44,12 +45,13 @@
   });
 
   function edit(id: string, value: string) {
+    if (isBeginner()) return;
     draft[id] = value;
     dirty = new Set(dirty).add(id);
   }
 
   async function save() {
-    if (dirty.size === 0) return;
+    if (isBeginner() || dirty.size === 0) return;
     saving = true;
     try {
       const values: Record<string, string> = {};
@@ -105,54 +107,61 @@
       </dl>
     {/if}
 
-    {#if !app.project}
+    {#if !app.project && !isBeginner()}
       <p class="warn">{t("media.need.project")}</p>
     {/if}
 
-    {#each groups as g (g)}
-      <fieldset>
-        <legend>{t(`media.group.${g}`)}</legend>
-        {#each visibleFields.filter((f) => f.group === g) as f (f.id)}
-          <label class:edited={dirty.has(f.id)}>
-            <span>{t(`field.${f.id}`)}</span>
-            {#if f.kind === "bool"}
-              <select value={draft[f.id]} onchange={(e) => edit(f.id, e.currentTarget.value)}>
-                {#if draft[f.id] === MIXED}<option value={MIXED}>{t("media.mixed")}</option>{/if}
-                <option value="">-</option>
-                <option value="true">{t("media.yes")}</option>
-                <option value="false">{t("media.no")}</option>
-              </select>
-            {:else}
-              <input
-                type={f.kind === "number" ? "number" : "text"}
-                value={draft[f.id] === MIXED ? "" : draft[f.id]}
-                placeholder={draft[f.id] === MIXED ? t("media.mixed") : ""}
-                oninput={(e) => edit(f.id, e.currentTarget.value)}
-              />
-            {/if}
-          </label>
-        {/each}
-      </fieldset>
-    {/each}
+    <fieldset class="fields">
+      {#each groups as g (g)}
+        <fieldset class="group">
+          <legend>{t(`media.group.${g}`)}</legend>
+          {#each visibleFields.filter((f) => f.group === g) as f (f.id)}
+            <label class:edited={dirty.has(f.id)}>
+              <span>{t(`field.${f.id}`)}</span>
+              {#if f.kind === "bool"}
+                <select value={draft[f.id]} disabled={isBeginner()} onchange={(e) => edit(f.id, e.currentTarget.value)}>
+                  {#if draft[f.id] === MIXED}<option value={MIXED}>{t("media.mixed")}</option>{/if}
+                  <option value="">-</option>
+                  <option value="true">{t("media.yes")}</option>
+                  <option value="false">{t("media.no")}</option>
+                </select>
+              {:else}
+                <input
+                  type={f.kind === "number" ? "number" : "text"}
+                  value={draft[f.id] === MIXED ? "" : draft[f.id]}
+                  placeholder={draft[f.id] === MIXED ? t("media.mixed") : ""}
+                  readonly={isBeginner()}
+                  oninput={(e) => edit(f.id, e.currentTarget.value)}
+                />
+              {/if}
+            </label>
+          {/each}
+        </fieldset>
+      {/each}
 
-    {#if single && channels > 0}
-      <fieldset>
-        <legend>{t("media.group.tracks")}</legend>
-        {#each Array.from({ length: Math.min(channels, 64) }, (_, i) => i + 1) as n (n)}
-          <label class:edited={dirty.has(`track.${n}`)}>
-            <span>{t("media.track")} {n}</span>
-            <input value={draft[`track.${n}`] ?? ""} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} />
-          </label>
-        {/each}
-      </fieldset>
+      {#if single && channels > 0}
+        <fieldset class="group">
+          <legend>{t("media.group.tracks")}</legend>
+          {#each Array.from({ length: Math.min(channels, 64) }, (_, i) => i + 1) as n (n)}
+            <label class:edited={dirty.has(`track.${n}`)}>
+              <span>{t("media.track")} {n}</span>
+              <input value={draft[`track.${n}`] ?? ""} readonly={isBeginner()} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} />
+            </label>
+          {/each}
+        </fieldset>
+      {/if}
+    </fieldset>
+
+    {#if isBeginner()}
+      <p class="muted">{t("level.media.readonly")}</p>
+    {:else}
+      <div class="save">
+        <button disabled={dirty.size === 0 || saving || !app.project} onclick={save}>
+          {selection.length > 1 ? `${t("media.save.batch")} (${selection.length})` : t("media.save")}
+        </button>
+        {#if message}<span class="small">{message}</span>{/if}
+      </div>
     {/if}
-
-    <div class="save">
-      <button disabled={dirty.size === 0 || saving || !app.project} onclick={save}>
-        {selection.length > 1 ? `${t("media.save.batch")} (${selection.length})` : t("media.save")}
-      </button>
-      {#if message}<span class="small">{message}</span>{/if}
-    </div>
   {/if}
 </aside>
 
@@ -188,7 +197,22 @@
     margin: 0;
     word-break: break-all;
   }
-  fieldset {
+  fieldset.fields {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-3);
+  }
+  fieldset.fields input[readonly],
+  fieldset.fields select:disabled {
+    color: var(--vf-text);
+    opacity: 1;
+    cursor: default;
+  }
+  fieldset.group {
     border: 1px solid var(--vf-border);
     border-radius: var(--vf-radius-md);
     padding: var(--vf-space-2);
