@@ -75,11 +75,11 @@ Un **interrupteur DÉBUTANT / EXPERT** se trouve en haut à gauche de l'en-tête
 
 | Onglet | Niveau DÉBUTANT |
 |---|---|
-| OFFLOAD | Réglages automatiques : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport. Pas d'éjection automatique. Source, destinations et contrôles restent visibles. Une reprise d'une copie lancée en EXPERT garde ses réglages d'origine |
+| OFFLOAD | Réglages automatiques : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport. Pas d'éjection automatique. Source, destinations, opérateur et contrôles restent visibles. Une reprise garde les réglages d'origine (modèle, empreintes, opérateur figés ; jour et caméra repris de la copie, modifiables en EXPERT) |
 | MEDIA | Métadonnées en lecture seule. Pas d'exports (CSV, ALE, XMP, copie de travail) ni d'ajout au rapport. « Ouvrir dans le PLAYER » et « Envoyer vers TRANSCODE » restent disponibles |
 | PLAYER | Lecture sans marqueurs (entrée, sortie, marqueur, ajout au rapport) |
 | SYNC | Caché |
-| TRANSCODE | Presets de conversion (hors analyse et fusion) et destination. Les réglages du preset ne sont pas modifiés. Les options EXPERT (incrustation, LUT, loudness, découpe, nommage) ne sont ni affichées ni appliquées. Rien n'est écrasé |
+| TRANSCODE | Liste blanche de presets (Montage et étalonnage, Broadcast, Diffusion, Plateformes web, Proxies, Formats son, Sans réencodage) et destination. Sont exclus : anciens codecs, images, analyses, fusion, découpe, remplacement du son, conformation, insert, sous-titres. Les réglages du preset ne sont pas modifiés. Les options EXPERT (incrustation, LUT, loudness, découpe, nommage) ne sont ni affichées ni appliquées. Rien n'est écrasé |
 | REPORT | Caché |
 
 Les raccourcis (Alt+4 pour SYNC, Alt+6 pour REPORT) et les entrées de menu des onglets cachés sont désactivés. Passer en DÉBUTANT depuis SYNC ou REPORT ramène à OFFLOAD.
