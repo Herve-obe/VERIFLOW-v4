@@ -642,18 +642,20 @@
           onpointerdown={scrubStart}
           oninput={(e) => jump(Number(e.currentTarget.value), !scrubbing)}
         />
-        {#each markers as m (m.id)}
-          {#if m.in_frame !== null && m.out_frame !== null}
-            <span
-              class="span"
-              style:left={`${(Math.min(m.in_frame, m.out_frame) / Math.max(1, last)) * 100}%`}
-              style:width={`${(Math.abs(m.out_frame - m.in_frame) / Math.max(1, last)) * 100}%`}
-              style:background={markerCss(m.color)}
-            ></span>
-          {:else}
-            <span class="tick" style:left={`${(m.frame / Math.max(1, last)) * 100}%`} style:background={markerCss(m.color)}></span>
-          {/if}
-        {/each}
+        {#if logs}
+          {#each markers as m (m.id)}
+            {#if m.in_frame !== null && m.out_frame !== null}
+              <span
+                class="span"
+                style:left={`${(Math.min(m.in_frame, m.out_frame) / Math.max(1, last)) * 100}%`}
+                style:width={`${(Math.abs(m.out_frame - m.in_frame) / Math.max(1, last)) * 100}%`}
+                style:background={markerCss(m.color)}
+              ></span>
+            {:else}
+              <span class="tick" style:left={`${(m.frame / Math.max(1, last)) * 100}%`} style:background={markerCss(m.color)}></span>
+            {/if}
+          {/each}
+        {/if}
       </div>
       <span class="mono small pos">{t("player.frame")} {shown} / {last}</span>
     </div>

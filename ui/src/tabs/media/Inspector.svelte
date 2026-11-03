@@ -107,11 +107,11 @@
       </dl>
     {/if}
 
-    {#if !app.project}
+    {#if !app.project && !isBeginner()}
       <p class="warn">{t("media.need.project")}</p>
     {/if}
 
-    <fieldset class="fields" disabled={isBeginner()}>
+    <fieldset class="fields">
       {#each groups as g (g)}
         <fieldset class="group">
           <legend>{t(`media.group.${g}`)}</legend>
@@ -119,7 +119,7 @@
             <label class:edited={dirty.has(f.id)}>
               <span>{t(`field.${f.id}`)}</span>
               {#if f.kind === "bool"}
-                <select value={draft[f.id]} onchange={(e) => edit(f.id, e.currentTarget.value)}>
+                <select value={draft[f.id]} disabled={isBeginner()} onchange={(e) => edit(f.id, e.currentTarget.value)}>
                   {#if draft[f.id] === MIXED}<option value={MIXED}>{t("media.mixed")}</option>{/if}
                   <option value="">-</option>
                   <option value="true">{t("media.yes")}</option>
@@ -130,6 +130,7 @@
                   type={f.kind === "number" ? "number" : "text"}
                   value={draft[f.id] === MIXED ? "" : draft[f.id]}
                   placeholder={draft[f.id] === MIXED ? t("media.mixed") : ""}
+                  readonly={isBeginner()}
                   oninput={(e) => edit(f.id, e.currentTarget.value)}
                 />
               {/if}
@@ -144,7 +145,7 @@
           {#each Array.from({ length: Math.min(channels, 64) }, (_, i) => i + 1) as n (n)}
             <label class:edited={dirty.has(`track.${n}`)}>
               <span>{t("media.track")} {n}</span>
-              <input value={draft[`track.${n}`] ?? ""} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} />
+              <input value={draft[`track.${n}`] ?? ""} readonly={isBeginner()} oninput={(e) => edit(`track.${n}`, e.currentTarget.value)} />
             </label>
           {/each}
         </fieldset>
@@ -205,8 +206,8 @@
     flex-direction: column;
     gap: var(--vf-space-3);
   }
-  fieldset.fields:disabled input,
-  fieldset.fields:disabled select {
+  fieldset.fields input[readonly],
+  fieldset.fields select:disabled {
     color: var(--vf-text);
     opacity: 1;
     cursor: default;

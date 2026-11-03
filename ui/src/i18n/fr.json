@@ -829,5 +829,6 @@
   "window.minimize": "Réduire",
   "window.maximize": "Agrandir",
   "window.restore": "Restaurer",
-  "window.close": "Fermer"
+  "window.close": "Fermer",
+  "offload.resume.locked": "Réglages d'origine conservés pour cette reprise."
 }

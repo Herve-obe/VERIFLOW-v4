@@ -52,12 +52,19 @@
   // tant que la source reste celle de la copie reprise.
   let resumeDate = $state<string | null>(null);
   let resumeSource = "";
+  // Demande d'origine d'une reprise : gardée à part, jamais écrite dans les
+  // réglages enregistrés (template, algorithmes, opérateur).
+  let resumeReq = $state<OffloadRequest | null>(null);
+  const resuming = $derived(!!resumeReq && !!source && source === resumeSource);
+  const effTemplate = $derived(resuming && resumeReq ? resumeReq.template : template);
+  const effAlgorithms = $derived(resuming && resumeReq ? resumeReq.algorithms : algorithms);
+  const effOperator = $derived(resuming && resumeReq ? (resumeReq.operator ?? "") : operator);
   // Demande en attente du choix « compléter / tout recopier ».
   let existingFor = $state<OffloadRequest | null>(null);
   // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
   // dossier), valables tant que source, destinations et modèle ne changent pas.
   let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
-  const formKey = () => JSON.stringify([source, destinations, template, jour, camera]);
+  const formKey = () => JSON.stringify([source, destinations, effTemplate, jour, camera, isBeginner()]);
   let summaryEl = $state<HTMLElement | null>(null);
   let revealSummary = false;
 
@@ -77,10 +84,10 @@
   const request = (): OffloadRequest => ({
     source,
     destinations,
-    template,
+    template: effTemplate,
     vars: { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
-    algorithms,
-    operator: operator || null,
+    algorithms: effAlgorithms,
+    operator: effOperator || null,
     notes: notes || null,
     date: source && source === resumeSource ? resumeDate : null,
     roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
@@ -102,7 +109,7 @@
     const card = source.split(/[\\/]/).filter(Boolean).pop() ?? "A001";
     const base = destinations[0] ?? "";
     const sep = base.includes("\\") ? "\\" : "/";
-    const tpl = template;
+    const tpl = effTemplate;
     const date = source && source === resumeSource ? resumeDate : null;
     window.clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
@@ -125,9 +132,7 @@
     resumeSource = r.source;
     resumeDate = r.date ?? null;
     destinations = [...r.destinations];
-    template = r.template;
-    algorithms = [...r.algorithms];
-    operator = r.operator ?? "";
+    resumeReq = { ...r, algorithms: [...r.algorithms] };
     notes = r.notes ?? "";
     jour = r.vars.jour ?? "";
     camera = r.vars.camera ?? "";
@@ -235,6 +240,7 @@
       notes = "";
       resumeDate = null;
       resumeSource = "";
+      resumeReq = null;
     } catch (e) {
       error = String(e);
     }
@@ -318,15 +324,19 @@
 
     {#if isBeginner()}
       <p class="muted small">{t("level.offload.auto")}</p>
+      <div class="block grid">
+        <label class="wide">{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
+      </div>
     {:else}
     <div class="block grid">
-      <label>{t("offload.template")}<input class="mono" bind:value={template} /></label>
+      <label>{t("offload.template")}<input class="mono" value={effTemplate} disabled={resuming} oninput={(e) => (template = e.currentTarget.value)} /></label>
+      {#if resuming}<p class="wide muted small">{t("offload.resume.locked")}</p>{/if}
       {#if preview}
         <p class="wide preview small">{t("offload.template.example")} <span class="mono">{request().roots?.[0] ?? preview}</span></p>
       {/if}
       <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" /></label>
       <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" /></label>
-      <label>{t("offload.operator")}<input bind:value={operator} /></label>
+      <label>{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
       <label class="wide">{t("offload.notes")}<input bind:value={notes} /></label>
     </div>
 
@@ -335,7 +345,7 @@
       <div class="algos">
         {#each ALGORITHMS as a (a.id)}
           <label class="check" title={a.mhl ? "" : t("offload.not.mhl")}>
-            <input type="checkbox" checked={algorithms.includes(a.id)} onchange={() => toggleAlgo(a.id)} />
+            <input type="checkbox" checked={effAlgorithms.includes(a.id)} disabled={resuming} onchange={() => toggleAlgo(a.id)} />
             {a.label}{a.mhl ? "" : " *"}
           </label>
         {/each}

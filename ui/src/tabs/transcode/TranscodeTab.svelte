@@ -19,7 +19,7 @@
   import { transcode, listenTranscode } from "../../stores/transcode.svelte";
   import { t, i18n } from "../../i18n/index.svelte";
   import { reveal } from "../../lib/offload";
-  import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type EncoderChoice, type PresetView, type Trim, defaultSettings } from "../../lib/transcode";
+  import { presets as fetchPresets, encoderFor, expand, start, CATEGORIES, type Category, type EncoderChoice, type PresetView, type Trim, defaultSettings } from "../../lib/transcode";
   import { defaultForm, loadForm, saveForm, toRequest, type Form } from "../../lib/transcodeForm.svelte";
 
   // Extensions acceptées (voir core/src/media/catalog.rs).
@@ -53,7 +53,11 @@
   });
 
   const domain = $derived(app.mode === "audio" ? "audio" : "video");
-  const shown = $derived(list.filter((p) => (p.domain === domain || p.domain === "both") && !(isBeginner() && (p.category === "analysis" || p.kind === "merge"))));
+  // DÉBUTANT : liste blanche de conversions simples, sans saisie cachée.
+  const BEGINNER_CATEGORIES: Category[] = ["intermediate", "broadcast", "delivery", "web", "proxy", "audio", "no_reencode"];
+  const BEGINNER_EXCLUDED_KINDS = ["cut", "replace_audio", "conform", "insert", "subtitles", "merge", "loudness", "vmaf", "cut_detect", "black_detect", "offline_detect", "silence_detect", "framemd5"];
+  const beginnerOk = (p: PresetView) => BEGINNER_CATEGORIES.includes(p.category) && !BEGINNER_EXCLUDED_KINDS.includes(p.kind);
+  const shown = $derived(list.filter((p) => (p.domain === domain || p.domain === "both") && (!isBeginner() || beginnerOk(p))));
   const preset = $derived(shown.find((p) => p.id === form.settings.preset) ?? shown.find((p) => !p.unavailable) ?? null);
   const lang = $derived(i18n.lang === "en" ? "en" : "fr");
   const trimmable = $derived(!!preset && !isBeginner() && !NO_TRIM.includes(preset.kind));
@@ -73,7 +77,7 @@
     if (!p || p.unavailable || !p.video) return;
     const req = ++encoderReq;
     encoderBusy = true;
-    encoderFor(p.id, soft)
+    encoderFor(p.id, isBeginner() ? false : soft)
       .then((e) => req === encoderReq && (encoder = e))
       .catch(() => {})
       .finally(() => req === encoderReq && (encoderBusy = false));

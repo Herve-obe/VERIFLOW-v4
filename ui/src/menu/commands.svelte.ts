@@ -277,11 +277,8 @@ export const MENUS: MenuDef[] = [
       "play.shuttle.forward",
       "play.step.back",
       "play.step.forward",
-      "-",
-      "play.mark.in",
-      "play.mark.out",
-      "play.mark.add",
-      "play.report.edit",
+      // Marqueurs et rapport : absents en DÉBUTANT (menu et aide des raccourcis).
+      ...(isBeginner() ? [] : ["-", "play.mark.in", "play.mark.out", "play.mark.add", "play.report.edit"]),
     ],
   },
   {

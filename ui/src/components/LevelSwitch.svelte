@@ -25,14 +25,6 @@
     padding: 2px;
     width: 190px;
   }
-  @media (max-width: 1150px) {
-    .switch {
-      width: 150px;
-    }
-    .switch button {
-      letter-spacing: 0.02em;
-    }
-  }
   .thumb {
     position: absolute;
     top: 2px;
@@ -66,5 +58,16 @@
   }
   .switch button.active {
     color: var(--vf-text);
+  }
+  /* Après les règles de base : à spécificité égale, la dernière l'emporte. */
+  @media (max-width: 1150px) {
+    .switch {
+      width: 160px;
+    }
+    .switch button {
+      font-size: var(--vf-text-xs);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
   }
 </style>

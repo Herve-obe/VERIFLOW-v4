@@ -373,18 +373,20 @@
           value={position}
           oninput={(e) => audioSeek(Number(e.currentTarget.value), slot)}
         />
-        {#each markers as m (m.id)}
-          {#if m.in_frame !== null && m.out_frame !== null}
-            <span
-              class="span"
-              style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
-              style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
-              style:background={markerCss(m.color)}
-            ></span>
-          {:else}
-            <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
-          {/if}
-        {/each}
+        {#if logs}
+          {#each markers as m (m.id)}
+            {#if m.in_frame !== null && m.out_frame !== null}
+              <span
+                class="span"
+                style:left={`${(Math.min(m.in_frame, m.out_frame) / lastFrame) * 100}%`}
+                style:width={`${(Math.abs(m.out_frame - m.in_frame) / lastFrame) * 100}%`}
+                style:background={markerCss(m.color)}
+              ></span>
+            {:else}
+              <span class="tick" style:left={`${(m.frame / lastFrame) * 100}%`} style:background={markerCss(m.color)}></span>
+            {/if}
+          {/each}
+        {/if}
       </div>
       <span class="mono small pos">{secondsToClock(position)} / {secondsToClock(duration)}</span>
     </div>
