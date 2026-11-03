@@ -75,7 +75,7 @@ Un **interrupteur DÉBUTANT / EXPERT** se trouve en haut à gauche de l'en-tête
 
 | Onglet | Niveau DÉBUTANT |
 |---|---|
-| OFFLOAD | Réglages automatiques : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport. Pas d'éjection automatique. Source, destinations, opérateur et contrôles restent visibles. Une reprise garde les réglages d'origine (modèle, empreintes, opérateur figés ; jour et caméra repris de la copie, modifiables en EXPERT) |
+| OFFLOAD | Réglages automatiques : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport. Pas d'éjection automatique. Source, destinations, opérateur et contrôles restent visibles. Une reprise garde les réglages d'origine (modèle, empreintes, opérateur, jour et caméra figés, en DÉBUTANT comme en EXPERT) |
 | MEDIA | Métadonnées en lecture seule. Pas d'exports (CSV, ALE, XMP, copie de travail) ni d'ajout au rapport. « Ouvrir dans le PLAYER » et « Envoyer vers TRANSCODE » restent disponibles |
 | PLAYER | Lecture sans marqueurs (entrée, sortie, marqueur, ajout au rapport) |
 | SYNC | Caché |
