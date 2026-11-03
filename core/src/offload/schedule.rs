@@ -238,8 +238,19 @@ pub fn select(
                 current.push(c.clone());
             }
             Err(reason) => {
-                if matches!(reason, Wait::Space | Wait::HddBusy) {
-                    held.extend(c.dest_volumes.iter().map(|(v, _, _)| (v.clone(), reason)));
+                // Un disque dur occupé ne retient que ses volumes de disque dur
+                // (les SSD de ce travail restent libres pour les suivants).
+                match reason {
+                    Wait::Space => {
+                        held.extend(c.dest_volumes.iter().map(|(v, _, _)| (v.clone(), reason)))
+                    }
+                    Wait::HddBusy => held.extend(
+                        c.dest_volumes
+                            .iter()
+                            .filter(|(_, hdd, _)| *hdd)
+                            .map(|(v, _, _)| (v.clone(), reason)),
+                    ),
+                    _ => {}
                 }
                 waits.push((i, reason));
             }
@@ -545,5 +556,22 @@ mod tests {
         let (go, waits) = select(&pending, &run, &no_limit);
         assert!(go.is_empty());
         assert_eq!(waits, [(0, Wait::HddBusy), (1, Wait::HddBusy)]);
+    }
+
+    #[test]
+    fn select_hdd_wait_holds_only_hdd_volumes() {
+        let run = [claim("/A", &["/hdd/a"], &[("/hdd", true, 10)])];
+        let pending = [
+            // Attend le disque dur, mais écrit aussi sur un SSD.
+            claim(
+                "/B",
+                &["/hdd/b", "/ssd/b"],
+                &[("/hdd", true, 10), ("/ssd", false, 10)],
+            ),
+            claim("/C", &["/ssd/c"], &[("/ssd", false, 10)]),
+        ];
+        let (go, waits) = select(&pending, &run, &no_limit);
+        assert_eq!(go, [1]);
+        assert_eq!(waits, [(0, Wait::HddBusy)]);
     }
 }

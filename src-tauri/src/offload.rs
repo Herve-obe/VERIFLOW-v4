@@ -17,7 +17,7 @@ use veriflow_core::offload::job::{
     Preflight, TemplateVars,
 };
 use veriflow_core::offload::scan::scan;
-use veriflow_core::offload::schedule::{claim_uses_volume, select, Claim, Wait};
+use veriflow_core::offload::schedule::{claim_uses_volume, overlaps, select, Claim, Wait};
 use veriflow_core::offload::storage::{self, Volume};
 use veriflow_core::project::PreviousOffload;
 
@@ -47,6 +47,9 @@ struct Job {
 #[derive(Default)]
 struct Sched {
     pending: VecDeque<Job>,
+    /// Travaux acceptés dont le claim se calcule encore : id et dossier source
+    /// (comptés par le test d'éjection).
+    preparing: HashMap<u64, PathBuf>,
     running: HashMap<u64, Claim>,
 }
 
@@ -296,13 +299,14 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
                 let volume = job.claim.source_volume.clone();
                 let in_use = {
                     let sched = lock(&shared.sched);
-                    sched
-                        .running
-                        .iter()
-                        .filter(|(id, _)| **id != job.id)
-                        .map(|(_, c)| c)
-                        .chain(sched.pending.iter().map(|j| &j.claim))
-                        .any(|c| claim_uses_volume(c, &volume))
+                    sched.preparing.values().any(|p| overlaps(p, &volume))
+                        || sched
+                            .running
+                            .iter()
+                            .filter(|(id, _)| **id != job.id)
+                            .map(|(_, c)| c)
+                            .chain(sched.pending.iter().map(|j| &j.claim))
+                            .any(|c| claim_uses_volume(c, &volume))
                 };
                 if in_use {
                     eject_code = Some("source_in_use_eject");
@@ -527,15 +531,24 @@ pub async fn offload_start(
     let source = request.source.display().to_string();
     let _ = app.emit("offload", Notice::Queued { job: id, source });
     let shared = state.shared.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    lock(&shared.sched)
+        .preparing
+        .insert(id, veriflow_core::absolute_path(&request.source));
+    let (worker, worker_app) = (shared.clone(), app.clone());
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        let (shared, app) = (worker, worker_app);
         let claim = claim_for(&request, total_bytes);
-        // Annulé pendant le calcul : jamais mis en file.
+        // Drapeau lu sous le verrou, comme `offload_cancel` : une annulation
+        // ne peut pas passer entre la lecture et la mise en file.
+        let mut sched = lock(&shared.sched);
+        sched.preparing.remove(&id);
         if cancel.load(Ordering::Relaxed) {
+            drop(sched);
             lock(&shared.cancels).remove(&id);
             let _ = app.emit("offload", Notice::Dropped { job: id });
             return;
         }
-        lock(&shared.sched).pending.push_back(Job {
+        sched.pending.push_back(Job {
             id,
             request,
             eject,
@@ -544,26 +557,34 @@ pub async fn offload_start(
             claim,
             last_wait: None,
         });
+        drop(sched);
         dispatch(&app, &shared);
     })
-    .await
-    .map_err(text)?;
+    .await;
+    if let Err(e) = prepared {
+        // Panique du calcul : le travail n'existe pas, rien ne doit rester.
+        lock(&shared.sched).preparing.remove(&id);
+        lock(&shared.cancels).remove(&id);
+        let _ = app.emit("offload", failed(id, text(&e), Some("job_spawn")));
+        return Err(text(e));
+    }
     Ok(id)
 }
 
 /// Annule un travail : retiré de la file s'il n'a pas démarré, sinon arrêté.
 #[tauri::command]
 pub fn offload_cancel(job: u64, app: AppHandle, state: State<'_, OffloadState>) -> CmdResult<()> {
-    let dropped = {
-        let mut sched = lock(&state.shared.sched);
-        sched
-            .pending
-            .iter()
-            .position(|j| j.id == job)
-            .and_then(|i| sched.pending.remove(i))
-    };
+    // Verrou de la file tenu pendant le drapeau : voir `offload_start`
+    // (ordre des verrous : file, puis annulations).
+    let mut sched = lock(&state.shared.sched);
+    let dropped = sched
+        .pending
+        .iter()
+        .position(|j| j.id == job)
+        .and_then(|i| sched.pending.remove(i));
     if dropped.is_some() {
         lock(&state.shared.cancels).remove(&job);
+        drop(sched);
         let _ = app.emit("offload", Notice::Dropped { job });
     } else if let Some(c) = lock(&state.shared.cancels).get(&job) {
         c.store(true, Ordering::Relaxed);

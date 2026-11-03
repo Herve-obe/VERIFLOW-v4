@@ -53,6 +53,8 @@
   let resumeSource = "";
   // Demande en attente du choix « compléter / tout recopier ».
   let existingFor = $state<OffloadRequest | null>(null);
+  // Taille de la source au moment du préflight qui a rempli existingFor.
+  let existingBytes: number | null = null;
   // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
   // dossier), valables tant que source, destinations et modèle ne changent pas.
   let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
@@ -236,6 +238,7 @@
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
     if (pre.present.some((p) => p.files > 0 || p.partial > 0)) {
       existingFor = { ...request(), date: pre.date };
+      existingBytes = pre.total_bytes;
       return;
     }
     launching = true;
@@ -248,7 +251,7 @@
       if (battery) warnings.push(batteryText(battery));
       if (!(await confirm(warnings))) return;
       if (!pre) return;
-      await launchWith({ ...request(), date: pre.date }, "verify", null);
+      await launchWith({ ...request(), date: pre.date }, "verify", null, pre.total_bytes);
     } finally {
       launching = false;
     }
@@ -263,16 +266,15 @@
       if (!pre) return;
       if (!(await confirm(battery ? [batteryText(battery)] : []))) return;
       if (!pre) return;
-      await launchWith(r, mode, check);
+      await launchWith(r, mode, check, existingBytes);
     } finally {
       launching = false;
     }
   }
 
-  async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
+  async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null, totalBytes: number | null) {
     existingFor = null;
     const req = { ...r, existing };
-    const totalBytes = pre?.total_bytes ?? null;
     try {
       const id = await start(req, eject, check, totalBytes);
       offload.requests[id] = req;
