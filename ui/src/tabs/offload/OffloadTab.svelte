@@ -64,7 +64,7 @@
   // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
   // dossier), valables tant que source, destinations et modèle ne changent pas.
   let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
-  const formKey = () => JSON.stringify([source, destinations, effTemplate, jour, camera, isBeginner()]);
+  const formKey = () => JSON.stringify([source, destinations, effTemplate, jour, camera, resuming ? null : isBeginner()]);
   let summaryEl = $state<HTMLElement | null>(null);
   let revealSummary = false;
 
@@ -85,7 +85,7 @@
     source,
     destinations,
     template: effTemplate,
-    vars: { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
+    vars: resuming && resumeReq ? resumeReq.vars : { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
     algorithms: effAlgorithms,
     operator: effOperator || null,
     notes: notes || null,
@@ -120,6 +120,16 @@
         })
         .catch(() => (preview = ""));
     }, 150);
+  });
+
+  // Source changée : la reprise est abandonnée, un retour au même point de
+  // montage ne doit pas la réactiver.
+  $effect(() => {
+    if (resumeReq && source !== resumeSource) {
+      resumeReq = null;
+      resumeSource = "";
+      resumeDate = null;
+    }
   });
 
   // « Reprendre la copie » depuis la file d'attente : formulaire rempli avec
@@ -326,6 +336,7 @@
       <p class="muted small">{t("level.offload.auto")}</p>
       <div class="block grid">
         <label class="wide">{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
+        {#if resuming}<p class="wide muted small">{t("offload.resume.locked")}</p>{/if}
       </div>
     {:else}
     <div class="block grid">
@@ -334,8 +345,8 @@
       {#if preview}
         <p class="wide preview small">{t("offload.template.example")} <span class="mono">{request().roots?.[0] ?? preview}</span></p>
       {/if}
-      <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" /></label>
-      <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" /></label>
+      <label>{t("offload.day")}<input bind:value={jour} placeholder="J01" disabled={resuming} /></label>
+      <label>{t("offload.camera")}<input bind:value={camera} placeholder="A" disabled={resuming} /></label>
       <label>{t("offload.operator")}<input value={effOperator} disabled={resuming} oninput={(e) => (operator = e.currentTarget.value)} /></label>
       <label class="wide">{t("offload.notes")}<input bind:value={notes} /></label>
     </div>
