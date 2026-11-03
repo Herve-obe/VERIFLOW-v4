@@ -1,12 +1,16 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
-export type JobState = "queued" | "running" | "done" | "failed";
+export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
 export interface Job {
   id: number;
   source: string;
   state: JobState;
+  /** Raison de l'attente (état waiting), null sinon. */
+  waitReason: WaitReason | null;
+  /** Retirée de la file par l'annulation avant d'avoir démarré. */
+  dropped: boolean;
   files: number;
   totalBytes: number;
   roots: string[];
@@ -19,7 +23,9 @@ export interface Job {
   recent: FileResult[];
   result: JobResult | null;
   error: string | null;
+  errorCode: ErrorCode | null;
   ejected: string | null;
+  ejectCode: EjectCode | null;
   startedAt: number;
 }
 
@@ -132,6 +138,8 @@ function applyNotice(n: Notice) {
       id: n.job,
       source: n.source,
       state: "queued",
+      waitReason: null,
+      dropped: false,
       files: 0,
       totalBytes: 0,
       roots: [],
@@ -144,7 +152,9 @@ function applyNotice(n: Notice) {
       recent: [],
       result: null,
       error: null,
+      errorCode: null,
       ejected: null,
+      ejectCode: null,
       startedAt: 0,
     });
     return;
@@ -152,8 +162,17 @@ function applyNotice(n: Notice) {
   const j = job(n.job);
   if (!j) return;
   switch (n.kind) {
+    case "waiting":
+      if (j.state === "queued" || j.state === "waiting") Object.assign(j, { state: "waiting", waitReason: n.reason });
+      break;
+    case "dropped":
+      if (j.state === "queued" || j.state === "waiting" || j.state === "starting") Object.assign(j, { state: "failed", waitReason: null, dropped: true });
+      break;
+    case "starting":
+      if (j.state === "queued" || j.state === "waiting") Object.assign(j, { state: "starting", waitReason: null });
+      break;
     case "running":
-      Object.assign(j, { state: "running", files: n.files, totalBytes: n.total_bytes, roots: n.roots, startedAt: Date.now() });
+      Object.assign(j, { state: "running", waitReason: null, files: n.files, totalBytes: n.total_bytes, roots: n.roots, startedAt: Date.now() });
       break;
     case "engine": {
       const e = n.event;
@@ -174,10 +193,12 @@ function applyNotice(n: Notice) {
       j.current = "";
       if (n.ejected && "Ok" in n.ejected) j.ejected = "ok";
       else if (n.ejected && "Err" in n.ejected) j.ejected = n.ejected.Err;
+      j.ejectCode = n.eject_code ?? null;
       break;
     case "failed":
       j.state = "failed";
       j.error = n.error;
+      j.errorCode = n.error_code ?? null;
       break;
   }
 }

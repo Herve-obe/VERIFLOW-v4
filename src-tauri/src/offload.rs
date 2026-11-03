@@ -17,7 +17,7 @@ use veriflow_core::offload::job::{
     Preflight, TemplateVars,
 };
 use veriflow_core::offload::scan::scan;
-use veriflow_core::offload::schedule::{can_start, Claim, Wait};
+use veriflow_core::offload::schedule::{claim_uses_volume, overlaps, select, Claim, Wait};
 use veriflow_core::offload::storage::{self, Volume};
 use veriflow_core::project::PreviousOffload;
 
@@ -47,6 +47,9 @@ struct Job {
 #[derive(Default)]
 struct Sched {
     pending: VecDeque<Job>,
+    /// Travaux acceptés dont le claim se calcule encore : id et dossier source
+    /// (comptés par le test d'éjection).
+    preparing: HashMap<u64, PathBuf>,
     running: HashMap<u64, Claim>,
 }
 
@@ -90,6 +93,12 @@ enum Notice {
     Dropped {
         job: u64,
     },
+    /// Le travail vient d'être lancé (contrôles en cours) : l'ancienne raison
+    /// d'attente ne doit plus s'afficher. `running` suit une fois la source
+    /// inventoriée.
+    Starting {
+        job: u64,
+    },
     Running {
         job: u64,
         files: usize,
@@ -104,11 +113,26 @@ enum Notice {
         job: u64,
         result: JobResult,
         ejected: Option<Result<(), String>>,
+        /// Code stable de l'échec d'éjection (traduction côté interface) :
+        /// `source_in_use_eject` ou `eject_not_removable`. Absent si l'échec
+        /// vient du système (texte de `ejected`).
+        eject_code: Option<&'static str>,
     },
     Failed {
         job: u64,
         error: String,
+        /// Code stable pour la traduction : `no_space`, `job_panic`,
+        /// `job_spawn`. Absent : seul le texte `error` est affichable.
+        error_code: Option<&'static str>,
     },
+}
+
+fn failed(job: u64, error: impl Into<String>, error_code: Option<&'static str>) -> Notice {
+    Notice::Failed {
+        job,
+        error: error.into(),
+        error_code,
+    }
 }
 
 impl OffloadState {
@@ -137,32 +161,31 @@ fn dispatch(app: &AppHandle, shared: &Shared) {
     let mut waiting = Vec::new();
     {
         let mut sched = lock(&shared.sched);
-        let mut i = 0;
-        while i < sched.pending.len() {
-            let running: Vec<Claim> = sched.running.values().cloned().collect();
-            match can_start(&sched.pending[i].claim, &running, &free) {
-                Ok(()) => {
-                    if let Some(job) = sched.pending.remove(i) {
-                        sched.running.insert(job.id, job.claim.clone());
-                        launch.push(job);
-                    }
-                }
-                Err(reason) => {
-                    let job = &mut sched.pending[i];
-                    if job.last_wait != Some(reason) {
-                        job.last_wait = Some(reason);
-                        waiting.push((job.id, reason));
-                    }
-                    i += 1;
-                }
+        let pending: Vec<Claim> = sched.pending.iter().map(|j| j.claim.clone()).collect();
+        let running: Vec<Claim> = sched.running.values().cloned().collect();
+        let (go, waits) = select(&pending, &running, &free);
+        for (i, reason) in waits {
+            let job = &mut sched.pending[i];
+            if job.last_wait != Some(reason) {
+                job.last_wait = Some(reason);
+                waiting.push((job.id, reason));
             }
         }
+        // Retrait de la fin vers le début : les indices restent valables.
+        for i in go.into_iter().rev() {
+            if let Some(job) = sched.pending.remove(i) {
+                sched.running.insert(job.id, job.claim.clone());
+                launch.push(job);
+            }
+        }
+        launch.reverse();
     }
     for (job, reason) in waiting {
         let _ = app.emit("offload", Notice::Waiting { job, reason });
     }
     for job in launch {
         let id = job.id;
+        let _ = app.emit("offload", Notice::Starting { job: id });
         let (app2, shared2) = (app.clone(), shared.clone());
         let spawned = thread::Builder::new()
             .name(format!("veriflow-offload-{id}"))
@@ -172,22 +195,13 @@ fn dispatch(app: &AppHandle, shared: &Shared) {
                 if outcome.is_err() {
                     let _ = app2.emit(
                         "offload",
-                        Notice::Failed {
-                            job: id,
-                            error: "arrêt inattendu du travail".into(),
-                        },
+                        failed(id, "arrêt inattendu du travail", Some("job_panic")),
                     );
                 }
                 finish(&app2, &shared2, id);
             });
         if let Err(e) = spawned {
-            let _ = app.emit(
-                "offload",
-                Notice::Failed {
-                    job: id,
-                    error: e.to_string(),
-                },
-            );
+            let _ = app.emit("offload", failed(id, e.to_string(), Some("job_spawn")));
             finish(app, shared, id);
         }
     }
@@ -202,8 +216,9 @@ fn finish(app: &AppHandle, shared: &Shared, id: u64) {
 }
 
 /// Ressources d'une demande : volumes, disques durs, octets à écrire. Lent
-/// (inventaire de la source, lecture des volumes) : hors du fil de l'interface.
-fn claim_for(request: &OffloadRequest) -> Claim {
+/// (lecture des volumes) : hors du fil de l'interface. `total_bytes` vient du
+/// préflight de l'interface ; absent, la source est inventoriée.
+fn claim_for(request: &OffloadRequest, total_bytes: Option<u64>) -> Claim {
     let source = veriflow_core::absolute_path(&request.source);
     let volume_or = |p: &Path| {
         storage::volume_of(p)
@@ -211,9 +226,10 @@ fn claim_for(request: &OffloadRequest) -> Claim {
             .unwrap_or_else(|| p.to_path_buf())
     };
     // Inventaire en échec : le travail échouera de lui-même au lancement.
-    let bytes = scan(&source).map(|i| i.total_bytes).unwrap_or(0);
+    let bytes = total_bytes.unwrap_or_else(|| scan(&source).map(|i| i.total_bytes).unwrap_or(0));
     Claim {
         source_volume: volume_or(&source),
+        source_hdd: storage::is_hdd(&source),
         roots: planned_roots(request),
         dest_volumes: request
             .destinations
@@ -223,6 +239,7 @@ fn claim_for(request: &OffloadRequest) -> Claim {
                 (volume_or(&d), storage::is_hdd(&d), bytes)
             })
             .collect(),
+        source,
     }
 }
 
@@ -239,12 +256,18 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
     let pre = match preflight(&job.request) {
         Ok(p) => p,
         Err(e) => {
-            return send(Notice::Failed {
-                job: job.id,
-                error: e.to_string(),
-            })
+            return send(failed(job.id, e.to_string(), None));
         }
     };
+    // L'espace a pu manquer entre le préflight de l'interface et le lancement
+    // (autre copie terminée entre-temps, après une attente).
+    if pre.missing_space.iter().any(Option::is_some) {
+        return send(failed(
+            job.id,
+            "espace insuffisant sur une destination",
+            Some("no_space"),
+        ));
+    }
     send(Notice::Running {
         job: job.id,
         files: pre.files,
@@ -270,39 +293,43 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
             }
             let success = !result.summary.cancelled && result.summary.failed_files == 0;
             // Éjection seulement quand plus aucun autre travail (en cours ou en
-            // attente) n'utilise ce volume.
+            // attente) n'utilise ce volume (source, destination ou dossier final).
+            let mut eject_code = None;
             let ejected = (job.eject && success).then(|| {
                 let volume = job.claim.source_volume.clone();
                 let in_use = {
                     let sched = lock(&shared.sched);
-                    sched
-                        .running
-                        .iter()
-                        .filter(|(id, _)| **id != job.id)
-                        .map(|(_, c)| c)
-                        .chain(sched.pending.iter().map(|j| &j.claim))
-                        .any(|c| c.source_volume == volume)
+                    sched.preparing.values().any(|p| overlaps(p, &volume))
+                        || sched
+                            .running
+                            .iter()
+                            .filter(|(id, _)| **id != job.id)
+                            .map(|(_, c)| c)
+                            .chain(sched.pending.iter().map(|j| &j.claim))
+                            .any(|c| claim_uses_volume(c, &volume))
                 };
                 if in_use {
+                    eject_code = Some("source_in_use_eject");
                     return Err(
                         "source encore utilisée par un autre travail : pas d'éjection".to_owned(),
                     );
                 }
                 storage::volume_of(&job.request.source)
                     .filter(|v| v.removable)
-                    .ok_or_else(|| "source non amovible : pas d'éjection".to_owned())
+                    .ok_or_else(|| {
+                        eject_code = Some("eject_not_removable");
+                        "source non amovible : pas d'éjection".to_owned()
+                    })
                     .and_then(|v| storage::eject(&v.mount_point).map_err(text))
             });
             send(Notice::Done {
                 job: job.id,
                 result,
                 ejected,
+                eject_code,
             });
         }
-        Err(e) => send(Notice::Failed {
-            job: job.id,
-            error: e.to_string(),
-        }),
+        Err(e) => send(failed(job.id, e.to_string(), None)),
     }
 }
 
@@ -480,12 +507,14 @@ pub fn offload_check_cancel(state: State<'_, OffloadState>) -> CmdResult<()> {
 
 /// Ajoute une copie à la file d'attente ; renvoie son numéro. `check` :
 /// vérification préalable des rushes présents (mode « compléter »). La copie
-/// démarre dès que ses ressources sont libres (voir `schedule`).
+/// démarre dès que ses ressources sont libres (voir `schedule`). `total_bytes` :
+/// taille de la source donnée par le préflight (sinon la source est parcourue).
 #[tauri::command]
 pub async fn offload_start(
-    request: OffloadRequest,
+    mut request: OffloadRequest,
     eject: bool,
     check: Option<u64>,
+    total_bytes: Option<u64>,
     app: AppHandle,
     state: State<'_, OffloadState>,
 ) -> CmdResult<u64> {
@@ -496,11 +525,30 @@ pub async fn offload_start(
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let cancel = Arc::new(AtomicBool::new(false));
     lock(&state.shared.cancels).insert(id, cancel.clone());
+    // Date figée maintenant : minuit passé pendant l'attente ne change pas
+    // le dossier final.
+    request.date.get_or_insert_with(local_date);
+    let source = request.source.display().to_string();
+    let _ = app.emit("offload", Notice::Queued { job: id, source });
     let shared = state.shared.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let source = request.source.display().to_string();
-        let claim = claim_for(&request);
-        lock(&shared.sched).pending.push_back(Job {
+    lock(&shared.sched)
+        .preparing
+        .insert(id, veriflow_core::absolute_path(&request.source));
+    let (worker, worker_app) = (shared.clone(), app.clone());
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        let (shared, app) = (worker, worker_app);
+        let claim = claim_for(&request, total_bytes);
+        // Drapeau lu sous le verrou, comme `offload_cancel` : une annulation
+        // ne peut pas passer entre la lecture et la mise en file.
+        let mut sched = lock(&shared.sched);
+        sched.preparing.remove(&id);
+        if cancel.load(Ordering::Relaxed) {
+            drop(sched);
+            lock(&shared.cancels).remove(&id);
+            let _ = app.emit("offload", Notice::Dropped { job: id });
+            return;
+        }
+        sched.pending.push_back(Job {
             id,
             request,
             eject,
@@ -509,27 +557,34 @@ pub async fn offload_start(
             claim,
             last_wait: None,
         });
-        let _ = app.emit("offload", Notice::Queued { job: id, source });
+        drop(sched);
         dispatch(&app, &shared);
     })
-    .await
-    .map_err(text)?;
+    .await;
+    if let Err(e) = prepared {
+        // Panique du calcul : le travail n'existe pas, rien ne doit rester.
+        lock(&shared.sched).preparing.remove(&id);
+        lock(&shared.cancels).remove(&id);
+        let _ = app.emit("offload", failed(id, text(&e), Some("job_spawn")));
+        return Err(text(e));
+    }
     Ok(id)
 }
 
 /// Annule un travail : retiré de la file s'il n'a pas démarré, sinon arrêté.
 #[tauri::command]
 pub fn offload_cancel(job: u64, app: AppHandle, state: State<'_, OffloadState>) -> CmdResult<()> {
-    let dropped = {
-        let mut sched = lock(&state.shared.sched);
-        sched
-            .pending
-            .iter()
-            .position(|j| j.id == job)
-            .and_then(|i| sched.pending.remove(i))
-    };
+    // Verrou de la file tenu pendant le drapeau : voir `offload_start`
+    // (ordre des verrous : file, puis annulations).
+    let mut sched = lock(&state.shared.sched);
+    let dropped = sched
+        .pending
+        .iter()
+        .position(|j| j.id == job)
+        .and_then(|i| sched.pending.remove(i));
     if dropped.is_some() {
         lock(&state.shared.cancels).remove(&job);
+        drop(sched);
         let _ = app.emit("offload", Notice::Dropped { job });
     } else if let Some(c) = lock(&state.shared.cancels).get(&job) {
         c.store(true, Ordering::Relaxed);
