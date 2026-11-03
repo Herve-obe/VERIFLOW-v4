@@ -37,16 +37,54 @@ pub enum Wait {
     Space,
 }
 
-/// Vrai si l'un des deux dossiers est le même que l'autre ou le contient.
-fn overlaps(a: &Path, b: &Path) -> bool {
-    a.starts_with(b) || b.starts_with(a)
+/// Windows et macOS comparent les chemins sans tenir compte de la casse
+/// (systèmes de fichiers par défaut) ; Linux reste exact.
+const CASE_INSENSITIVE: bool = cfg!(any(windows, target_os = "macos"));
+
+/// Forme comparable d'un chemin, par composants : préfixe `\\?\` retiré, `/` et
+/// `\` traités comme séparateurs, composants vides et `.` ignorés, casse
+/// repliée si `case_insensitive`. Un chemin absolu commence par le composant
+/// `/`, pour ne pas le confondre avec un chemin relatif.
+fn normalize(p: &Path, case_insensitive: bool) -> Vec<String> {
+    let text = p.to_string_lossy();
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+    let mut out = Vec::new();
+    if text.starts_with(['/', '\\']) {
+        out.push("/".to_string());
+    }
+    for part in text.split(['/', '\\']) {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        out.push(if case_insensitive {
+            part.to_lowercase()
+        } else {
+            part.to_string()
+        });
+    }
+    out
+}
+
+/// Deux chemins désignent-ils le même emplacement ?
+fn same_path(a: &Path, b: &Path, case_insensitive: bool) -> bool {
+    normalize(a, case_insensitive) == normalize(b, case_insensitive)
+}
+
+/// Vrai si l'un des deux dossiers est le même que l'autre ou le contient
+/// (comparaison par composants : `/a/bc` n'est pas dans `/a/b`).
+fn overlaps(a: &Path, b: &Path, case_insensitive: bool) -> bool {
+    let (a, b) = (
+        normalize(a, case_insensitive),
+        normalize(b, case_insensitive),
+    );
+    a.starts_with(&b) || b.starts_with(&a)
 }
 
 /// Octets réservés par un claim sur un volume.
-fn reserved_on(c: &Claim, volume: &Path) -> u64 {
+fn reserved_on(c: &Claim, volume: &Path, ci: bool) -> u64 {
     c.dest_volumes
         .iter()
-        .filter(|(v, _, _)| v == volume)
+        .filter(|(v, _, _)| same_path(v, volume, ci))
         .map(|(_, _, bytes)| *bytes)
         .sum()
 }
@@ -58,25 +96,40 @@ pub fn can_start(
     running: &[Claim],
     free: &dyn Fn(&Path) -> Option<u64>,
 ) -> Result<(), Wait> {
+    can_start_with(c, running, free, CASE_INSENSITIVE)
+}
+
+/// `can_start` avec la sensibilité à la casse choisie (testable partout).
+fn can_start_with(
+    c: &Claim,
+    running: &[Claim],
+    free: &dyn Fn(&Path) -> Option<u64>,
+    ci: bool,
+) -> Result<(), Wait> {
     if running.len() >= MAX_PARALLEL_JOBS {
         return Err(Wait::Limit);
     }
-    if running.iter().any(|r| r.source_volume == c.source_volume) {
+    if running
+        .iter()
+        .any(|r| same_path(&r.source_volume, &c.source_volume, ci))
+    {
         return Err(Wait::SourceBusy);
     }
     let root_clash = c.roots.iter().any(|a| {
         running
             .iter()
             .flat_map(|r| &r.roots)
-            .any(|b| overlaps(a, b))
+            .any(|b| overlaps(a, b, ci))
     });
     if root_clash {
         return Err(Wait::RootBusy);
     }
     for (volume, hdd, _) in &c.dest_volumes {
-        let used = running
-            .iter()
-            .any(|r| r.dest_volumes.iter().any(|(v, _, _)| v == volume));
+        let used = running.iter().any(|r| {
+            r.dest_volumes
+                .iter()
+                .any(|(v, _, _)| same_path(v, volume, ci))
+        });
         if *hdd && used {
             return Err(Wait::HddBusy);
         }
@@ -84,13 +137,20 @@ pub fn can_start(
     for (volume, _, _) in &c.dest_volumes {
         let others: Vec<&Claim> = running
             .iter()
-            .filter(|r| r.dest_volumes.iter().any(|(v, _, _)| v == volume))
+            .filter(|r| {
+                r.dest_volumes
+                    .iter()
+                    .any(|(v, _, _)| same_path(v, volume, ci))
+            })
             .collect();
         if others.is_empty() {
             continue;
         }
-        let total: u64 =
-            reserved_on(c, volume) + others.iter().map(|r| reserved_on(r, volume)).sum::<u64>();
+        let total: u64 = reserved_on(c, volume, ci)
+            + others
+                .iter()
+                .map(|r| reserved_on(r, volume, ci))
+                .sum::<u64>();
         if free(volume).is_some_and(|f| total > f) {
             return Err(Wait::Space);
         }
@@ -187,5 +247,90 @@ mod tests {
         assert_eq!(can_start(&c, &run, &roomy), Ok(()));
         // Seul sur le volume : l'espace n'est pas l'affaire de l'ordonnanceur.
         assert_eq!(can_start(&c, &[], &free), Ok(()));
+    }
+
+    #[test]
+    fn schedule_normalize_components() {
+        let n = |p: &str, ci| normalize(Path::new(p), ci);
+        assert_eq!(n(r"\\?\E:\Rushes\J01", true), ["e:", "rushes", "j01"]);
+        assert_eq!(n("E:/Rushes//J01/./", false), ["E:", "Rushes", "J01"]);
+        assert_eq!(n("/Volumes/SSD", false), ["/", "Volumes", "SSD"]);
+        assert_ne!(n("/a", false), n("a", false));
+    }
+
+    #[test]
+    fn schedule_root_case_windows_style() {
+        let run = [claim("S", &[r"E:\Rushes\J01"], &[("E:", false, 10)])];
+        let c = claim("T", &[r"e:\rushes\j01\A001"], &[("e:", false, 10)]);
+        assert_eq!(
+            can_start_with(&c, &run, &no_limit, true),
+            Err(Wait::RootBusy)
+        );
+        // Sensible à la casse : dossiers distincts.
+        assert_eq!(can_start_with(&c, &run, &no_limit, false), Ok(()));
+        // Préfixe \\?\ et séparateurs mixtes.
+        let c = claim("T", &[r"\\?\e:\rushes/j01"], &[("e:", false, 10)]);
+        assert_eq!(
+            can_start_with(&c, &run, &no_limit, true),
+            Err(Wait::RootBusy)
+        );
+    }
+
+    #[test]
+    fn schedule_volume_case_macos_style() {
+        let run = [claim(
+            "/Volumes/CARD",
+            &["/Volumes/SSD/a"],
+            &[("/Volumes/SSD", true, 10)],
+        )];
+        let c = claim(
+            "/Volumes/card",
+            &["/Volumes/ssd/B"],
+            &[("/Volumes/ssd", true, 10)],
+        );
+        assert_eq!(
+            can_start_with(&c, &run, &no_limit, true),
+            Err(Wait::SourceBusy)
+        );
+        assert_eq!(can_start_with(&c, &run, &no_limit, false), Ok(()));
+        // Même disque dur, autre source.
+        let c = claim(
+            "/Volumes/other",
+            &["/Volumes/ssd/B"],
+            &[("/Volumes/ssd", true, 10)],
+        );
+        assert_eq!(
+            can_start_with(&c, &run, &no_limit, true),
+            Err(Wait::HddBusy)
+        );
+        assert_eq!(can_start_with(&c, &run, &no_limit, false), Ok(()));
+        // Même dossier final à la casse près.
+        let c = claim(
+            "/Volumes/other",
+            &["/Volumes/ssd/A"],
+            &[("/Volumes/x", false, 1)],
+        );
+        assert_eq!(
+            can_start_with(&c, &run, &no_limit, true),
+            Err(Wait::RootBusy)
+        );
+        assert_eq!(can_start_with(&c, &run, &no_limit, false), Ok(()));
+    }
+
+    #[test]
+    fn schedule_space_case_insensitive_volume() {
+        let run = [claim("/A", &["/Ssd/A001"], &[("/Ssd", false, 60)])];
+        let c = claim("/B", &["/Ssd/B001"], &[("/SSD", false, 60)]);
+        let free = |_: &Path| Some(100);
+        assert_eq!(can_start_with(&c, &run, &free, true), Err(Wait::Space));
+        assert_eq!(can_start_with(&c, &run, &free, false), Ok(()));
+    }
+
+    #[test]
+    fn schedule_component_prefix_is_not_inclusion() {
+        for ci in [false, true] {
+            assert!(!overlaps(Path::new("/a/bc"), Path::new("/a/b"), ci));
+            assert!(overlaps(Path::new("/a/b/c"), Path::new("/a/b"), ci));
+        }
     }
 }
