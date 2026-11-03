@@ -26,6 +26,7 @@ fn main() {
         destinations: destinations.clone(),
         algorithms: algos.clone(),
         known: None,
+        overlap: false,
     };
     println!("{} fichiers, {} octets", inv.files.len(), inv.total_bytes);
     let summary = run(&inv, &spec, &AtomicBool::new(false), |e| {

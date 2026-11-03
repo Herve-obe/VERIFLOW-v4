@@ -203,6 +203,12 @@ pub struct JobResult {
     pub fingerprint: String,
 }
 
+/// Le recouvrement copie/vérification est exclu dès qu'une destination est un
+/// disque dur mécanique (deux accès simultanés s'y gênent).
+fn overlap_allowed(roots: &[PathBuf], is_hdd: impl Fn(&Path) -> bool) -> bool {
+    !roots.iter().any(|r| is_hdd(r))
+}
+
 /// Exécute l'offload : copie et vérification, puis MHL et rapports.
 pub fn execute(
     req: &OffloadRequest,
@@ -229,6 +235,8 @@ pub fn execute(
             ExistingMode::Complete => known,
             _ => None,
         },
+        // Pas de recouvrement si une destination est un disque dur mécanique.
+        overlap: overlap_allowed(&pre.roots, super::storage::is_hdd),
     };
     if req.existing == ExistingMode::Replace {
         existing::remove(&inv, &spec.destinations)?;
@@ -280,6 +288,14 @@ pub fn display(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlap_is_refused_when_a_destination_is_a_hard_disk() {
+        let roots = [PathBuf::from("/ssd/A001"), PathBuf::from("/hdd/A001")];
+        assert!(overlap_allowed(&roots, |_| false));
+        assert!(!overlap_allowed(&roots, |p| p.starts_with("/hdd")));
+        assert!(overlap_allowed(&[], |_| true));
+    }
 
     #[test]
     fn renders_templates() {

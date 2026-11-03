@@ -739,6 +739,7 @@ mod tests {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
             known: None,
+            overlap: false,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo {
