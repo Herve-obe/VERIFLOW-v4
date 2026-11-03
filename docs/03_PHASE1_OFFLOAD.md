@@ -38,7 +38,7 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
   - empreintes de dossiers et racine : identiques au caractère près à celles calculées par l'outil de référence ;
   - `ascmhl verify` : OK ; corruption d'un seul octet : détectée.
 - Script de contrôle : `scripts/validate-mhl.sh <dossier copié>`.
-- Revérification (03/11/2026) : la génération de vérification est une génération `in-place` de la même chaîne, relue par le même script. Le contrôle de cette génération sur un disque réel reste à faire (voir `docs/TESTS_EN_ATTENTE.md`).
+- Revérification (03/11/2026) : la génération de vérification est une génération `in-place` de la même chaîne, relue par le même script. Contrôlée en développement le 03/11/2026 avec l'outil ascmhl de référence sur un dossier de test (copie puis vérification VERIFLOW, disque conforme puis disque modifié) : générations transfer et in-place et chaîne valides au XSD, `ascmhl-debug verify` sans erreur sur le disque conforme et mêmes écarts signalés que VERIFLOW sur le disque modifié. Le contrôle sur un disque réel reste à faire (voir `docs/TESTS_EN_ATTENTE.md`).
 - Lecture de l'historique : chaîne et C4 de chaque génération contrôlés, empreinte la plus récente de chaque fichier retenue, toutes générations confondues. Une empreinte `failed` ne remplace jamais une empreinte connue.
 - Limite de la norme : SHA-256 n'existe pas dans ASC MHL v2. Il figure dans les rapports CSV, HTML et PDF, pas dans le MHL.
 
