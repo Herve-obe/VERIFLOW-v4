@@ -165,17 +165,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // Dans un conteneur, la liste peut être vide : on vérifie seulement la cohérence.
         if let Some(v) = volume_of(dir.path()) {
-            assert!(dir
-                .path()
-                .canonicalize()
-                .unwrap()
-                .starts_with(&v.mount_point));
+            let canon = strip_verbatim(&dir.path().canonicalize().unwrap());
+            assert!(canon.starts_with(strip_verbatim(&v.mount_point)));
             assert!(v.total >= v.available);
         }
         let _ = is_hdd(dir.path());
     }
 
-    #[cfg(unix)]
     #[test]
     fn verbatim_prefix_is_removed_for_volume_matching() {
         assert_eq!(
@@ -193,6 +189,7 @@ mod tests {
         assert_eq!(strip_verbatim(Path::new(r"E:\")), PathBuf::from(r"E:\"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn readable_volume_names() {
         assert_eq!(display_name(Path::new("/"), "/dev/vda"), "Système (/)");
