@@ -19,7 +19,7 @@
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
   const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
-  const barState = $derived(job.state === "failed" || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
+  const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
 
   // Reprise proposée tant que la carte n'a pas été recopiée avec succès depuis.
@@ -31,7 +31,7 @@
 
   /** Retire la fiche après confirmation ; une copie en cours est d'abord annulée. */
   async function remove() {
-    const active = job.state === "queued" || job.state === "running";
+    const active = job.state === "queued" || job.state === "waiting" || job.state === "running";
     const ok = await ask(t(active ? "offload.remove.active" : "offload.remove.done"), {
       title: t("offload.remove.title"),
       ok: t(active ? "offload.remove.do.active" : "offload.remove.do"),
@@ -46,14 +46,17 @@
     d.state === "verified" ? t("offload.status.verified") : d.state === "resumed_verified" ? t("offload.status.resumed") : t("offload.status.failed");
 </script>
 
-<article class="job" class:ok={job.state === "done" && ok} class:ko={job.state === "failed" || (job.state === "done" && !ok)}>
+<article class="job" class:ok={job.state === "done" && ok} class:ko={(job.state === "failed" && !job.dropped) || (job.state === "done" && !ok)}>
   <header>
     <div>
       <h3>{job.result?.source_name ?? job.source}</h3>
-      <span class="state">{t(`offload.job.${job.result?.summary.cancelled ? "cancelled" : job.state}`)}</span>
+      <span class="state">{t(job.dropped ? "offload.job.dropped" : `offload.job.${job.result?.summary.cancelled ? "cancelled" : job.state}`)}</span>
+      {#if job.state === "waiting" && job.waitReason}
+        <span class="wait">{t(`offload.wait.${job.waitReason}`)}</span>
+      {/if}
     </div>
     <div class="tools">
-      {#if job.state === "queued" || job.state === "running"}
+      {#if job.state === "queued" || job.state === "waiting" || job.state === "running"}
         <button class="ghost" onclick={() => cancel(job.id)}>{t("offload.cancel")}</button>
       {:else if resumable}
         <button onclick={() => (offload.resume = offload.requests[job.id])}>{t("offload.resume")}</button>
@@ -204,6 +207,11 @@
   h3 {
     margin: 0;
     font-size: var(--vf-text-lg);
+  }
+  .wait {
+    display: block;
+    font-size: var(--vf-text-sm);
+    color: var(--vf-warning);
   }
   .state,
   .small {

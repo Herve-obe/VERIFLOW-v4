@@ -441,6 +441,7 @@
     {:else}
       <p class="muted">{t("offload.queue.empty")}</p>
     {/each}
+    <p class="muted">{t("offload.job.parallel_hint")}</p>
   </section>
 </div>
 </div>

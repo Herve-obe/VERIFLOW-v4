@@ -129,8 +129,12 @@ export interface JobResult {
   fingerprint: string;
 }
 
+export type WaitReason = "limit" | "source_busy" | "root_busy" | "hdd_busy" | "space";
+
 export type Notice =
   | { kind: "queued"; job: number; source: string }
+  | { kind: "waiting"; job: number; reason: WaitReason }
+  | { kind: "dropped"; job: number }
   | { kind: "running"; job: number; files: number; total_bytes: number; roots: string[] }
   | { kind: "engine"; job: number; event: EngineEvent }
   | { kind: "done"; job: number; result: JobResult; ejected: { Ok: null } | { Err: string } | null }

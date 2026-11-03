@@ -835,5 +835,12 @@
   "offload.battery.running_low": "Batterie faible ({percent} %) pendant la copie : branche le portable sur secteur.",
   "offload.battery.running_long": "Copie en cours sur batterie ({percent} %), fin estimée dans {minutes} min : branche le portable sur secteur.",
   "offload.battery.running_long_nopercent": "Copie en cours sur batterie, fin estimée dans {minutes} min : branche le portable sur secteur.",
-  "offload.battery.dismiss": "Fermer"
+  "offload.battery.dismiss": "Fermer",
+  "offload.wait.limit": "En attente : 3 copies déjà en cours",
+  "offload.wait.source_busy": "En attente : la source est sur un lecteur déjà en cours de copie",
+  "offload.wait.root_busy": "En attente : une copie écrit déjà dans ce dossier",
+  "offload.wait.hdd_busy": "En attente : un disque dur de destination est déjà utilisé (un seul travail à la fois sur un disque dur)",
+  "offload.wait.space": "En attente : espace insuffisant pour les copies en cours sur ce disque",
+  "offload.job.dropped": "Annulée avant le début",
+  "offload.job.parallel_hint": "Les cartes lues sur des lecteurs différents sont copiées en même temps, jusqu'à 3 à la fois."
 }
