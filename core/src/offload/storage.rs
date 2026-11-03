@@ -90,12 +90,27 @@ pub fn volumes() -> Vec<Volume> {
     out
 }
 
+/// Retire le préfixe étendu de Windows que `canonicalize` ajoute (`\\?\E:\x`
+/// devient `E:\x`, `\\?\UNC\srv\x` devient `\\srv\x`) : sans cela, `starts_with`
+/// ne reconnaît plus le point de montage `E:\`.
+fn strip_verbatim(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Volume contenant un chemin (point de montage le plus long qui le précède).
 pub fn volume_of(path: &Path) -> Option<Volume> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = strip_verbatim(&path);
     volumes()
         .into_iter()
-        .filter(|v| path.starts_with(&v.mount_point))
+        .filter(|v| path.starts_with(strip_verbatim(&v.mount_point)))
         .max_by_key(|v| v.mount_point.as_os_str().len())
 }
 
@@ -161,6 +176,23 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn verbatim_prefix_is_removed_for_volume_matching() {
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\E:\Rushes\A001")),
+            PathBuf::from(r"E:\Rushes\A001")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\UNC\srv\partage\x")),
+            PathBuf::from(r"\\srv\partage\x")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new("/media/disque")),
+            PathBuf::from("/media/disque")
+        );
+        assert_eq!(strip_verbatim(Path::new(r"E:\")), PathBuf::from(r"E:\"));
+    }
+
     #[test]
     fn readable_volume_names() {
         assert_eq!(display_name(Path::new("/"), "/dev/vda"), "Système (/)");
