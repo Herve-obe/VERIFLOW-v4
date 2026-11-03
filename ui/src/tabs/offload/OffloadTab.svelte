@@ -9,6 +9,7 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
+  import { isBeginner } from "../../stores/level.svelte";
   import { offload, listenOffload } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
@@ -69,6 +70,10 @@
     }
   });
 
+  // Réglages imposés en DÉBUTANT. Appliqués seulement dans la requête : les
+  // valeurs EXPERT enregistrées (SETTINGS_KEY) ne sont jamais écrasées.
+  const BEGINNER: Partial<OffloadRequest> = { template: "{date}/{carte}", algorithms: ["xxh128"], notes: null };
+
   const request = (): OffloadRequest => ({
     source,
     destinations,
@@ -79,6 +84,8 @@
     notes: notes || null,
     date: source && source === resumeSource ? resumeDate : null,
     roots: rootsOverride && rootsOverride.key === formKey() ? rootsOverride.roots : null,
+    // Une reprise depuis la file garde ses réglages d'origine (même dossier final).
+    ...(isBeginner() && !(source && source === resumeSource) ? BEGINNER : {}),
   });
 
   /** Reprend la copie dans les dossiers où elle a été trouvée. */
@@ -222,7 +229,7 @@
     existingFor = null;
     const req = { ...r, existing };
     try {
-      const id = await start(req, eject, check);
+      const id = await start(req, eject && !isBeginner(), check);
       offload.requests[id] = req;
       source = "";
       notes = "";
@@ -309,6 +316,9 @@
       <p class="muted small">{t("offload.drop.dest")}</p>
     </div>
 
+    {#if isBeginner()}
+      <p class="muted small">{t("level.offload.auto")}</p>
+    {:else}
     <div class="block grid">
       <label>{t("offload.template")}<input class="mono" bind:value={template} /></label>
       {#if preview}
@@ -333,6 +343,7 @@
       <p class="muted small">{t("offload.algo.hint")}</p>
       <label class="check"><input type="checkbox" bind:checked={eject} /> {t("offload.eject.after")}</label>
     </div>
+    {/if}
 
     <div class="block summary" bind:this={summaryEl}>
       {#if checking}
