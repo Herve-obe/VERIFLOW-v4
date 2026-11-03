@@ -226,9 +226,9 @@
       case "shuttle.back": seekBy(-5); break;
       case "step.forward": seekBy(1); break;
       case "step.back": seekBy(-1); break;
-      case "mark.in": markIn = logFrame; break;
-      case "mark.out": markOut = logFrame; break;
-      case "mark.add": panel?.add(); break;
+      case "mark.in": if (logs) markIn = logFrame; break;
+      case "mark.out": if (logs) markOut = logFrame; break;
+      case "mark.add": if (logs) panel?.add(); break;
       case "report.edit": if (logs && loaded[0]) reportOpen = true; break;
     }
   }

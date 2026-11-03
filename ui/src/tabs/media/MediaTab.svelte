@@ -9,6 +9,7 @@
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { explorer } from "../../stores/explorer.svelte";
   import { watch, norm } from "../../lib/explorer";
+  import { isBeginner } from "../../stores/level.svelte";
   import { app, openInPlayer, addToReport, sendToTranscode } from "../../stores/app.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes } from "../../lib/format";
@@ -231,14 +232,16 @@
     >
       {t("media.open.player")}
     </button>
-    <button
-      class="toplayer"
-      disabled={selection.length === 0}
-      onclick={() => addToReport(selection.map((m) => m.path))}
-      title={t("media.add.report.hint")}
-    >
-      {t("media.add.report")}
-    </button>
+    {#if !isBeginner()}
+      <button
+        class="toplayer"
+        disabled={selection.length === 0}
+        onclick={() => addToReport(selection.map((m) => m.path))}
+        title={t("media.add.report.hint")}
+      >
+        {t("media.add.report")}
+      </button>
+    {/if}
     <button
       class="toplayer"
       disabled={selection.length === 0}
@@ -255,13 +258,15 @@
       <button class:on={view === "list"} onclick={() => (view = "list")}>{t("media.view.list")}</button>
       <button class:on={view === "grid"} onclick={() => (view = "grid")}>{t("media.view.grid")}</button>
     </div>
-    <div class="exports">
-      <span class="small">{t("media.export")}</span>
-      <button onclick={() => runExport("csv")}>CSV</button>
-      <button onclick={() => runExport("ale")}>ALE</button>
-      <button onclick={() => runExport("xmp")}>XMP</button>
-      <button onclick={() => runExport("working_copy")} title={t("media.export.working_copy.hint")}>{t("media.export.copy")}</button>
-    </div>
+    {#if !isBeginner()}
+      <div class="exports">
+        <span class="small">{t("media.export")}</span>
+        <button onclick={() => runExport("csv")}>CSV</button>
+        <button onclick={() => runExport("ale")}>ALE</button>
+        <button onclick={() => runExport("xmp")}>XMP</button>
+        <button onclick={() => runExport("working_copy")} title={t("media.export.working_copy.hint")}>{t("media.export.copy")}</button>
+      </div>
+    {/if}
   </div>
 
   <div class="body">
