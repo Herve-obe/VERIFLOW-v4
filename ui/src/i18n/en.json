@@ -836,11 +836,20 @@
   "offload.battery.running_long": "Copy running on battery ({percent}%), estimated to end in {minutes} min: plug the laptop in.",
   "offload.battery.running_long_nopercent": "Copy running on battery, estimated to end in {minutes} min: plug the laptop in.",
   "offload.battery.dismiss": "Close",
-  "offload.wait.limit": "Waiting: 3 copies already running",
+  "offload.wait.limit": "Waiting: {max} copies already running",
   "offload.wait.source_busy": "Waiting: the source is on a drive already being copied",
   "offload.wait.root_busy": "Waiting: another copy is already writing to this folder",
   "offload.wait.hdd_busy": "Waiting: a destination hard drive is already in use (one job at a time per hard drive)",
   "offload.wait.space": "Waiting: not enough space for the running copies on this drive",
   "offload.job.dropped": "Cancelled before it started",
-  "offload.job.parallel_hint": "Cards read from different drives are copied at the same time, up to 3 at once."
+  "offload.job.parallel_hint": "Cards read from different drives are copied at the same time, up to {max} at once.",
+  "offload.job.waiting": "Waiting",
+  "offload.job.starting": "Starting…",
+  "offload.wait.source_in_use": "Waiting: the source is in a folder another copy is writing to (or the reverse)",
+  "offload.relaunch": "Run the copy again",
+  "offload.error.no_space": "Not enough space when the copy started",
+  "offload.error.job_panic": "The copy stopped unexpectedly",
+  "offload.error.job_spawn": "The copy could not start",
+  "offload.eject.code.source_in_use_eject": "Card not ejected: another copy is still using it",
+  "offload.eject.code.eject_not_removable": "Cannot eject: the source is not a removable drive"
 }

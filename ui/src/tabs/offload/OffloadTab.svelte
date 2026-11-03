@@ -12,7 +12,7 @@
   import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, volumes, preflight, start, batteryWarning, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -272,8 +272,9 @@
   async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
     existingFor = null;
     const req = { ...r, existing };
+    const totalBytes = pre?.total_bytes ?? null;
     try {
-      const id = await start(req, eject, check);
+      const id = await start(req, eject, check, totalBytes);
       offload.requests[id] = req;
       source = "";
       notes = "";
@@ -441,7 +442,7 @@
     {:else}
       <p class="muted">{t("offload.queue.empty")}</p>
     {/each}
-    <p class="muted">{t("offload.job.parallel_hint")}</p>
+    <p class="muted">{t("offload.job.parallel_hint").replace("{max}", String(MAX_PARALLEL_JOBS))}</p>
   </section>
 </div>
 </div>
