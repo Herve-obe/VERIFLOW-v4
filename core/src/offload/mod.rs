@@ -8,4 +8,5 @@ pub mod job;
 pub mod mhl;
 pub mod report;
 pub mod scan;
+pub mod schedule;
 pub mod storage;

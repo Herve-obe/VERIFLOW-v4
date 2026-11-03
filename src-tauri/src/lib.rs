@@ -37,7 +37,7 @@ pub fn run() {
         .manage(sync::SyncState::default())
         .setup(|app| {
             use tauri::Manager;
-            app.manage(offload::OffloadState::new(app.handle().clone()));
+            app.manage(offload::OffloadState::new());
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
             menu::listen(app.handle());

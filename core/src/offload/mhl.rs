@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use super::engine::{DestStatus, OffloadSummary};
 use super::hash::{digest_bytes, hash_data, hash_of_hash_list, HashAlgo};
@@ -18,6 +19,10 @@ use crate::{Result, VERSION};
 
 /// Dossier des rapports VERIFLOW dans chaque destination (exclu du MHL).
 pub const REPORTS_DIR: &str = "_VERIFLOW";
+
+/// Plusieurs offloads peuvent finir en même temps dans un même dossier :
+/// lecture de la chaîne, numéro suivant et réécriture forment un bloc unique.
+static MHL_LOCK: Mutex<()> = Mutex::new(());
 
 /// Informations sur l'auteur de la copie (facultatives).
 #[derive(Debug, Clone, Default)]
@@ -257,7 +262,9 @@ pub fn write_generation(
     }
     xml += "  </hashes>\n</hashlist>\n";
 
-    // Numéro de génération suivant et chaîne.
+    // Numéro de génération suivant et chaîne (atomiques entre fils ; un verrou
+    // empoisonné ne dit rien sur les fichiers, on le reprend).
+    let _chain_guard = MHL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mhl_dir = dest_root.join("ascmhl");
     fs::create_dir_all(&mhl_dir)?;
     let chain_path = mhl_dir.join("ascmhl_chain.xml");
@@ -364,5 +371,54 @@ mod tests {
         let chain = parse_chain(&fs::read_to_string(dest.join("ascmhl/ascmhl_chain.xml")).unwrap());
         assert_eq!(chain.len(), 2);
         assert_eq!(chain[0].2, hash_data(HashAlgo::C4, xml.as_bytes()));
+    }
+
+    /// Deux écritures simultanées dans un même dossier : numéros 1 et 2, chaîne
+    /// à deux entrées dont les C4 correspondent aux fichiers.
+    #[test]
+    fn concurrent_generations_same_root_keep_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), b"abc").unwrap();
+        let dest = dir.path().join("D/A001");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dest.clone()],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: true,
+        };
+        let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let paths: Vec<PathBuf> = std::thread::scope(|sc| {
+            let hs: Vec<_> = (0..2)
+                .map(|_| {
+                    sc.spawn(|| {
+                        barrier.wait();
+                        write_generation(
+                            &inv,
+                            &s,
+                            0,
+                            &dest,
+                            &spec.algorithms,
+                            &MhlAuthor::default(),
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let chain = parse_chain(&fs::read_to_string(dest.join("ascmhl/ascmhl_chain.xml")).unwrap());
+        let mut seqs: Vec<u32> = chain.iter().map(|c| c.0).collect();
+        seqs.sort();
+        assert_eq!(seqs, [1, 2]);
+        for (_, name, c4) in &chain {
+            let bytes = fs::read(dest.join("ascmhl").join(name)).unwrap();
+            assert_eq!(&hash_data(HashAlgo::C4, &bytes), c4);
+        }
+        assert_eq!(paths.len(), 2);
+        assert_ne!(paths[0], paths[1]);
     }
 }

@@ -11,7 +11,7 @@ use super::existing::{self, Elsewhere, ExistingMode, Known, Present};
 use super::hash::HashAlgo;
 use super::mhl::{write_generation, MhlAuthor};
 use super::report::{write_reports, ReportData, ReportFiles, ReportInfo};
-use super::scan::{scan, SourceInventory};
+use super::scan::{scan, source_name, SourceInventory};
 use crate::Result;
 
 /// Modèle d'arborescence par défaut : un dossier par jour, puis la carte.
@@ -141,21 +141,36 @@ pub fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// Dossiers finals d'après le nom de source et la date (source de vérité
+/// commune à `preflight` et `planned_roots`).
+fn planned_roots_for(req: &OffloadRequest, card: &str, date: &str) -> Vec<PathBuf> {
+    match &req.roots {
+        Some(r) if r.len() == req.destinations.len() => {
+            r.iter().map(|p| crate::absolute_path(p)).collect()
+        }
+        _ => {
+            let rel = render_template(&req.template, card, &req.vars, date);
+            req.destinations
+                .iter()
+                .map(|d| crate::absolute_path(&d.join(&rel)))
+                .collect()
+        }
+    }
+}
+
+/// Dossiers finals de chaque destination, sans parcourir la source (le nom de
+/// la carte suffit) : sert à l'ordonnancement des copies simultanées.
+pub fn planned_roots(req: &OffloadRequest) -> Vec<PathBuf> {
+    let date = req.date.clone().unwrap_or_else(local_date);
+    let name = source_name(&crate::absolute_path(&req.source));
+    planned_roots_for(req, &name, &date)
+}
+
 /// Inventorie la source et contrôle les destinations, sans rien écrire.
 pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
     let inv = scan(&crate::absolute_path(&req.source))?;
     let date = req.date.clone().unwrap_or_else(local_date);
-    let rel = render_template(&req.template, &inv.name, &req.vars, &date);
-    let roots: Vec<PathBuf> = match &req.roots {
-        Some(r) if r.len() == req.destinations.len() => {
-            r.iter().map(|p| crate::absolute_path(p)).collect()
-        }
-        _ => req
-            .destinations
-            .iter()
-            .map(|d| crate::absolute_path(&d.join(&rel)))
-            .collect(),
-    };
+    let roots = planned_roots_for(req, &inv.name, &date);
     let present: Vec<Present> = roots.iter().map(|r| existing::present(&inv, r)).collect();
     let elsewhere = roots
         .iter()
@@ -405,5 +420,80 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].root, monday_root);
         assert_eq!(found[0].present.files, 1, "le plan du lundi est retrouvé");
+    }
+
+    fn request(src: &Path, dest: &Path) -> OffloadRequest {
+        OffloadRequest {
+            source: src.to_path_buf(),
+            destinations: vec![dest.to_path_buf()],
+            template: "{jour}/{carte}".into(),
+            vars: TemplateVars {
+                jour: Some("J01".into()),
+                ..Default::default()
+            },
+            algorithms: vec![HashAlgo::Xxh128],
+            operator: None,
+            notes: None,
+            existing: ExistingMode::Verify,
+            date: None,
+            roots: None,
+            history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn planned_roots_matches_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("a.mp4"), b"x").unwrap();
+        let mut req = request(&src, &dir.path().join("SSD1"));
+        req.destinations.push(dir.path().join("SSD2"));
+        assert_eq!(planned_roots(&req), preflight(&req).unwrap().roots);
+        // Dossiers imposés (reprise).
+        req.roots = Some(vec![dir.path().join("X/a"), dir.path().join("Y/b")]);
+        assert_eq!(planned_roots(&req), preflight(&req).unwrap().roots);
+        assert_eq!(planned_roots(&req)[0], dir.path().join("X/a"));
+    }
+
+    /// Deux cartes copiées en même temps vers la même destination de base.
+    #[test]
+    fn two_executes_in_parallel_to_same_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("SSD");
+        let reqs: Vec<OffloadRequest> = ["A001", "B001"]
+            .iter()
+            .map(|n| {
+                let src = dir.path().join(n);
+                std::fs::create_dir_all(src.join("CLIP")).unwrap();
+                std::fs::write(src.join("CLIP/C1.MP4"), n.as_bytes().repeat(1000)).unwrap();
+                request(&src, &dest)
+            })
+            .collect();
+        let results: Vec<JobResult> = std::thread::scope(|sc| {
+            let hs: Vec<_> = reqs
+                .iter()
+                .map(|req| {
+                    sc.spawn(move || {
+                        let pre = preflight(req).unwrap();
+                        execute(req, pre, &AtomicBool::new(false), |_| {}, None, None).unwrap()
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for (res, name) in results.iter().zip(["A001", "B001"]) {
+            assert_eq!(res.summary.failed_files, 0);
+            assert_eq!(res.roots[0], dest.join("J01").join(name));
+            let mhl = res.mhl[0].as_ref().expect("MHL écrit");
+            assert!(mhl
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("0001_"));
+            let chain =
+                std::fs::read_to_string(res.roots[0].join("ascmhl/ascmhl_chain.xml")).unwrap();
+            assert_eq!(chain.matches("<hashlist").count(), 1);
+        }
     }
 }
