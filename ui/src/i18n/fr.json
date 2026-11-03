@@ -835,5 +835,21 @@
   "offload.battery.running_low": "Batterie faible ({percent} %) pendant la copie : branche le portable sur secteur.",
   "offload.battery.running_long": "Copie en cours sur batterie ({percent} %), fin estimée dans {minutes} min : branche le portable sur secteur.",
   "offload.battery.running_long_nopercent": "Copie en cours sur batterie, fin estimée dans {minutes} min : branche le portable sur secteur.",
-  "offload.battery.dismiss": "Fermer"
+  "offload.battery.dismiss": "Fermer",
+  "offload.wait.limit": "En attente : {max} copies déjà en cours",
+  "offload.wait.source_busy": "En attente : la source est sur un lecteur déjà en cours de copie",
+  "offload.wait.root_busy": "En attente : une copie écrit déjà dans ce dossier",
+  "offload.wait.hdd_busy": "En attente : un disque dur de destination est déjà utilisé (un seul travail à la fois sur un disque dur)",
+  "offload.wait.space": "En attente : espace insuffisant pour les copies en cours sur ce disque",
+  "offload.job.dropped": "Annulée avant le début",
+  "offload.job.parallel_hint": "Les cartes lues sur des lecteurs différents sont copiées en même temps, jusqu'à {max} à la fois.",
+  "offload.job.waiting": "En attente",
+  "offload.job.starting": "Démarrage…",
+  "offload.wait.source_in_use": "En attente : la source est dans un dossier qu'une autre copie est en train d'écrire (ou l'inverse)",
+  "offload.relaunch": "Relancer la copie",
+  "offload.error.no_space": "Espace insuffisant au démarrage de la copie",
+  "offload.error.job_panic": "Arrêt inattendu de la copie",
+  "offload.error.job_spawn": "La copie n'a pas pu démarrer",
+  "offload.eject.code.source_in_use_eject": "Carte non éjectée : une autre copie l'utilise encore",
+  "offload.eject.code.eject_not_removable": "Éjection impossible : la source n'est pas un support amovible"
 }

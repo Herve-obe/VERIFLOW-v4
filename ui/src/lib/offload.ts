@@ -129,17 +129,28 @@ export interface JobResult {
   fingerprint: string;
 }
 
+export type WaitReason = "limit" | "source_busy" | "root_busy" | "source_in_use" | "hdd_busy" | "space";
+
+/** Copies simultanées au maximum. Miroir de core/src/offload/schedule.rs : à garder identique. */
+export const MAX_PARALLEL_JOBS = 3;
+
+export type EjectCode = "source_in_use_eject" | "eject_not_removable";
+export type ErrorCode = "no_space" | "job_panic" | "job_spawn";
+
 export type Notice =
   | { kind: "queued"; job: number; source: string }
+  | { kind: "waiting"; job: number; reason: WaitReason }
+  | { kind: "dropped"; job: number }
+  | { kind: "starting"; job: number }
   | { kind: "running"; job: number; files: number; total_bytes: number; roots: string[] }
   | { kind: "engine"; job: number; event: EngineEvent }
-  | { kind: "done"; job: number; result: JobResult; ejected: { Ok: null } | { Err: string } | null }
-  | { kind: "failed"; job: number; error: string };
+  | { kind: "done"; job: number; result: JobResult; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null }
+  | { kind: "failed"; job: number; error: string; error_code: ErrorCode | null };
 
 export const volumes = () => invoke<Volume[]>("offload_volumes");
 export const preflight = (request: OffloadRequest) => invoke<PreflightView>("offload_preflight", { request });
-export const start = (request: OffloadRequest, eject: boolean, check: number | null = null) =>
-  invoke<number>("offload_start", { request, eject, check });
+export const start = (request: OffloadRequest, eject: boolean, check: number | null = null, totalBytes: number | null = null) =>
+  invoke<number>("offload_start", { request, eject, check, totalBytes });
 export const templatePreview = (template: string, vars: OffloadRequest["vars"], card: string, date: string | null) =>
   invoke<string>("offload_template_preview", { template, vars, card, date });
 export const checkExisting = (request: OffloadRequest) => invoke<CheckView>("offload_check_existing", { request });
