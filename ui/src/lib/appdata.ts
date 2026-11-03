@@ -13,6 +13,7 @@ export type StartupMode = "resume" | "fresh";
  *  de SYNC, dossiers dépliés, affichages du PLAYER...). */
 const KEEP = new Set([
   "veriflow.language",
+  "veriflow.level",
   STARTUP_KEY,
   "veriflow.recent",
   "veriflow.explorer.favorites",

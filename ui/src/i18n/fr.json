@@ -912,5 +912,12 @@
   "offload.battery.running_low": "Batterie faible ({percent} %) pendant la copie : branche le portable sur secteur.",
   "offload.battery.running_long": "Copie en cours sur batterie ({percent} %), fin estimée dans {minutes} min : branche le portable sur secteur.",
   "offload.battery.running_long_nopercent": "Copie en cours sur batterie, fin estimée dans {minutes} min : branche le portable sur secteur.",
-  "offload.battery.dismiss": "Fermer"
+  "offload.battery.dismiss": "Fermer",
+  "level.beginner": "DÉBUTANT",
+  "level.expert": "EXPERT",
+  "level.toggle.hint": "Interface Débutant (simplifiée) ou Expert (complète)",
+  "level.offload.auto": "Réglages automatiques : arborescence {date}/{carte}, empreinte XXH128, vérification complète, ASC MHL et rapport.",
+  "level.media.readonly": "Métadonnées en lecture seule (mode Débutant).",
+  "level.transcode.simple": "Mode Débutant : réglages du preset, sans modification.",
+  "offload.resume.locked": "Réglages d'origine conservés pour cette reprise."
 }

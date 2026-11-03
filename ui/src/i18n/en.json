@@ -912,5 +912,12 @@
   "offload.battery.running_low": "Low battery ({percent}%) during the copy: plug the laptop in.",
   "offload.battery.running_long": "Copy running on battery ({percent}%), estimated to end in {minutes} min: plug the laptop in.",
   "offload.battery.running_long_nopercent": "Copy running on battery, estimated to end in {minutes} min: plug the laptop in.",
-  "offload.battery.dismiss": "Close"
+  "offload.battery.dismiss": "Close",
+  "level.beginner": "BEGINNER",
+  "level.expert": "EXPERT",
+  "level.toggle.hint": "Beginner (simplified) or Expert (full) interface",
+  "level.offload.auto": "Automatic settings: {date}/{carte} folder tree, XXH128 hash, full verification, ASC MHL and report.",
+  "level.media.readonly": "Metadata is read-only (Beginner mode).",
+  "level.transcode.simple": "Beginner mode: preset settings, no changes.",
+  "offload.resume.locked": "Original settings kept for this resume."
 }

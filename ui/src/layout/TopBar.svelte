@@ -7,6 +7,7 @@
 <script lang="ts">
   import Logo from "../components/Logo.svelte";
   import ModeSwitch from "../components/ModeSwitch.svelte";
+  import LevelSwitch from "../components/LevelSwitch.svelte";
   import TabBar from "./TabBar.svelte";
   import ProjectMenu from "./ProjectMenu.svelte";
   import WindowControls from "./WindowControls.svelte";
@@ -39,6 +40,7 @@
   <div class="tabsrow">
     <div class="side">
       {#if isMac}{@render brand()}{/if}
+      <LevelSwitch />
     </div>
     <TabBar />
     <div class="side right">
