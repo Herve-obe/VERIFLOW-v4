@@ -420,6 +420,9 @@ impl Collector<'_> {
                 Err(_) => {
                     let lost: Vec<_> = self.pending.drain().collect();
                     for (index, mut p) in lost {
+                        // Relectures jamais faites : la progression doit quand même finir.
+                        let missing = p.status.iter().filter(|s| s.is_none()).count() as u64;
+                        self.counter.add(p.result.size * missing, false, emit);
                         for s in p.status.iter_mut().filter(|s| s.is_none()) {
                             *s = Some(DestStatus::Failed("vérification interrompue".into()));
                         }
@@ -496,6 +499,16 @@ fn stamp(m: &fs::Metadata) -> (u64, SystemTime) {
     (m.len(), m.modified().unwrap_or(SystemTime::UNIX_EPOCH))
 }
 
+/// Crochets de test, sans état global.
+struct Hooks<'a> {
+    /// Fil principal, par destination écrite (index, chemin final), avant sa relecture.
+    after_write: &'a dyn Fn(usize, &Path),
+    /// Fil principal, après chaque bloc lu de la source (index, nombre de blocs lus).
+    after_block: &'a dyn Fn(usize, usize),
+    /// Fil vérificateur, avant la relecture (index, chemin).
+    before_verify: &'a (dyn Fn(usize, &Path) + Sync),
+}
+
 /// Étage de copie d'un fichier : lecture unique de la source, écriture vers
 /// toutes les destinations (renommage compris) et empreintes de la source.
 /// La relecture des destinations est confiée aux vérificateurs.
@@ -506,7 +519,7 @@ fn copy_stage(
     cancel: &AtomicBool,
     col: &mut Collector,
     emit: &mut impl FnMut(Event),
-    after_write: &dyn Fn(usize, &Path),
+    hooks: &Hooks,
 ) -> Result<CopyOutcome> {
     let n = spec.destinations.len();
     let finals: Vec<PathBuf> = spec
@@ -569,6 +582,7 @@ fn copy_stage(
     // Lecture unique de la source.
     let hasher = ParallelHasher::new(&spec.algorithms);
     let mut read_bytes = 0u64;
+    let mut blocks = 0usize;
     let read_result = (|| -> std::io::Result<(u64, SystemTime)> {
         let mut src = File::open(&file.path)?;
         // État de la source à l'ouverture, comparé à celui de la fin de lecture.
@@ -588,6 +602,8 @@ fn copy_stage(
             // Un disque en échec ferme son canal : on continue avec les autres.
             senders.retain(|(_, tx)| tx.send(chunk.clone()).is_ok());
             read_bytes += got as u64;
+            blocks += 1;
+            (hooks.after_block)(index, blocks);
             col.counter.add(got as u64, true, emit);
             // Les relectures du fichier précédent avancent pendant cette copie.
             col.drain(emit);
@@ -635,25 +651,36 @@ fn copy_stage(
         }
     }
     for &i in &written {
-        after_write(index, &finals[i]);
+        (hooks.after_write)(index, &finals[i]);
     }
 
     // Source modifiée pendant la copie : les empreintes ne décrivent plus un
     // état cohérent. Les copies écrites par ce passage sont retirées.
-    let unchanged = fs::metadata(&file.path)
-        .map(|m| stamp(&m) == before)
-        .unwrap_or(false);
+    let stale = before != (file.size, file.modified);
+    let unchanged = !stale
+        && fs::metadata(&file.path)
+            .map(|m| stamp(&m) == before)
+            .unwrap_or(false);
     if !unchanged {
+        let why = if stale {
+            "source modifiée depuis l'inventaire"
+        } else {
+            "source modifiée pendant la copie"
+        };
         for &i in &written {
             let _ = fs::remove_file(&finals[i]);
         }
         // Aucune relecture n'aura lieu : leurs octets comptent comme faits.
         col.counter.add(file.size * n as u64, false, emit);
-        // Les causes réelles déjà établies (écriture en échec...) sont conservées.
+        // Les causes réelles déjà établies (écriture en échec...) sont conservées,
+        // sauf le refus d'une copie de taille inattendue, qui vient de la modification.
         let destinations = status
             .into_iter()
-            .map(|s| {
-                s.unwrap_or_else(|| DestStatus::Failed("source modifiée pendant la copie".into()))
+            .map(|s| match s {
+                Some(DestStatus::Failed(m)) if !m.starts_with("écriture : copie incomplète") => {
+                    DestStatus::Failed(m)
+                }
+                _ => DestStatus::Failed(why.into()),
             })
             .collect();
         return Ok(CopyOutcome::Done(FileResult {
@@ -731,19 +758,21 @@ pub(crate) fn run_with(
     emit: impl FnMut(Event),
     after_write: &dyn Fn(usize, &Path),
 ) -> Result<OffloadSummary> {
-    run_hooked(inv, spec, cancel, emit, after_write, &|_, _| {})
+    let hooks = Hooks {
+        after_write,
+        after_block: &|_, _| {},
+        before_verify: &|_, _| {},
+    };
+    run_hooked(inv, spec, cancel, emit, &hooks)
 }
 
-/// Comme `run`, avec deux crochets de test : `after_write` est appelé dans le
-/// fil principal pour chaque destination écrite (index, chemin final), avant sa
-/// relecture ; `before_verify` l'est dans le fil vérificateur, avant la relecture.
+/// Comme `run`, avec les crochets de test de `Hooks`.
 fn run_hooked(
     inv: &SourceInventory,
     spec: &OffloadSpec,
     cancel: &AtomicBool,
     mut emit: impl FnMut(Event),
-    after_write: &dyn Fn(usize, &Path),
-    before_verify: &(dyn Fn(usize, &Path) + Sync),
+    hooks: &Hooks,
 ) -> Result<OffloadSummary> {
     if spec.destinations.is_empty() {
         return Err(Error::Unsupported("aucune destination".into()));
@@ -770,6 +799,7 @@ fn run_hooked(
         for _ in &spec.destinations {
             let (tx, rx) = sync_channel::<VerifyTask>(VERIFY_AHEAD);
             let reply = reply_tx.clone();
+            let before_verify = hooks.before_verify;
             s.spawn(move || verifier(rx, reply, algos, cancel, before_verify));
             task_tx.push(tx);
         }
@@ -796,7 +826,7 @@ fn run_hooked(
                 rel: file.rel.clone(),
                 size: file.size,
             });
-            match copy_stage(index, file, spec, cancel, &mut col, &mut emit, after_write) {
+            match copy_stage(index, file, spec, cancel, &mut col, &mut emit, hooks) {
                 Ok(CopyOutcome::Done(result)) => {
                     emit(Event::FileDone {
                         index,
@@ -1416,27 +1446,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("A001");
         fs::create_dir_all(&root).unwrap();
-        let big: Vec<u8> = (0..CHUNK * 10).map(|i| (i % 249) as u8).collect();
+        let big: Vec<u8> = (0..CHUNK * 4).map(|i| (i % 249) as u8).collect();
         fs::write(root.join("GROS.MP4"), &big).unwrap();
         let inv = scan(&root).unwrap();
         let dest = dir.path().join("SSD1/A001");
         let sp = spec_overlap(std::slice::from_ref(&dest), true);
         let cancel = AtomicBool::new(false);
-        let s = thread::scope(|sc| {
-            // Annule dès que le premier bloc est écrit dans le fichier temporaire.
-            sc.spawn(|| {
-                let tmp = temp_path(&dest.join("GROS.MP4"));
-                let t = Instant::now();
-                while t.elapsed().as_secs() < 20 {
-                    if fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0) >= CHUNK as u64 {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(1));
+        // Annulation déterministe : après le deuxième bloc sur quatre.
+        let hooks = Hooks {
+            after_write: &|_, _| {},
+            after_block: &|_, blocks| {
+                if blocks == 2 {
+                    cancel.store(true, Ordering::Relaxed);
                 }
-                cancel.store(true, Ordering::Relaxed);
-            });
-            run(&inv, &sp, &cancel, |_| {}).unwrap()
-        });
+            },
+            before_verify: &|_, _| {},
+        };
+        let s = run_hooked(&inv, &sp, &cancel, |_| {}, &hooks).unwrap();
         assert!(s.cancelled);
         assert!(s.files.is_empty());
         assert_eq!(partials(&dest), 0);
@@ -1462,11 +1488,14 @@ mod tests {
                 &spec_overlap(&dests, true),
                 &AtomicBool::new(false),
                 |_| {},
-                &|_, _| {},
-                &|index, _| {
-                    if index == 5 {
-                        panic!("panique volontaire du vérificateur");
-                    }
+                &Hooks {
+                    after_write: &|_, _| {},
+                    after_block: &|_, _| {},
+                    before_verify: &|index, _| {
+                        if index == 5 {
+                            panic!("panique volontaire du vérificateur");
+                        }
+                    },
                 },
             )
             .unwrap();
@@ -1510,19 +1539,22 @@ mod tests {
                 Event::FileDone { index, .. } => events.push(("done", index)),
                 _ => {}
             },
-            &|_, _| {},
-            // La relecture du fichier 10 ne se termine qu'une fois le 11 commencé.
-            &|index, _| {
-                if index == 10 {
-                    let t = Instant::now();
-                    while !next_started.load(Ordering::SeqCst) {
-                        if t.elapsed().as_secs() >= 10 {
-                            waited_in_vain.store(true, Ordering::SeqCst);
-                            break;
+            &Hooks {
+                after_write: &|_, _| {},
+                after_block: &|_, _| {},
+                // La relecture du fichier 10 ne se termine qu'une fois le 11 commencé.
+                before_verify: &|index, _| {
+                    if index == 10 {
+                        let t = Instant::now();
+                        while !next_started.load(Ordering::SeqCst) {
+                            if t.elapsed().as_secs() >= 10 {
+                                waited_in_vain.store(true, Ordering::SeqCst);
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(1));
                         }
-                        thread::sleep(Duration::from_millis(1));
                     }
-                }
+                },
             },
         )
         .unwrap();
@@ -1554,5 +1586,30 @@ mod tests {
         drop(tx);
         writer(rx, path.clone(), SystemTime::now(), 200).unwrap();
         assert_eq!(fs::metadata(&path).unwrap().len(), 200);
+    }
+
+    #[test]
+    fn source_changed_since_inventory_is_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = many_files_card(dir.path());
+        let inv = scan(&src).unwrap();
+        let victim = &inv.files[7];
+        let mut f = OpenOptions::new().append(true).open(&victim.path).unwrap();
+        f.write_all(b"ajout apres l'inventaire").unwrap();
+        drop(f);
+        let dest = dir.path().join("SSD1/A001");
+        let s = run(
+            &inv,
+            &spec_overlap(std::slice::from_ref(&dest), true),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(s.failed_files, 1);
+        assert_eq!(
+            s.files[7].destinations[0],
+            DestStatus::Failed("source modifiée depuis l'inventaire".into())
+        );
+        assert!(!dest.join(&victim.rel).exists());
     }
 }
