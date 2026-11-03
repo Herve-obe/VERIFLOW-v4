@@ -219,8 +219,32 @@ pub(super) fn hash_from_disk(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
+    hash_from_disk_progress(path, algos, cancel, |_| {})
+}
+
+/// Comme `hash_from_disk`, avec un rappel appelé après chaque bloc lu
+/// (octets lus depuis le début du fichier).
+pub(super) fn hash_from_disk_progress(
+    path: &Path,
+    algos: &[HashAlgo],
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
+) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let mut buf = AlignedBuf::new(CHUNK);
-    hash_file(path, algos, buf.as_mut_slice(), cancel)
+    let mut f = retry_busy(
+        || open_uncached(path),
+        is_sharing_violation,
+        Duration::from_millis(200),
+    )?;
+    let size = f.metadata()?.len();
+    hash_uncached_with(
+        &mut f,
+        size,
+        buf.as_mut_slice(),
+        algos,
+        cancel,
+        &mut progress,
+    )
 }
 
 /// Relecture complète avec un tampon fourni (un par fil vérificateur).
@@ -253,6 +277,17 @@ fn hash_uncached(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
+    hash_uncached_with(f, size, buf, algos, cancel, &mut |_| {})
+}
+
+fn hash_uncached_with(
+    f: &mut impl Read,
+    size: u64,
+    buf: &mut [u8],
+    algos: &[HashAlgo],
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64),
+) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let hasher = ParallelHasher::new(algos);
     let mut done = 0u64;
     while done < size {
@@ -271,6 +306,7 @@ fn hash_uncached(
         }
         hasher.update(&Arc::new(buf[..n].to_vec()));
         done += n as u64;
+        progress(done);
     }
     Ok(hasher.finish())
 }

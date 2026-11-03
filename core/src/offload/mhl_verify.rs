@@ -14,10 +14,10 @@ use std::time::{Instant, SystemTime};
 use serde::Serialize;
 use walkdir::WalkDir;
 
-use super::engine::{hash_from_disk, DestStatus, Event, FileResult, Hashes};
+use super::engine::{hash_from_disk_progress, DestStatus, Event, FileResult, Hashes};
 use super::hash::HashAlgo;
 use super::mhl::{write_entries, Action, GenEntry, MhlAuthor, REPORTS_DIR};
-use super::mhl_read::{best_algo, load_history, to_path, Chain, MHL_DIR};
+use super::mhl_read::{best_algo, load_history, nfc, to_path, Chain, MHL_DIR};
 use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -242,6 +242,7 @@ pub fn verify_root(
         });
     };
     progress(0, &mut emit);
+    let mut last_emit = Instant::now();
 
     for (index, f) in disk.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -253,13 +254,19 @@ pub fn verify_root(
             rel: f.rel.clone(),
             size: f.size,
         });
-        let known = history.files.get(&f.rel);
+        let known = history.files.get(&nfc(&f.rel));
         let algo = known.and_then(|(_, h)| best_algo(h)).unwrap_or(new_algo);
         let expected =
             known.and_then(|(_, h)| h.iter().find(|(a, _)| *a == algo).map(|(_, v)| v.clone()));
         let read = match &f.error {
             Some(e) => Err(std::io::Error::other(e.clone())),
-            None => hash_from_disk(&f.path, &[algo], cancel),
+            None => hash_from_disk_progress(&f.path, &[algo], cancel, |n| {
+                // Au plus une dizaine d'événements par seconde.
+                if last_emit.elapsed().as_millis() >= 100 {
+                    last_emit = Instant::now();
+                    progress(done + n, &mut emit);
+                }
+            }),
         };
         let (status, actual): (VerifyStatus, Option<String>) = match read {
             Err(e) => {
@@ -324,8 +331,7 @@ pub fn verify_root(
 
     // Fichiers de l'historique absents du disque (seulement si le parcours est complet).
     if !cancelled {
-        let on_disk: std::collections::HashSet<&str> =
-            disk.iter().map(|f| f.rel.as_str()).collect();
+        let on_disk: std::collections::HashSet<String> = disk.iter().map(|f| nfc(&f.rel)).collect();
         let mut gone: Vec<(&String, &(Option<u64>, Hashes))> = history
             .files
             .iter()
@@ -632,6 +638,55 @@ mod tests {
             "empreinte de la génération 1"
         );
         assert!(s.conform);
+    }
+
+    #[test]
+    fn verify_matches_nfc_and_nfd_names() {
+        // Historique en NFC, disque en NFD, puis l'inverse.
+        for (on_disk, in_history) in [
+            ("e\u{301}te\u{301}.mov", "\u{e9}t\u{e9}.mov"),
+            ("\u{e9}t\u{e9}.mov", "e\u{301}te\u{301}.mov"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("D");
+            fs::create_dir_all(&root).unwrap();
+            fs::write(root.join(on_disk), b"abc").unwrap();
+            let entry = GenEntry {
+                rel: in_history.into(),
+                size: 3,
+                hashes: vec![(HashAlgo::Xxh128, hash_data(HashAlgo::Xxh128, b"abc"))],
+                action: Action::Original,
+            };
+            write_entries(&root, &[entry], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+            let s = run_verify(&root);
+            assert_eq!((s.ok, s.missing, s.new), (1, 0, 0), "{on_disk:?}");
+            assert!(s.conform);
+        }
+    }
+
+    #[test]
+    fn verify_emits_progress_inside_a_large_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        fs::create_dir_all(&root).unwrap();
+        let data = vec![7u8; 40 << 20];
+        fs::write(root.join("gros.bin"), &data).unwrap();
+        let entry = GenEntry {
+            rel: "gros.bin".into(),
+            size: data.len() as u64,
+            hashes: vec![(HashAlgo::Xxh128, hash_data(HashAlgo::Xxh128, &data))],
+            action: Action::Original,
+        };
+        write_entries(&root, &[entry], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let mut dones = Vec::new();
+        verify_root(&root, &AtomicBool::new(false), |e| {
+            if let Event::Progress { done, .. } = e {
+                dones.push(done);
+            }
+        })
+        .unwrap();
+        assert!(dones.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(*dones.last().unwrap(), data.len() as u64);
     }
 
     #[test]

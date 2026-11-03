@@ -6,9 +6,9 @@
 //! inconnus ignorés. Un MHL v1 ou un historique imbriqué est refusé avec un
 //! message explicite : une vérification fausse est pire qu'aucune.
 //!
-//! Les chemins du XML sont en « / » ; ils sont comparés tels quels (aucune
-//! normalisation Unicode NFC n'existe dans le dépôt : un nom accentué écrit en
-//! NFC par un autre outil et en NFD par macOS apparaîtrait manquant et nouveau).
+//! Les chemins du XML sont en « / ». Les clés de l'historique sont normalisées
+//! en NFC (macOS écrit les noms accentués en NFD, d'autres outils en NFC) ;
+//! le chemin réel du disque reste utilisé pour la lecture.
 
 use std::collections::HashMap;
 use std::fs;
@@ -93,6 +93,12 @@ pub struct History {
     pub files: HashMap<String, (Option<u64>, Hashes)>,
     /// Motifs d'exclusion de toutes les générations.
     pub ignore: Vec<String>,
+}
+
+/// Forme NFC d'un chemin, pour comparer des noms écrits en NFC ou en NFD.
+pub fn nfc(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfc().collect()
 }
 
 /// Chemin relatif « / » converti pour le système.
@@ -365,7 +371,7 @@ pub fn load_history(root: &Path) -> Result<History> {
             if f.action == "failed" {
                 continue;
             }
-            let entry = files.entry(f.rel).or_default();
+            let entry = files.entry(nfc(&f.rel)).or_default();
             if f.size.is_some() {
                 entry.0 = f.size;
             }
