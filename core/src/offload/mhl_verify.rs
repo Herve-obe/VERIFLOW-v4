@@ -696,6 +696,10 @@ mod tests {
         fs::create_dir_all(dest.join("CLIP/ascmhl")).unwrap();
         let err = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap_err();
         assert!(err.to_string().contains("imbriqué"), "{err}");
+        assert_eq!(
+            super::super::mhl_read::error_code(&err),
+            Some("nested_history")
+        );
     }
 
     #[test]

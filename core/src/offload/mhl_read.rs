@@ -80,6 +80,8 @@ pub struct GenFile {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Generation {
     pub process: String,
+    /// Date de création (`creationdate`, texte du fichier), vide si absente.
+    pub date: String,
     pub files: Vec<GenFile>,
     /// Motifs `<ignore>` de la génération.
     pub ignore: Vec<String>,
@@ -303,6 +305,7 @@ pub fn read_generation(path: &Path) -> Result<Generation> {
                 )));
             }
             (Ev::End, ["hashlist", "processinfo", "process"]) => gen.process = text.to_owned(),
+            (Ev::End, ["hashlist", "creatorinfo", "creationdate"]) => gen.date = text.to_owned(),
             (Ev::End, ["hashlist", "processinfo", "ignore", "pattern"]) if !text.is_empty() => {
                 gen.ignore.push(text.to_owned());
             }
@@ -415,6 +418,86 @@ pub fn find_histories(dir: &Path, depth: usize) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Résumé d'un historique pour l'affichage avant vérification.
+#[derive(Debug, Clone, Serialize)]
+pub struct MhlInfo {
+    pub root: PathBuf,
+    /// Nombre de générations inscrites dans la chaîne.
+    pub generations: usize,
+    /// Date de la dernière génération lisible (texte du MHL).
+    pub last_date: Option<String>,
+    /// Fichiers suivis par l'historique.
+    pub files: usize,
+    /// Méthodes d'empreinte présentes, de la plus à la moins prioritaire du MHL.
+    pub algos: Vec<HashAlgo>,
+    pub chain_issues: Vec<ChainIssue>,
+    /// Sous-dossiers qui ont leur propre historique, renseignés seulement quand
+    /// `root` n'en a pas (l'utilisateur a choisi un dossier parent).
+    pub histories: Vec<PathBuf>,
+}
+
+/// Profondeur de recherche des historiques dans les sous-dossiers.
+const HISTORY_SEARCH_DEPTH: usize = 3;
+
+/// Lit l'historique de `root` pour l'aperçu. Sans `ascmhl/`, renvoie un
+/// résumé vide dont `histories` liste les sous-dossiers qui en ont ; l'erreur
+/// « aucun historique » n'est rendue que s'il n'y en a nulle part.
+pub fn info(root: &Path) -> Result<MhlInfo> {
+    if root.is_dir() && !root.join(MHL_DIR).is_dir() {
+        let histories = find_histories(root, HISTORY_SEARCH_DEPTH);
+        if !histories.is_empty() {
+            return Ok(MhlInfo {
+                root: root.to_path_buf(),
+                generations: 0,
+                last_date: None,
+                files: 0,
+                algos: Vec::new(),
+                chain_issues: Vec::new(),
+                histories,
+            });
+        }
+    }
+    let h = load_history(root)?;
+    let dir = root.join(MHL_DIR);
+    let last_date = h
+        .chain
+        .entries
+        .iter()
+        .rev()
+        .filter_map(|e| read_generation(&to_path(&dir, &e.file)).ok())
+        .map(|g| g.date)
+        .find(|d| !d.is_empty());
+    let mut algos: Vec<HashAlgo> = h
+        .files
+        .values()
+        .flat_map(|(_, hashes)| hashes.iter().map(|(a, _)| *a))
+        .collect();
+    algos.sort_by_key(|a| a.mhl_order());
+    algos.dedup();
+    Ok(MhlInfo {
+        root: root.to_path_buf(),
+        generations: h.chain.entries.len(),
+        last_date,
+        files: h.files.len(),
+        algos,
+        chain_issues: h.chain.issues,
+        histories: Vec::new(),
+    })
+}
+
+/// Code stable d'une erreur de lecture ou de vérification d'historique, pour
+/// la traduction côté interface : `no_history`, `mhl_v1` ou `nested_history`.
+pub fn error_code(e: &Error) -> Option<&'static str> {
+    match e {
+        Error::Report(m) if m.starts_with("aucun historique ASC MHL") => Some("no_history"),
+        Error::Unsupported(m) if m.contains("ASC MHL v1") => Some("mhl_v1"),
+        Error::Unsupported(m) if m.starts_with("historique ASC MHL imbriqué") => {
+            Some("nested_history")
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -534,5 +617,36 @@ mod tests {
         .unwrap();
         let err = read_generation(&v1).unwrap_err().to_string();
         assert!(err.contains("non pris en charge"), "{err}");
+    }
+
+    #[test]
+    fn info_summarises_history_and_finds_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let i = info(&dest).unwrap();
+        assert_eq!((i.generations, i.files), (1, 2));
+        assert!(i.last_date.is_some_and(|d| d.contains('T')));
+        assert!(i.algos.contains(&HashAlgo::Xxh128) && i.algos.contains(&HashAlgo::Md5));
+        assert!(i.chain_issues.is_empty() && i.histories.is_empty());
+        // Dossier parent sans historique : les sous-dossiers qui en ont sont listés.
+        let parent = dir.path().join("SSD");
+        let i = info(&parent).unwrap();
+        assert_eq!(i.generations, 0);
+        assert_eq!(i.histories, [dest]);
+        // Nulle part : erreur au code stable.
+        let empty = dir.path().join("vide");
+        fs::create_dir_all(&empty).unwrap();
+        let err = info(&empty).unwrap_err();
+        assert_eq!(error_code(&err), Some("no_history"));
+    }
+
+    #[test]
+    fn error_codes_are_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let v1 = dir.path().join("0001_D_x.mhl");
+        fs::write(&v1, "<hashlist version=\"1.0\"></hashlist>").unwrap();
+        let err = read_generation(&v1).unwrap_err();
+        assert_eq!(error_code(&err), Some("mhl_v1"));
+        assert_eq!(error_code(&Error::Cancelled), None);
     }
 }

@@ -96,6 +96,8 @@ pub fn run() {
             offload::offload_template_preview,
             offload::offload_check_cancel,
             offload::offload_cancel,
+            offload::offload_mhl_info,
+            offload::offload_mhl_verify,
             offload::offload_eject,
             offload::reveal,
             explorer::explorer_list,
