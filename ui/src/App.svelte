@@ -14,6 +14,7 @@
   import TranscodeTab from "./tabs/transcode/TranscodeTab.svelte";
   import ReportTab from "./tabs/report/ReportTab.svelte";
   import { app, setMode, toggleMode, type Tab } from "./stores/app.svelte";
+  import { tabVisible } from "./stores/level.svelte";
   import { resolveAction } from "./shortcuts";
   import { appInfo } from "./lib/api";
 
@@ -39,8 +40,16 @@
     if (!action) return;
     e.preventDefault();
     if (action === "mode.toggle" || action === "mode.toggle.force") toggleMode();
-    else app.tab = action.slice("tab.".length) as Tab;
+    else {
+      const tab = action.slice("tab.".length) as Tab;
+      if (tabVisible(tab)) app.tab = tab;
+    }
   }
+
+  // Passage en DÉBUTANT depuis un onglet masqué : retour à OFFLOAD.
+  $effect(() => {
+    if (!tabVisible(app.tab)) app.tab = "offload";
+  });
 </script>
 
 <svelte:window onkeydown={onKeydown} />

@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { app, toggleMode, type Tab } from "../stores/app.svelte";
+import { isBeginner, tabVisible } from "../stores/level.svelte";
 import { explorer, setExplorerCollapsed } from "../stores/explorer.svelte";
 import { t } from "../i18n/index.svelte";
 import { inTauri } from "../lib/api";
@@ -112,14 +113,16 @@ const tab = (id: Tab, key: string): Command => ({
   label: () => id.toUpperCase(),
   shortcut: { key, alt: true },
   bind: false, // App.svelte
+  enabled: () => tabVisible(id),
   run: () => (app.tab = id),
 });
 
-const play = (action: PlayerAction, label: string): Command => ({
+const play = (action: PlayerAction, label: string, expertOnly = false): Command => ({
   id: `play.${action}`,
   label: () => t(label as never),
   shortcut: PLAYER_SHORTCUTS[action],
   bind: false, // VideoView, AudioView
+  enabled: expertOnly ? () => !isBeginner() : undefined,
   run: () => dispatchPlayerAction(action),
 });
 
@@ -182,10 +185,10 @@ const list: Command[] = [
   play("shuttle.forward", "menu.play.forward"),
   play("step.back", "menu.play.step.back"),
   play("step.forward", "menu.play.step.forward"),
-  play("mark.in", "menu.play.in"),
-  play("mark.out", "menu.play.out"),
-  play("mark.add", "menu.play.marker"),
-  play("report.edit", "menu.play.report"),
+  play("mark.in", "menu.play.in", true),
+  play("mark.out", "menu.play.out", true),
+  play("mark.add", "menu.play.marker", true),
+  play("report.edit", "menu.play.report", true),
 
   { id: "help.shortcuts", label: () => t("menu.help.shortcuts"), shortcut: { key: "F1" }, run: show("shortcuts") },
   { id: "help.licenses", label: () => t("menu.help.licenses"), run: show("licenses") },
@@ -252,12 +255,9 @@ export const MENUS: MenuDef[] = [
     id: "view",
     label: () => t("menu.view"),
     items: () => [
-      "view.tab.offload",
-      "view.tab.media",
-      "view.tab.player",
-      "view.tab.sync",
-      "view.tab.transcode",
-      "view.tab.report",
+      ...["offload", "media", "player", "sync", "transcode", "report"]
+        .filter((id) => tabVisible(id as Tab))
+        .map((id) => `view.tab.${id}`),
       "-",
       "view.mode",
       "view.explorer",

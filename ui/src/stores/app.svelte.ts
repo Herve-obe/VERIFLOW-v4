@@ -1,4 +1,5 @@
 // État global de l'interface : mode VIDEO/AUDIO, onglet actif, projet courant.
+import { tabVisible } from "./level.svelte";
 export type Mode = "video" | "audio";
 export const TABS = [
   "offload",
@@ -39,7 +40,7 @@ export function sendToTranscode(paths: string[]) {
 
 /** Envoie des médias vers l'onglet REPORT (rapport image en VIDEO, son en AUDIO). */
 export function addToReport(paths: string[]) {
-  if (paths.length === 0) return;
+  if (paths.length === 0 || !tabVisible("report")) return;
   app.reportMedia = paths;
   app.tab = "report";
 }
