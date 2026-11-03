@@ -6,6 +6,8 @@ pub mod hash;
 mod io;
 pub mod job;
 pub mod mhl;
+pub mod mhl_read;
+pub mod mhl_verify;
 pub mod report;
 pub mod scan;
 pub mod schedule;

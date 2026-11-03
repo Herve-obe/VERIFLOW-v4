@@ -7,12 +7,12 @@
 //! chaîné par empreintes C4). Les empreintes de dossiers (contenu et structure)
 //! suivent l'algorithme de référence.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::engine::{DestStatus, OffloadSummary};
+use super::engine::{DestStatus, Hashes, OffloadSummary};
 use super::hash::{digest_bytes, hash_data, hash_of_hash_list, HashAlgo};
 use super::scan::{SourceInventory, IGNORED};
 use crate::{Result, VERSION};
@@ -104,6 +104,37 @@ fn mtime_rfc3339(path: &Path) -> Option<String> {
     )
 }
 
+/// Action d'une empreinte dans une génération (vocabulaire ASC MHL).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Fichier présenté pour la première fois (copie, ou nouveau fichier à la vérification).
+    Original,
+    /// Empreinte relue et conforme à l'historique.
+    Verified,
+    /// Empreinte relue et différente de l'historique.
+    Failed,
+}
+
+impl Action {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Action::Original => "original",
+            Action::Verified => "verified",
+            Action::Failed => "failed",
+        }
+    }
+}
+
+/// Un fichier à inscrire dans une génération.
+#[derive(Debug, Clone)]
+pub struct GenEntry {
+    /// Chemin relatif, séparateur « / ».
+    pub rel: String,
+    pub size: u64,
+    pub hashes: Hashes,
+    pub action: Action,
+}
+
 /// Écrit une nouvelle génération MHL dans la destination `index` et met à jour
 /// la chaîne. Renvoie le chemin du fichier .mhl créé.
 pub fn write_generation(
@@ -120,42 +151,91 @@ pub fn write_generation(
         a.dedup();
         a
     };
+    // Fichiers présents et vérifiés (ou en échec d'empreinte) dans cette destination.
+    let entries: Vec<GenEntry> = summary
+        .files
+        .iter()
+        .filter_map(|f| {
+            let action = match &f.destinations[dest_index] {
+                DestStatus::Verified | DestStatus::ResumedVerified => Action::Original,
+                DestStatus::Failed(m) if m.starts_with("empreinte") => Action::Failed,
+                _ => return None,
+            };
+            Some(GenEntry {
+                rel: f.rel.clone(),
+                size: f.size,
+                hashes: f.hashes.clone(),
+                action,
+            })
+        })
+        .collect();
+    let dirs: Vec<&str> = inv.dirs.iter().map(|d| d.rel.as_str()).collect();
+    let comment = author.comment.clone().unwrap_or_else(|| {
+        format!(
+            "Copie de « {} » ({}) vérifiée par VERIFLOW",
+            inv.name,
+            inv.root.display()
+        )
+    });
+    write_core(
+        dest_root, &entries, &dirs, &algos, "transfer", &comment, author,
+    )
+}
+
+/// Écrit une génération à partir d'entrées quelconques (vérification en place
+/// d'un disque, par exemple). Les formats écrits sont ceux des entrées ; les
+/// empreintes de dossiers ne comptent que les fichiers non `failed`.
+pub fn write_entries(
+    root: &Path,
+    entries: &[GenEntry],
+    dirs: &[&str],
+    process: &str,
+    comment: &str,
+    author: &MhlAuthor,
+) -> Result<PathBuf> {
+    let mut algos: Vec<HashAlgo> = entries
+        .iter()
+        .flat_map(|e| e.hashes.iter().map(|(a, _)| *a))
+        .filter(|a| a.in_mhl())
+        .collect();
+    algos.sort_by_key(|a| a.mhl_order());
+    algos.dedup();
+    write_core(root, entries, dirs, &algos, process, comment, author)
+}
+
+fn write_core(
+    dest_root: &Path,
+    entries: &[GenEntry],
+    dirs: &[&str],
+    algos: &[HashAlgo],
+    process: &str,
+    comment: &str,
+    author: &MhlAuthor,
+) -> Result<PathBuf> {
     let now = chrono::Utc::now();
     let date = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
     let hashdate = esc(&date);
 
-    // Fichiers présents et vérifiés (ou en échec d'empreinte) dans cette destination.
-    let entries: Vec<(&super::engine::FileResult, &'static str)> = summary
-        .files
-        .iter()
-        .filter_map(|f| match &f.destinations[dest_index] {
-            DestStatus::Verified | DestStatus::ResumedVerified => Some((f, "original")),
-            DestStatus::Failed(m) if m.starts_with("empreinte") => Some((f, "failed")),
-            _ => None,
-        })
-        .collect();
-    let dirs: Vec<&str> = inv.dirs.iter().map(|d| d.rel.as_str()).collect();
-
-    // Empreintes de dossiers pour chaque format (seulement à partir des fichiers vérifiés).
+    // Empreintes de dossiers pour chaque format (seulement à partir des fichiers non en échec).
     let mut dir_hashes: BTreeMap<HashAlgo, BTreeMap<String, (String, String)>> = BTreeMap::new();
-    for &algo in &algos {
+    for &algo in algos {
         let files: Vec<(&str, &str)> = entries
             .iter()
-            .filter(|(_, action)| *action == "original")
-            .filter_map(|(f, _)| {
-                f.hashes
+            .filter(|e| e.action != Action::Failed)
+            .filter_map(|e| {
+                e.hashes
                     .iter()
                     .find(|(a, _)| *a == algo)
-                    .map(|(_, h)| (f.rel.as_str(), h.as_str()))
+                    .map(|(_, h)| (e.rel.as_str(), h.as_str()))
             })
             .collect();
-        dir_hashes.insert(algo, directory_hashes(algo, &files, &dirs));
+        dir_hashes.insert(algo, directory_hashes(algo, &files, dirs));
     }
     let dir_block = |key: &str, indent: &str| -> String {
         let mut s = String::new();
         for tag in ["content", "structure"] {
             s += &format!("{indent}<{tag}>\n");
-            for &algo in &algos {
+            for &algo in algos {
                 let (c, st) = &dir_hashes[&algo][key];
                 let v = if tag == "content" { c } else { st };
                 s += &format!(
@@ -189,15 +269,11 @@ pub fn write_generation(
     if let Some(l) = author.location.as_deref().filter(|l| !l.trim().is_empty()) {
         xml += &format!("    <location>{}</location>\n", esc(l));
     }
-    let comment = author.comment.clone().unwrap_or_else(|| {
-        format!(
-            "Copie de « {} » ({}) vérifiée par VERIFLOW",
-            inv.name,
-            inv.root.display()
-        )
-    });
-    xml += &format!("    <comment>{}</comment>\n", esc(&comment));
-    xml += "  </creatorinfo>\n  <processinfo>\n    <process>transfer</process>\n    <roothash>\n";
+    xml += &format!("    <comment>{}</comment>\n", esc(comment));
+    xml += &format!(
+        "  </creatorinfo>\n  <processinfo>\n    <process>{}</process>\n    <roothash>\n",
+        esc(process)
+    );
     xml += &dir_block("", "      ");
     xml += "    </roothash>\n    <ignore>\n";
     for p in IGNORED.iter().chain(std::iter::once(&REPORTS_DIR)) {
@@ -206,10 +282,8 @@ pub fn write_generation(
     xml += "      <pattern>ascmhl/</pattern>\n    </ignore>\n  </processinfo>\n  <hashes>\n";
 
     // Fichiers, puis chaque dossier après son contenu (ordre de l'outil de référence).
-    let mut items: Vec<(String, bool)> = entries
-        .iter()
-        .map(|(f, _)| (f.rel.clone(), false))
-        .collect();
+    let by_rel: HashMap<&str, &GenEntry> = entries.iter().map(|e| (e.rel.as_str(), e)).collect();
+    let mut items: Vec<(String, bool)> = entries.iter().map(|e| (e.rel.clone(), false)).collect();
     items.extend(dirs.iter().map(|d| (d.to_string(), true)));
     items.sort_by(|a, b| {
         let ka = if a.1 {
@@ -236,20 +310,18 @@ pub fn write_generation(
             xml += &dir_block(&rel, "      ");
             xml += "    </directoryhash>\n";
         } else {
-            let (f, action) = entries
-                .iter()
-                .find(|(f, _)| f.rel == rel)
-                .expect("entrée connue");
+            let e = by_rel.get(rel.as_str()).expect("entrée connue");
+            let action = e.action.as_str();
             let date_attr = mtime_rfc3339(&dest_root.join(&rel))
                 .map(|d| format!(" lastmodificationdate=\"{}\"", esc(&d)))
                 .unwrap_or_default();
             xml += &format!(
                 "    <hash>\n      <path size=\"{}\"{date_attr}>{}</path>\n",
-                f.size,
+                e.size,
                 esc(&rel)
             );
             let mut hs: Vec<&(HashAlgo, String)> =
-                f.hashes.iter().filter(|(a, _)| a.in_mhl()).collect();
+                e.hashes.iter().filter(|(a, _)| a.in_mhl()).collect();
             hs.sort_by_key(|(a, _)| a.mhl_order());
             for (algo, value) in hs {
                 xml += &format!(
