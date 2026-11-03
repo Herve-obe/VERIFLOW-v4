@@ -33,6 +33,10 @@ Objectif (charte §7.3) : finaliser le lecteur posé en phase 0 bis. Cette phase
 - **FCPXML** : ce format n'a pas de couleur de marqueur ; la couleur est écrite dans la note du marqueur.
 - **TC de sortie** : il est exclusif (image qui suit la dernière image de la plage), comme dans toutes les EDL et ALE.
 
+## Mode Débutant (ajout du 03/11/2026)
+
+En niveau DÉBUTANT, la lecture se fait sans marqueurs : les commandes d'entrée, de sortie, de marqueur et d'ajout au rapport sont désactivées (touches et menu Lecture), et le panneau des marqueurs ne s'affiche pas. La lecture et le saut d'image restent disponibles. Détail dans la charte, §3.2.
+
 ## Vérifications réalisées
 
 ### Tests automatiques (cœur)

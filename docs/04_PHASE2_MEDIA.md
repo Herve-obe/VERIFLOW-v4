@@ -51,6 +51,10 @@ Essai réel (Linux) : arbre des volumes, dossier créé pendant que l'applicatio
 | Timecode | User bits | |
 | Notes | Commentaire, note, mots-clés, étiquette de couleur | ALE Comments/Keywords, iXML NOTE, XMP |
 
+## Mode Débutant (ajout du 03/11/2026)
+
+En niveau DÉBUTANT, les métadonnées sont en lecture seule : champs désactivés, pas de bouton Enregistrer. Les exports CSV, ALE, XMP, la copie de travail et « Ajouter au rapport » sont masqués. « Ouvrir dans le PLAYER » et « Envoyer vers TRANSCODE » restent disponibles. Détail dans la charte, §3.2.
+
 ## Essais
 - Tests automatiques : catalogue et lecture iXML, champs, édition par lot dans le projet, forme d'onde WAV et FFmpeg (avec découpage de lecture), vignettes et bande d'images, CSV/ALE/XMP, copie de travail WAV (audio identique octet pour octet, original intact, aucun écrasement), copie de travail vidéo (timecode conservé).
 - Essai réel dans l'application (Linux) : 3 clips ProRes avec TC et 2 WAV 8 pistes avec iXML.

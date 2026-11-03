@@ -59,6 +59,10 @@ Objectif (charte §7.6, décision du 09/10/2026) : reprendre les capacités de c
   - **Réglé le 11/10/2026** : le FFmpeg Linux de martin-riedl.de était compilé avec `--enable-nonfree` (DeckLink), donc non redistribuable ; remplacé par le build GPL de BtbN (voir `docs/FFMPEG.md`).
 - Hors périmètre (charte) : outils IA, gravure DVD/Blu-ray, téléchargement web, FTP, e-mail. Dolby Digital Plus et TrueHD : licences Dolby à vérifier avant d'être proposés.
 
+## Mode Débutant (ajout du 03/11/2026)
+
+En niveau DÉBUTANT, TRANSCODE ne propose que les presets de conversion (catégorie analyse et presets de fusion masqués), avec leur destination. Les réglages du preset ne sont pas modifiés. Les options EXPERT (incrustation, LUT, loudness, découpe, nommage) sont masquées et ne partent pas dans la requête : une conversion lancée en DÉBUTANT n'applique aucun réglage EXPERT. Le renommage des fichiers existants est imposé, rien n'est écrasé. Détail dans la charte, §3.2.
+
 ## Vérifications réalisées
 
 ### Tests automatiques (cœur)

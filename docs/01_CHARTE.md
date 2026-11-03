@@ -69,6 +69,21 @@ VERIFLOW possède **deux modes d'affichage** : **VIDEO** et **AUDIO**. Chacun co
 | TRANSCODE | Presets vidéo | Presets audio (conversion, rééchantillonnage, normalisation) |
 | REPORT | Rapport image + EDL | Rapport son |
 
+### 3.2 Niveaux Débutant / Expert (ajout du 03/11/2026)
+
+Un **interrupteur DÉBUTANT / EXPERT** se trouve en haut à gauche de l'en-tête, à côté des onglets. Il est indépendant du mode VIDEO / AUDIO. Le niveau **EXPERT** est celui par défaut (interface complète). Le choix est mémorisé sur le poste et retrouvé au lancement suivant. Passer en DÉBUTANT ne modifie aucun réglage EXPERT : ceux-ci sont masqués ou remplacés au moment de l'action, et reviennent intacts au retour en EXPERT.
+
+| Onglet | Niveau DÉBUTANT |
+|---|---|
+| OFFLOAD | Réglages automatiques : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport. Pas d'éjection automatique. Source, destinations et contrôles restent visibles. Une reprise d'une copie lancée en EXPERT garde ses réglages d'origine |
+| MEDIA | Métadonnées en lecture seule. Pas d'exports (CSV, ALE, XMP, copie de travail) ni d'ajout au rapport. « Ouvrir dans le PLAYER » et « Envoyer vers TRANSCODE » restent disponibles |
+| PLAYER | Lecture sans marqueurs (entrée, sortie, marqueur, ajout au rapport) |
+| SYNC | Caché |
+| TRANSCODE | Presets de conversion (hors analyse et fusion) et destination. Les réglages du preset ne sont pas modifiés. Les options EXPERT (incrustation, LUT, loudness, découpe, nommage) ne sont ni affichées ni appliquées. Rien n'est écrasé |
+| REPORT | Caché |
+
+Les raccourcis (Alt+4 pour SYNC, Alt+6 pour REPORT) et les entrées de menu des onglets cachés sont désactivés. Passer en DÉBUTANT depuis SYNC ou REPORT ramène à OFFLOAD.
+
 ---
 
 ## 4. Charte graphique (VALIDÉ, amendable)

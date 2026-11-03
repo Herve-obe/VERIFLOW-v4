@@ -34,6 +34,10 @@ Demande d'Hervé du 19/10/2026 : une barre de menus classique pour ranger les pr
 - Cœur : `Project::save` et `Project::save_as` (`core/src/project.rs`), test `save_as_copies_everything_and_switches_to_the_copy`.
 - Nouvelle dépendance : `tauri-plugin-clipboard-manager` 2 (MIT ou Apache 2.0, compatible GPLv3).
 
+## Mode Débutant (ajout du 03/11/2026)
+
+En niveau DÉBUTANT, le menu Affichage ne liste que les onglets visibles (SYNC et REPORT retirés). Dans le menu Lecture, les entrées de marqueurs et d'ajout au rapport sont désactivées. Les raccourcis des onglets cachés (Alt+4, Alt+6) n'ont pas d'effet. Détail dans la charte, §3.2.
+
 ## Vérifications réalisées (Linux, Xvfb)
 
 - Barre et menus déroulants affichés à 1280 et 1024 px de large, sans débordement.

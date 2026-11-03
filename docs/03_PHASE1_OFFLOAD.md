@@ -39,6 +39,10 @@ Objectif (charte §7.1) : copier une source vers une ou plusieurs destinations a
 - Contenu : verdict (CONFORME / ÉCHEC / INTERROMPU), projet, opérateur, poste, logiciel, début, fin, durée, débit, source et empreinte d'inventaire, volume, empreintes utilisées, méthode de vérification, chaque destination et son MHL, liste des fichiers avec empreinte et statut par destination.
 - Preuve de non-modification : le PDF et le HTML impriment l'empreinte SHA-256 du CSV de données et des MHL ; l'empreinte du PDF est dans `<rapport>.pdf.sha256`.
 
+## Mode Débutant (ajout du 03/11/2026)
+
+En niveau DÉBUTANT, l'onglet masque le modèle de dossier, le jour, la caméra, l'opérateur, les notes, les algorithmes et l'éjection. Il applique seul : arborescence `{date}/{carte}`, empreinte XXH128, vérification complète, ASC MHL et rapport, sans éjection automatique. Les réglages EXPERT enregistrés ne sont pas modifiés. Une reprise depuis la file garde les réglages de son lancement d'origine. Détail dans la charte, §3.2.
+
 ## Essais
 - 50 tests automatiques du cœur passent (49 unitaires, 1 d'intégration vidéo), dont :
   - empreintes identiques aux vecteurs de l'outil de référence ASC ;
