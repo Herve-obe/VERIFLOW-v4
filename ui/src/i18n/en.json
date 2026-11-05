@@ -884,5 +884,6 @@
   "player.playlist.clear": "Clear",
   "player.playlist.up": "Move up",
   "player.playlist.down": "Move down",
-  "player.playlist.missing": "File not found"
+  "player.playlist.missing": "File not found",
+  "player.playlist.unreadable": "File present but unreadable"
 }

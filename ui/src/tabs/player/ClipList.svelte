@@ -17,6 +17,7 @@
     select,
     loadFolder,
     checkPlaylist,
+    describeNow,
     addToPlaylist,
     removeFromPlaylist,
     moveInPlaylist,
@@ -89,17 +90,27 @@
   });
 
   // Ouvert depuis MEDIA (ou ailleurs) : charge le dossier parent du clip et le surligne.
-  let autoTried = "";
+  // Seulement quand le chemin chargé du mode change, jamais sur une simple bascule de mode.
+  const lastSeen: Record<Mode, string | undefined> = { video: undefined, audio: undefined };
+  const parentOf = (p: string) => {
+    const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    if (i < 0) return "";
+    const head = p.slice(0, i);
+    if (head === "") return p.slice(0, 1); // « /clip.mov » : la racine
+    return /^[A-Za-z]:$/.test(head) ? `${head}\\` : head; // « C:\clip.mov » : C:\
+  };
   $effect(() => {
     const p = loadedPaths[0];
     const m = mode;
     untrack(() => {
-      if (!p || p === autoTried) return;
+      if (p === lastSeen[m]) return;
+      lastSeen[m] = p;
+      if (!p) return;
       const s = playerSources[m];
       if (s.entries.some((e) => e.path === p)) return;
       if (s.source === "playlist" && s.playlist.some((e) => e.path === p)) return;
-      autoTried = p;
-      void loadFolder(m, p.replace(/[\\/][^\\/]*$/, ""));
+      const dir = parentOf(p);
+      if (dir) void loadFolder(m, dir);
     });
   });
 
@@ -110,6 +121,7 @@
   });
 
   const missing = $derived(new Set(src.missing));
+  const unreadable = $derived(new Set(src.unreadable));
   const loadedSet = $derived(new Set(loadedPaths));
 
   // --- Virtualisation --------------------------------------------------------
@@ -121,6 +133,12 @@
   const first = $derived(Math.max(0, Math.floor(top / rowH) - OVER));
   const last = $derived(Math.min(shown.length, Math.ceil((top + viewH) / rowH) + OVER));
   const visibleRows = $derived(shown.slice(first, last));
+
+  // Les lignes visibles sans détails sont analysées tout de suite, sans attendre les lots.
+  $effect(() => {
+    const paths = visibleRows.map((e) => e.path);
+    untrack(() => void describeNow(paths));
+  });
 
   onMount(() => {
     if (!scroller) return;
@@ -151,7 +169,7 @@
   // --- Actions ---------------------------------------------------------------
   function click(e: MouseEvent, index: number) {
     const clip = shown[index];
-    if (!clip || missing.has(clip.path)) return;
+    if (!clip || missing.has(clip.path) || unreadable.has(clip.path)) return;
     if (e.ctrlKey || e.metaKey) {
       picked = picked.includes(clip.path) ? picked.filter((p) => p !== clip.path) : [...picked, clip.path];
       return;
@@ -242,10 +260,14 @@
           class="row"
           class:cur={loadedSet.has(e.path)}
           class:pick={picked.includes(e.path)}
-          class:gone={missing.has(e.path)}
+          class:gone={missing.has(e.path) || unreadable.has(e.path)}
           style:top="{i * rowH}px"
           style:height="{rowH}px"
-          title={missing.has(e.path) ? `${t("player.playlist.missing")} : ${e.path}` : e.rel || e.name}
+          title={missing.has(e.path)
+            ? `${t("player.playlist.missing")} : ${e.path}`
+            : unreadable.has(e.path)
+              ? `${t("player.playlist.unreadable")} : ${e.path}`
+              : e.rel || e.name}
           onclick={(ev) => click(ev, i)}
           onkeydown={key}
         >

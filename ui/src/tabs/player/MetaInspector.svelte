@@ -133,7 +133,10 @@
     });
     if (!isBeginner()) {
       const tags = Object.entries(probe?.tags ?? {}).map(([k, v]) => ({ label: k, value: v }));
-      const cam = Object.entries(det?.camera ?? {}).map(([k, v]) => ({ label: k, value: v }));
+      const known = new Set(Object.keys(probe?.tags ?? {}));
+      const cam = Object.entries(det?.camera ?? {})
+        .filter(([k]) => !known.has(k))
+        .map(([k, v]) => ({ label: k, value: v }));
       out.push({
         id: "tags",
         title: t("player.inspector.section.tags"),
@@ -175,7 +178,7 @@
           </button>
           {#if open}
             <dl>
-              {#each s.rows as r (r.label)}
+              {#each s.rows as r, i (`${s.id}:${i}`)}
                 <dt title={r.label}>{r.label}</dt>
                 <dd title={r.value}>{r.value}</dd>
               {/each}

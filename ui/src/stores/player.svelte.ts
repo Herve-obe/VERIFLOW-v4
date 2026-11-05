@@ -58,10 +58,27 @@ export function cacheDetails(list: Described[]) {
   }
 }
 
+const inflight = new Set<string>();
+
+/** Décrit tout de suite (hors lots) les chemins absents du cache. */
+export async function describeNow(paths: string[]) {
+  const todo = paths.filter((p) => !player.details.has(p) && !inflight.has(p));
+  if (todo.length === 0) return;
+  for (const p of todo) inflight.add(p);
+  try {
+    cacheDetails(await describe(todo));
+  } catch {
+    /* le cœur ne répond pas : la ligne reste sans détails */
+  } finally {
+    for (const p of todo) inflight.delete(p);
+  }
+}
+
 export function select(i: number) {
   const c = player.clips[i];
   if (!c) return;
   player.current = i;
+  void describeNow([c.path]);
   if (c.kind === "audio") app.playerAudio = [c.path];
   else app.playerVideo = c.path;
 }
@@ -81,6 +98,8 @@ export interface ModeSource {
   playlist: MediaEntry[];
   /** Chemins de la playlist introuvables (grisés, jamais retirés en silence). */
   missing: string[];
+  /** Chemins présents mais illisibles. */
+  unreadable: string[];
   /** Dernier message d'erreur de chargement, vide sinon. */
   error: string;
 }
@@ -104,6 +123,7 @@ const blank = (mode: Mode): ModeSource => ({
   source: "folder",
   playlist: loadPlaylist(mode),
   missing: [],
+  unreadable: [],
   error: "",
 });
 
@@ -125,8 +145,12 @@ export async function loadFolder(mode: Mode, dir: string) {
     if (gen !== generation[mode]) return;
     const entries = all.filter((e) => e.kind === mode);
     m.entries = entries;
-    for (let i = 0; i < entries.length; i += BATCH) {
-      const batch = await describe(entries.slice(i, i + BATCH).map((e) => e.path));
+    // Le clip chargé passe en premier, puis le reste par lots.
+    const loaded = mode === "video" ? app.playerVideo : (app.playerAudio?.[0] ?? null);
+    const paths = entries.map((e) => e.path);
+    if (loaded) paths.sort((a, b) => Number(b === loaded) - Number(a === loaded));
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const batch = await describe(paths.slice(i, i + BATCH).filter((p) => !player.details.has(p) || p === loaded));
       if (gen !== generation[mode]) return;
       cacheDetails(batch);
     }
@@ -159,6 +183,7 @@ export function removeFromPlaylist(mode: Mode, paths: string[]) {
   const gone = new Set(paths);
   m.playlist = m.playlist.filter((e) => !gone.has(e.path));
   m.missing = m.missing.filter((p) => !gone.has(p));
+  m.unreadable = m.unreadable.filter((p) => !gone.has(p));
   savePlaylist(mode);
 }
 
@@ -177,23 +202,34 @@ export function clearPlaylist(mode: Mode) {
   const m = playerSources[mode];
   m.playlist = [];
   m.missing = [];
+  m.unreadable = [];
   savePlaylist(mode);
 }
 
-/** Décrit la playlist (par lots) : range les détails et repère les fichiers introuvables. */
+const checkGen: Record<Mode, number> = { video: 0, audio: 0 };
+const checked: Record<Mode, Set<string>> = { video: new Set(), audio: new Set() };
+const GONE = /no such file|not found|introuvable|os error (2|3)\b|cannot find|n'existe pas|does not exist/i;
+
+/** Décrit les entrées nouvelles de la playlist (par lots) et repère les fichiers introuvables ou illisibles. */
 export async function checkPlaylist(mode: Mode) {
   const m = playerSources[mode];
-  const paths = m.playlist.map((e) => e.path);
-  const missing: string[] = [];
+  const gen = ++checkGen[mode];
+  const inList = new Set(m.playlist.map((e) => e.path));
+  for (const p of [...checked[mode]]) if (!inList.has(p)) checked[mode].delete(p);
+  const paths = [...inList].filter((p) => !checked[mode].has(p));
   try {
     for (let i = 0; i < paths.length; i += BATCH) {
       const batch = await describe(paths.slice(i, i + BATCH));
+      if (gen !== checkGen[mode]) return;
       cacheDetails(batch.filter((d) => !d.details.error));
       for (const d of batch) {
-        if (d.details.error && !d.details.probe && !d.details.wav) missing.push(d.path);
+        checked[mode].add(d.path);
+        const bad = !!d.details.error && !d.details.probe && !d.details.wav;
+        const gone = bad && GONE.test(d.details.error ?? "");
+        m.missing = [...m.missing.filter((p) => p !== d.path), ...(gone ? [d.path] : [])];
+        m.unreadable = [...m.unreadable.filter((p) => p !== d.path), ...(bad && !gone ? [d.path] : [])];
       }
     }
-    m.missing = missing;
   } catch {
     /* cœur indisponible : l'état précédent est conservé */
   }

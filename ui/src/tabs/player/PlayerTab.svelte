@@ -3,7 +3,7 @@
      lecteur, bande de clips. Droite : inspecteur. Les deux vues restent montées pour conserver
      leur état lors des bascules ; la disposition est mémorisée par mode (stores/playerLayout). -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { app } from "../../stores/app.svelte";
   import { isBeginner } from "../../stores/level.svelte";
   import {
@@ -45,11 +45,17 @@
     return () => ro.disconnect();
   });
 
-  // Mémorise les deux dispositions à chaque changement.
-  $effect(() => {
+  // Mémorise les deux dispositions, avec un délai : pas d'écriture à chaque mouvement de poignée.
+  const saveBoth = () => {
     saveLayout("video");
     saveLayout("audio");
+  };
+  $effect(() => {
+    void JSON.stringify($state.snapshot(playerLayout));
+    const id = window.setTimeout(saveBoth, 300);
+    return () => window.clearTimeout(id);
   });
+  onDestroy(saveBoth);
 
   // Le bandeau ou l'inspecteur affichent déjà codec, cadence, TC et iXML : les vues les masquent alors.
   const infoPanels = $derived(vis.banner || vis.inspector);
@@ -60,29 +66,32 @@
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     const el = e.target instanceof HTMLElement ? e.target : null;
-    if (el?.closest('input, textarea, select, [contenteditable="true"], [role="slider"], [role="separator"], [role="tree"], [role="menu"]')) return;
+    if (el?.closest('input, textarea, select, [contenteditable="true"], [role="slider"], [role="separator"], [role="tree"], [role="menu"], [role="dialog"], [aria-modal="true"]')) return;
     e.preventDefault();
     if (e.key === "ArrowUp") prev();
     else next();
   }
 
+  // Colonne des marqueurs (300 px) en Expert : elle est dans la zone centrale.
+  const centerMin = $derived(CENTER_MIN + (isBeginner() ? 0 : 300));
+
   const showLeft = $derived(vis.explorer || vis.clips);
   const HANDLE = 5;
   const leftFloor = L.left.min;
   const rightFloor = 120;
-  // Le centre garde au moins CENTER_MIN : l'inspecteur se réduit d'abord, puis la colonne de gauche.
+  // Le centre garde au moins centerMin : l'inspecteur se réduit d'abord, puis la colonne de gauche.
   const rightW = $derived(
     vis.inspector
-      ? Math.max(rightFloor, Math.min(lay.sizes.right, width - (showLeft ? lay.sizes.left + HANDLE : 0) - CENTER_MIN - HANDLE))
+      ? Math.max(rightFloor, Math.min(lay.sizes.right, width - (showLeft ? lay.sizes.left + HANDLE : 0) - centerMin - HANDLE))
       : 0,
   );
   const leftW = $derived(
     showLeft
-      ? Math.max(leftFloor, Math.min(lay.sizes.left, width - (vis.inspector ? rightW + HANDLE : 0) - CENTER_MIN - HANDLE))
+      ? Math.max(leftFloor, Math.min(lay.sizes.left, width - (vis.inspector ? rightW + HANDLE : 0) - centerMin - HANDLE))
       : 0,
   );
-  const leftMax = $derived(Math.min(L.left.max, Math.max(leftFloor, width - (vis.inspector ? rightW + HANDLE : 0) - CENTER_MIN - HANDLE)));
-  const rightMax = $derived(Math.min(L.right.max, Math.max(rightFloor, width - (showLeft ? leftW + HANDLE : 0) - CENTER_MIN - HANDLE)));
+  const leftMax = $derived(Math.min(L.left.max, Math.max(leftFloor, width - (vis.inspector ? rightW + HANDLE : 0) - centerMin - HANDLE)));
+  const rightMax = $derived(Math.min(L.right.max, Math.max(rightFloor, width - (showLeft ? leftW + HANDLE : 0) - centerMin - HANDLE)));
 </script>
 
 <svelte:window onkeydown={onArrows} />

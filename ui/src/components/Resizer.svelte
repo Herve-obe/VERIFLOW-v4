@@ -27,6 +27,8 @@
 
   let drag: { start: number; size: number } | null = $state(null);
   const clamp = (v: number) => Math.round(Math.min(Math.max(v, min), Math.max(min, max)));
+  // Sans ResizeObserver, les panneaux se remesurent sur l'événement resize.
+  const remeasure = () => window.dispatchEvent(new Event("resize"));
   const vertical = $derived(orientation === "vertical");
 
   function down(e: PointerEvent) {
@@ -42,6 +44,7 @@
   function up(e: PointerEvent) {
     drag = null;
     (e.currentTarget as HTMLElement).blur();
+    remeasure();
   }
   function key(e: KeyboardEvent) {
     const back = vertical ? "ArrowLeft" : "ArrowUp";
@@ -50,25 +53,28 @@
     e.preventDefault();
     const sign = (e.key === fwd ? 1 : -1) * (grow === "after" ? 1 : -1);
     size = clamp(size + sign * 16);
+    remeasure();
   }
 </script>
 
+<!-- Séparateur focusable (WAI-ARIA) : il se manipule à la souris et au clavier. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="resizer {orientation}"
   class:drag={drag !== null}
-  role="slider"
+  role="separator"
   aria-orientation={vertical ? "vertical" : "horizontal"}
   aria-label={label || t("player.resize")}
   aria-valuenow={size}
   aria-valuemin={min}
-  aria-valuemax={max}
+  aria-valuemax={Math.max(min, max)}
   tabindex="0"
   onpointerdown={down}
   onpointermove={move}
   onpointerup={up}
   onpointercancel={up}
   onkeydown={key}
-  ondblclick={() => (size = clamp(def))}
+  ondblclick={() => ((size = clamp(def)), remeasure())}
 ></div>
 
 <style>

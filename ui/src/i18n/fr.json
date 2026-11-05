@@ -884,5 +884,6 @@
   "player.playlist.clear": "Vider",
   "player.playlist.up": "Monter",
   "player.playlist.down": "Descendre",
-  "player.playlist.missing": "Fichier introuvable"
+  "player.playlist.missing": "Fichier introuvable",
+  "player.playlist.unreadable": "Fichier présent mais illisible"
 }
