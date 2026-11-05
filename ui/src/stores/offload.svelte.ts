@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest, type PendingView, cascadePending } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
@@ -37,6 +37,14 @@ export interface Job {
   ejected: string | null;
   ejectCode: EjectCode | null;
   startedAt: number;
+  /** Étape de la copie : 1 (immédiate) ou 2 (en cascade). */
+  stage: 1 | 2;
+  /** Étape 2 : numéro de la copie d'étape 1 d'origine. */
+  cascadeOf: number | null;
+  /** Étape 1 : numéro de la copie d'étape 2 mise en file. */
+  cascadeJob: number | null;
+  /** Étape 1 : la carte peut être libérée (null tant que la copie n'est pas finie). */
+  cardFree: boolean | null;
 }
 
 /** Fenêtre de la moyenne glissante de la vitesse. */
@@ -51,7 +59,18 @@ export const offload = $state({
   resume: null as OffloadRequest | null,
   /** Alerte batterie pendant une copie (clé i18n et variables, traduites à l'affichage). */
   batteryAlert: null as { key: string; vars: Record<string, string> } | null,
+  /** Copies en cascade enregistrées dont l'étape 2 reste à faire. */
+  pending: [] as PendingView[],
 });
+
+/** Relit la liste des copies en cascade à reprendre. */
+export async function refreshPending() {
+  try {
+    offload.pending = await cascadePending();
+  } catch {
+    offload.pending = []; // hors de Tauri
+  }
+}
 
 export function dismissBatteryAlert() {
   offload.batteryAlert = null;
@@ -186,6 +205,10 @@ function applyNotice(n: Notice) {
       ejected: null,
       ejectCode: null,
       startedAt: 0,
+      stage: n.cascade_of != null ? 2 : 1,
+      cascadeOf: n.cascade_of ?? null,
+      cascadeJob: null,
+      cardFree: null,
     });
     return;
   }
@@ -235,11 +258,17 @@ function applyNotice(n: Notice) {
       if (n.ejected && "Ok" in n.ejected) j.ejected = "ok";
       else if (n.ejected && "Err" in n.ejected) j.ejected = n.ejected.Err;
       j.ejectCode = n.eject_code ?? null;
+      if (j.kind === "offload" && j.stage === 1) {
+        j.cardFree = n.card_free ?? false;
+        j.cascadeJob = n.cascade_job ?? null;
+      }
+      void refreshPending();
       break;
     case "failed":
       j.state = "failed";
       j.error = n.error;
       j.errorCode = n.error_code ?? null;
+      void refreshPending();
       break;
   }
 }
