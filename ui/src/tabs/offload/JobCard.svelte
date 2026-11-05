@@ -16,10 +16,16 @@
     reveal(path).catch((e) => (openError = String(e)));
   };
 
+  const isVerify = $derived(job.kind === "verify");
+  const vs = $derived(job.verify);
+  const vOk = $derived(!!vs && vs.conform && !vs.cancelled && !vs.empty_history);
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
   const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
-  const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
+  const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) || (isVerify && job.state === "done" && !vOk) ? "error" : job.state === "done" ? "ok" : "running");
+  const GAP_MAX = 200;
+  const gaps = $derived(vs ? vs.files.filter((f) => f.status.state === "different" || f.status.state === "missing" || f.status.state === "unreadable") : []);
+  const news = $derived(vs ? vs.files.filter((f) => f.status.state === "new") : []);
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
 
   // Reprise proposée tant que la carte n'a pas été recopiée avec succès depuis.
@@ -42,15 +48,26 @@
     removeJob(job.id);
   }
 
+  function errorText(): string {
+    const c = job.errorCode;
+    if (!c) return job.error ?? "";
+    if (job.kind === "verify") {
+      if (c === "no_history" || c === "mhl_v1" || c === "nested_history") return t(`offload.verify.${c}`);
+      if (c === "job_panic") return t("offload.verify.panic");
+      if (c === "job_spawn") return t("offload.verify.spawn");
+    }
+    return t(`offload.error.${c}`);
+  }
+
   const label = (d: DestStatus) =>
     d.state === "verified" ? t("offload.status.verified") : d.state === "resumed_verified" ? t("offload.status.resumed") : t("offload.status.failed");
 </script>
 
-<article class="job" class:ok={job.state === "done" && ok} class:ko={(job.state === "failed" && !job.dropped) || (job.state === "done" && !ok)}>
+<article class="job" class:ok={job.state === "done" && (isVerify ? vOk : ok)} class:ko={(job.state === "failed" && !job.dropped) || (job.state === "done" && !(isVerify ? vOk : ok))}>
   <header>
     <div>
-      <h3>{job.result?.source_name ?? job.source}</h3>
-      <span class="state">{t(job.dropped ? "offload.job.dropped" : `offload.job.${job.result?.summary.cancelled ? "cancelled" : job.state}`)}</span>
+      <h3>{isVerify ? (vs?.root ?? job.roots[0] ?? job.source) : (job.result?.source_name ?? job.source)}</h3>
+      <span class="state">{t(job.dropped ? "offload.job.dropped" : `offload.job.${job.result?.summary.cancelled || vs?.cancelled ? "cancelled" : job.state}`)}</span>
       {#if job.state === "waiting" && job.waitReason}
         <span class="wait">{t(`offload.wait.${job.waitReason}`).replace("{max}", String(MAX_PARALLEL_JOBS))}</span>
       {/if}
@@ -58,7 +75,7 @@
     <div class="tools">
       {#if job.state === "queued" || job.state === "waiting" || job.state === "starting" || job.state === "running"}
         <button class="ghost" onclick={() => cancel(job.id)}>{t("offload.cancel")}</button>
-      {:else if resumable}
+      {:else if resumable && !isVerify}
         <button onclick={() => (offload.resume = offload.requests[job.id])}>{t(job.dropped ? "offload.relaunch" : "offload.resume")}</button>
       {/if}
       <button class="close" onclick={remove} title={t("offload.remove.title")} aria-label={t("offload.remove.title")}>
@@ -72,9 +89,13 @@
   <div class="stats mono">
     {#if job.state === "running"}
       <span>{Math.round(progress * 100)} %</span>
-      <span>{job.verified} / {job.files} {t("offload.files")}</span>
+      {#if !isVerify}<span>{job.verified} / {job.files} {t("offload.files")}</span>{/if}
       <span>{rate(job.rate)}</span>
       <span>{t("offload.eta")} {duration(eta)}</span>
+    {:else if vs}
+      <span>{vs.files.length} {t("offload.files")}</span>
+      <span>{bytes(vs.total_bytes)} ({bytesBinary(vs.total_bytes)})</span>
+      <span>{duration(vs.duration_s)}</span>
     {:else if job.result}
       <span>{job.result.summary.files.length} {t("offload.files")}</span>
       <span>{bytes(job.result.summary.total_bytes)} ({bytesBinary(job.result.summary.total_bytes)})</span>
@@ -87,7 +108,60 @@
     <div class="current mono" title={job.current}>{job.current}</div>
   {/if}
 
-  {#if job.state === "done" && job.result}
+  {#if job.state === "done" && vs}
+    <div class="verdict" class:good={vOk}>
+      {vs.cancelled ? t("offload.verify.cancelled") : vOk ? t("offload.verify.verdict.ok") : t("offload.verify.verdict.gap")}
+    </div>
+    <div class="counts mono">
+      <span class="good-n">{t("offload.verify.ok")} : {vs.ok}</span>
+      <span class:bad-n={vs.different > 0}>{t("offload.verify.different")} : {vs.different}</span>
+      <span class:bad-n={vs.missing > 0}>{t("offload.verify.missing")} : {vs.missing}</span>
+      <span>{t("offload.verify.new")} : {vs.new}</span>
+      <span class:bad-n={vs.unreadable > 0}>{t("offload.verify.unreadable")} : {vs.unreadable}</span>
+    </div>
+    {#if vs.empty_history}<div class="small err">{t("offload.verify.empty_history")}</div>{/if}
+    {#each vs.chain.issues as c (c.kind + c.name)}
+      <div class="small err">{t(`offload.verify.mhl_${c.kind}`)} : <span class="mono">{c.name}</span></div>
+    {/each}
+    {#if vs.write_error}
+      <div class="small err">{t("offload.verify.write_error")} : {vs.write_error}</div>
+    {/if}
+    {#if job.reportError || (!job.verifyReports && !vs.cancelled)}
+      <div class="small err">{t("offload.verify.readonly")}{job.reportError ? ` : ${job.reportError}` : ""}</div>
+    {/if}
+    {#if vs.omitted > 0}
+      <div class="small">{t("offload.verify.omitted").replace("{n}", String(vs.omitted))}</div>
+    {/if}
+    <div class="actions">
+      {#if job.verifyReports}
+        <button onclick={() => open(job.verifyReports!.pdf)}>{t("offload.report.pdf")}</button>
+        <button class="ghost" onclick={() => open(job.verifyReports!.html)}>{t("offload.verify.report.html")}</button>
+        <button class="ghost" onclick={() => open(job.verifyReports!.csv)}>{t("offload.verify.report.csv")}</button>
+      {/if}
+      <button class="ghost" onclick={() => open(vs.root)}>{t("offload.open.folder")}</button>
+    </div>
+    {#if openError}<div class="small err">{openError}</div>{/if}
+    {#if gaps.length > 0}
+      <details>
+        <summary class="small err">{t("offload.verify.gaps")} ({gaps.length})</summary>
+        <ul class="failures mono">
+          {#each gaps.slice(0, GAP_MAX) as f, i (i)}
+            <li>{f.rel} : {t(`offload.verify.${f.status.state === "unreadable" ? "unreadable" : f.status.state}`)}{f.status.state === "unreadable" ? ` (${f.status.detail})` : ""}</li>
+          {/each}
+        </ul>
+        {#if gaps.length > GAP_MAX}<div class="small">{t("offload.verify.more").replace("{n}", String(gaps.length - GAP_MAX))}</div>{/if}
+      </details>
+    {/if}
+    {#if news.length > 0}
+      <details>
+        <summary class="small">{t("offload.verify.new")} ({news.length})</summary>
+        <ul class="newfiles mono">
+          {#each news.slice(0, GAP_MAX) as f, i (i)}<li>{f.rel}</li>{/each}
+        </ul>
+        {#if news.length > GAP_MAX}<div class="small">{t("offload.verify.more").replace("{n}", String(news.length - GAP_MAX))}</div>{/if}
+      </details>
+    {/if}
+  {:else if job.state === "done" && job.result}
     <div class="verdict" class:good={ok}>
       {#if job.result.summary.cancelled}
         {t("offload.verdict.cancelled")}
@@ -112,7 +186,7 @@
   {/if}
 
   {#if job.error}
-    <div class="verdict">{job.errorCode ? t(`offload.error.${job.errorCode}`) : job.error}</div>
+    <div class="verdict">{errorText()}</div>
   {/if}
 
   {#if job.failed.length > 0}
@@ -261,6 +335,29 @@
     color: var(--vf-accent);
     padding: 0;
     align-self: flex-start;
+  }
+  .counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vf-space-4);
+    font-size: var(--vf-text-sm);
+  }
+  .counts .good-n {
+    color: var(--vf-success);
+  }
+  .counts .bad-n {
+    color: var(--vf-error);
+    font-weight: 700;
+  }
+  .newfiles {
+    margin: 0;
+    padding-left: var(--vf-space-4);
+    font-size: var(--vf-text-xs);
+    color: var(--vf-text-muted);
+  }
+  details {
+    max-height: 260px;
+    overflow-y: auto;
   }
   .err {
     margin: var(--vf-space-2) 0 0;

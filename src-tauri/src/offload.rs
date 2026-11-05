@@ -16,6 +16,9 @@ use veriflow_core::offload::job::{
     execute, local_date, planned_roots, preflight, render_template, JobResult, OffloadRequest,
     Preflight, TemplateVars,
 };
+use veriflow_core::offload::mhl_read::{self, MhlInfo};
+use veriflow_core::offload::mhl_verify::{verify_root, VerifySummary};
+use veriflow_core::offload::report::{write_verify_reports, ReportFiles, ReportInfo, VerifyData};
 use veriflow_core::offload::scan::scan;
 use veriflow_core::offload::schedule::{claim_uses_volume, overlaps, select, Claim, Wait};
 use veriflow_core::offload::storage::{self, Volume};
@@ -29,13 +32,25 @@ fn text<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// Genre de travail : copie, ou revérification d'un disque par son historique
+/// ASC MHL.
+enum JobKind {
+    Offload {
+        request: Box<OffloadRequest>,
+        eject: bool,
+        /// Empreintes établies par la vérification des rushes présents.
+        known: Option<Known>,
+    },
+    Verify {
+        root: PathBuf,
+        operator: Option<String>,
+    },
+}
+
 struct Job {
     id: u64,
-    request: OffloadRequest,
-    eject: bool,
+    kind: JobKind,
     cancel: Arc<AtomicBool>,
-    /// Empreintes établies par la vérification des rushes présents.
-    known: Option<Known>,
     /// Ressources occupées pendant la copie (voir `schedule`).
     claim: Claim,
     /// Dernière raison d'attente notifiée (une notification par changement).
@@ -101,6 +116,10 @@ enum Notice {
     },
     Running {
         job: u64,
+        /// `offload` ou `verify` (le champ `kind` est pris par l'étiquette de
+        /// l'événement).
+        job_kind: JobType,
+        /// Vérification : 0, le total réel arrive avec les événements Progress.
         files: usize,
         total_bytes: u64,
         roots: Vec<PathBuf>,
@@ -111,7 +130,19 @@ enum Notice {
     },
     Done {
         job: u64,
-        result: JobResult,
+        job_kind: JobType,
+        /// Absent pour une vérification.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result: Option<Box<JobResult>>,
+        /// Vérification : compteurs, chaîne et écarts (`VerifySummary::for_ui`,
+        /// sans les fichiers conformes) et fichiers de rapport (absents si annulée).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        verify: Option<Box<VerifySummary>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reports: Option<ReportFiles>,
+        /// Vérification : raison de l'échec d'écriture des rapports.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        report_error: Option<String>,
         ejected: Option<Result<(), String>>,
         /// Code stable de l'échec d'éjection (traduction côté interface) :
         /// `source_in_use_eject` ou `eject_not_removable`. Absent si l'échec
@@ -122,9 +153,17 @@ enum Notice {
         job: u64,
         error: String,
         /// Code stable pour la traduction : `no_space`, `job_panic`,
-        /// `job_spawn`. Absent : seul le texte `error` est affichable.
+        /// `job_spawn`, `no_history`, `mhl_v1`, `nested_history`. Absent : seul le texte `error` est affichable.
         error_code: Option<&'static str>,
     },
+}
+
+/// Genre d'un travail dans les notifications.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum JobType {
+    Offload,
+    Verify,
 }
 
 fn failed(job: u64, error: impl Into<String>, error_code: Option<&'static str>) -> Notice {
@@ -250,60 +289,144 @@ fn project_name(app: &AppHandle) -> Option<String> {
 }
 
 fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
+    let Job {
+        id,
+        kind,
+        cancel,
+        claim,
+        ..
+    } = job;
+    match kind {
+        JobKind::Offload {
+            request,
+            eject,
+            known,
+        } => run_offload(app, shared, id, *request, eject, known, &cancel, &claim),
+        JobKind::Verify { root, operator } => run_verify(app, id, &root, operator, &cancel),
+    }
+}
+
+/// Revérifie `root` d'après son historique ASC MHL, puis écrit les rapports
+/// (rien n'est écrit si la vérification est annulée).
+fn run_verify(
+    app: &AppHandle,
+    id: u64,
+    root: &Path,
+    operator: Option<String>,
+    cancel: &AtomicBool,
+) {
     let send = |n: Notice| {
         let _ = app.emit("offload", n);
     };
-    let pre = match preflight(&job.request) {
+    // Pas de mise en veille pendant la relecture.
+    let _awake = veriflow_core::power::keep_awake();
+    send(Notice::Running {
+        job: id,
+        job_kind: JobType::Verify,
+        files: 0,
+        total_bytes: 0,
+        roots: vec![root.to_path_buf()],
+    });
+    let summary = match verify_root(root, cancel, |event| {
+        send(Notice::Engine { job: id, event })
+    }) {
+        Ok(s) => s,
+        Err(e) => return send(failed(id, e.to_string(), mhl_read::error_code(&e))),
+    };
+    let (mut reports, mut report_error) = (None, None);
+    if !summary.cancelled {
+        let info = ReportInfo {
+            project: project_name(app),
+            operator,
+            notes: None,
+        };
+        match write_verify_reports(&VerifyData {
+            summary: &summary,
+            info: &info,
+        }) {
+            Ok(f) => reports = Some(f),
+            Err(e) => report_error = Some(e.to_string()),
+        }
+    }
+    send(Notice::Done {
+        job: id,
+        job_kind: JobType::Verify,
+        result: None,
+        // Compteurs, chaîne et écarts seulement : le détail est dans le CSV.
+        verify: Some(Box::new(summary.for_ui())),
+        reports,
+        report_error,
+        ejected: None,
+        eject_code: None,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_offload(
+    app: &AppHandle,
+    shared: &Shared,
+    id: u64,
+    request: OffloadRequest,
+    eject: bool,
+    known: Option<Known>,
+    cancel: &AtomicBool,
+    claim: &Claim,
+) {
+    let send = |n: Notice| {
+        let _ = app.emit("offload", n);
+    };
+    let pre = match preflight(&request) {
         Ok(p) => p,
         Err(e) => {
-            return send(failed(job.id, e.to_string(), None));
+            return send(failed(id, e.to_string(), None));
         }
     };
     // L'espace a pu manquer entre le préflight de l'interface et le lancement
     // (autre copie terminée entre-temps, après une attente).
     if pre.missing_space.iter().any(Option::is_some) {
         return send(failed(
-            job.id,
+            id,
             "espace insuffisant sur une destination",
             Some("no_space"),
         ));
     }
     send(Notice::Running {
-        job: job.id,
+        job: id,
+        job_kind: JobType::Offload,
         files: pre.files,
         total_bytes: pre.total_bytes,
         roots: pre.roots.clone(),
     });
     let project = project_name(app);
     let result = execute(
-        &job.request,
+        &request,
         pre,
-        &job.cancel,
-        |event| send(Notice::Engine { job: job.id, event }),
+        cancel,
+        |event| send(Notice::Engine { job: id, event }),
         project.as_deref(),
-        job.known,
+        known,
     );
     match result {
         Ok(result) => {
             // Historique dans le projet ouvert (détection des cartes déjà copiées).
             if let Ok(guard) = app.state::<AppState>().project.lock() {
                 if let Some(p) = guard.as_ref() {
-                    let _ = p.record_offload(&result, &job.request.source);
+                    let _ = p.record_offload(&result, &request.source);
                 }
             }
             let success = !result.summary.cancelled && result.summary.failed_files == 0;
             // Éjection seulement quand plus aucun autre travail (en cours ou en
             // attente) n'utilise ce volume (source, destination ou dossier final).
             let mut eject_code = None;
-            let ejected = (job.eject && success).then(|| {
-                let volume = job.claim.source_volume.clone();
+            let ejected = (eject && success).then(|| {
+                let volume = claim.source_volume.clone();
                 let in_use = {
                     let sched = lock(&shared.sched);
                     sched.preparing.values().any(|p| overlaps(p, &volume))
                         || sched
                             .running
                             .iter()
-                            .filter(|(id, _)| **id != job.id)
+                            .filter(|(other, _)| **other != id)
                             .map(|(_, c)| c)
                             .chain(sched.pending.iter().map(|j| &j.claim))
                             .any(|c| claim_uses_volume(c, &volume))
@@ -314,7 +437,7 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
                         "source encore utilisée par un autre travail : pas d'éjection".to_owned(),
                     );
                 }
-                storage::volume_of(&job.request.source)
+                storage::volume_of(&request.source)
                     .filter(|v| v.removable)
                     .ok_or_else(|| {
                         eject_code = Some("eject_not_removable");
@@ -323,13 +446,17 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
                     .and_then(|v| storage::eject(&v.mount_point).map_err(text))
             });
             send(Notice::Done {
-                job: job.id,
-                result,
+                job: id,
+                job_kind: JobType::Offload,
+                result: Some(Box::new(result)),
+                verify: None,
+                reports: None,
+                report_error: None,
                 ejected,
                 eject_code,
             });
         }
-        Err(e) => send(failed(job.id, e.to_string(), None)),
+        Err(e) => send(failed(id, e.to_string(), None)),
     }
 }
 
@@ -523,21 +650,44 @@ pub async fn offload_start(
         None => None,
     };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
-    let cancel = Arc::new(AtomicBool::new(false));
-    lock(&state.shared.cancels).insert(id, cancel.clone());
     // Date figée maintenant : minuit passé pendant l'attente ne change pas
     // le dossier final.
     request.date.get_or_insert_with(local_date);
     let source = request.source.display().to_string();
+    let abs_source = veriflow_core::absolute_path(&request.source);
+    enqueue(&app, &state.shared, id, source, abs_source, move || {
+        let claim = claim_for(&request, total_bytes);
+        let kind = JobKind::Offload {
+            request: Box::new(request),
+            eject,
+            known,
+        };
+        (kind, claim)
+    })
+    .await
+}
+
+/// Met un travail en file : le claim se calcule hors du fil de l'interface
+/// (lecture des volumes), puis l'ordonnanceur est relancé. `source` : texte de
+/// la notification Queued ; `busy` : dossier compté par le test d'éjection
+/// pendant le calcul.
+async fn enqueue(
+    app: &AppHandle,
+    shared: &Shared,
+    id: u64,
+    source: String,
+    busy: PathBuf,
+    build: impl FnOnce() -> (JobKind, Claim) + Send + 'static,
+) -> CmdResult<u64> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    lock(&shared.cancels).insert(id, cancel.clone());
     let _ = app.emit("offload", Notice::Queued { job: id, source });
-    let shared = state.shared.clone();
-    lock(&shared.sched)
-        .preparing
-        .insert(id, veriflow_core::absolute_path(&request.source));
+    let shared = shared.clone();
+    lock(&shared.sched).preparing.insert(id, busy);
     let (worker, worker_app) = (shared.clone(), app.clone());
     let prepared = tauri::async_runtime::spawn_blocking(move || {
         let (shared, app) = (worker, worker_app);
-        let claim = claim_for(&request, total_bytes);
+        let (kind, claim) = build();
         // Drapeau lu sous le verrou, comme `offload_cancel` : une annulation
         // ne peut pas passer entre la lecture et la mise en file.
         let mut sched = lock(&shared.sched);
@@ -550,10 +700,8 @@ pub async fn offload_start(
         }
         sched.pending.push_back(Job {
             id,
-            request,
-            eject,
+            kind,
             cancel,
-            known,
             claim,
             last_wait: None,
         });
@@ -569,6 +717,56 @@ pub async fn offload_start(
         return Err(text(e));
     }
     Ok(id)
+}
+
+/// Erreur de lecture d'un historique : `code` stable pour la traduction
+/// (`no_history`, `mhl_v1`, `nested_history`), absent si seul le texte compte.
+#[derive(Serialize)]
+pub struct MhlError {
+    code: Option<&'static str>,
+    message: String,
+}
+
+/// Résumé de l'historique ASC MHL de `root` (générations, fichiers, méthodes,
+/// anomalies de chaîne). Sans `ascmhl/`, `histories` liste les sous-dossiers
+/// qui en ont.
+#[tauri::command]
+pub async fn offload_mhl_info(root: PathBuf) -> Result<MhlInfo, MhlError> {
+    let unexpected = |e: tauri::Error| MhlError {
+        code: None,
+        message: e.to_string(),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        mhl_read::info(&root).map_err(|e| MhlError {
+            code: mhl_read::error_code(&e),
+            message: e.to_string(),
+        })
+    })
+    .await
+    .map_err(unexpected)?
+}
+
+/// Ajoute la revérification d'un disque (historique ASC MHL) à la file ;
+/// renvoie son numéro. Elle suit les mêmes règles d'attente qu'une copie : le
+/// volume de `root` est lu et `root` est un dossier occupé.
+#[tauri::command]
+pub async fn offload_mhl_verify(
+    root: PathBuf,
+    operator: Option<String>,
+    app: AppHandle,
+    state: State<'_, OffloadState>,
+) -> CmdResult<u64> {
+    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    let root = veriflow_core::absolute_path(&root);
+    let source = root.display().to_string();
+    enqueue(&app, &state.shared, id, source, root.clone(), move || {
+        let volume = storage::volume_of(&root)
+            .map(|v| v.mount_point)
+            .unwrap_or_else(|| root.clone());
+        let claim = Claim::verify(root.clone(), volume, storage::is_hdd(&root));
+        (JobKind::Verify { root, operator }, claim)
+    })
+    .await
 }
 
 /// Annule un travail : retiré de la file s'il n'a pas démarré, sinon arrêté.

@@ -6,6 +6,7 @@
   import { ask } from "../../stores/confirm.svelte";
   import JobCard from "./JobCard.svelte";
   import ExistingDialog from "./ExistingDialog.svelte";
+  import VerifyDialog from "./VerifyDialog.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
@@ -287,6 +288,13 @@
     }
   }
 
+  // Dossier choisi pour une revérification ASC MHL.
+  let verifyRoot = $state<string | null>(null);
+  async function pickVerify() {
+    const r = await open({ directory: true, multiple: false, title: t("offload.verify.button") });
+    if (typeof r === "string") verifyRoot = r;
+  }
+
   onMount(() => {
     listenOffload();
     refreshVolumes();
@@ -299,6 +307,10 @@
     onChoose={(mode, check) => existingFor && chooseExisting(existingFor, mode, check)}
     onClose={() => (existingFor = null)}
   />
+{/if}
+
+{#if verifyRoot}
+  <VerifyDialog root={verifyRoot} operator={operator || null} onClose={() => (verifyRoot = null)} />
 {/if}
 
 <div class="layout">
@@ -433,6 +445,9 @@
 
   <section class="queue">
     <h2>{t("offload.queue")}</h2>
+    <div class="verify-row">
+      <button class="ghost small" onclick={pickVerify}>{t("offload.verify.button")}</button>
+    </div>
     {#if offload.batteryAlert}
       <p class="warn alert">
         <span>{alertText(offload.batteryAlert)}</span>

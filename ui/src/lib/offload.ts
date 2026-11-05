@@ -129,22 +129,76 @@ export interface JobResult {
   fingerprint: string;
 }
 
+export type JobKindName = "offload" | "verify";
+
+export type VerifyState =
+  | { state: "ok" }
+  | { state: "different" }
+  | { state: "missing" }
+  | { state: "new" }
+  | { state: "unreadable"; detail: string };
+
+export interface VerifySummary {
+  root: string;
+  files: { rel: string; size: number; status: VerifyState }[];
+  total_bytes: number;
+  ok: number;
+  different: number;
+  missing: number;
+  new: number;
+  unreadable: number;
+  started_at: string;
+  finished_at: string;
+  duration_s: number;
+  cancelled: boolean;
+  conform: boolean;
+  mhl: string | null;
+  write_error: string | null;
+  chain: { entries: { seq: number; file: string; c4: string }[]; issues: { kind: "altered" | "missing"; name: string }[] };
+  /** L'historique ne décrit aucun fichier : rien à comparer. */
+  empty_history: boolean;
+  /** Fichiers retirés de `files` (conformes, nouveaux au-delà de 200) : détail dans le CSV. */
+  omitted: number;
+}
+
+export interface ReportFiles {
+  csv: string;
+  html: string;
+  pdf: string;
+  pdf_sha256: string;
+}
+
+export interface MhlInfo {
+  root: string;
+  generations: number;
+  last_date: string | null;
+  files: number;
+  algos: HashAlgo[];
+  chain_issues: { kind: "altered" | "missing"; name: string }[];
+  histories: string[];
+}
+
+export interface MhlError {
+  code: "no_history" | "mhl_v1" | "nested_history" | null;
+  message: string;
+}
+
 export type WaitReason = "limit" | "source_busy" | "root_busy" | "source_in_use" | "hdd_busy" | "space";
 
 /** Copies simultanées au maximum. Miroir de core/src/offload/schedule.rs : à garder identique. */
 export const MAX_PARALLEL_JOBS = 3;
 
 export type EjectCode = "source_in_use_eject" | "eject_not_removable";
-export type ErrorCode = "no_space" | "job_panic" | "job_spawn";
+export type ErrorCode = "no_space" | "job_panic" | "job_spawn" | "no_history" | "mhl_v1" | "nested_history";
 
 export type Notice =
   | { kind: "queued"; job: number; source: string }
   | { kind: "waiting"; job: number; reason: WaitReason }
   | { kind: "dropped"; job: number }
   | { kind: "starting"; job: number }
-  | { kind: "running"; job: number; files: number; total_bytes: number; roots: string[] }
+  | { kind: "running"; job: number; job_kind?: JobKindName; files: number; total_bytes: number; roots: string[] }
   | { kind: "engine"; job: number; event: EngineEvent }
-  | { kind: "done"; job: number; result: JobResult; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null }
+  | { kind: "done"; job: number; job_kind?: JobKindName; result?: JobResult; verify?: VerifySummary; reports?: ReportFiles; report_error?: string; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null }
   | { kind: "failed"; job: number; error: string; error_code: ErrorCode | null };
 
 export const volumes = () => invoke<Volume[]>("offload_volumes");
@@ -157,6 +211,8 @@ export const checkExisting = (request: OffloadRequest) => invoke<CheckView>("off
 export const checkCancel = () => invoke<void>("offload_check_cancel");
 export const onCheckProgress = (cb: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>
   listen<{ done: number; total: number }>("offload-check", (e) => cb(e.payload));
+export const mhlInfo = (root: string) => invoke<MhlInfo>("offload_mhl_info", { root });
+export const mhlVerify = (root: string, operator: string | null = null) => invoke<number>("offload_mhl_verify", { root, operator });
 export const cancel = (job: number) => invoke<void>("offload_cancel", { job });
 export const eject = (mountPoint: string) => invoke<void>("offload_eject", { mountPoint });
 export const reveal = (path: string) => invoke<void>("reveal", { path });

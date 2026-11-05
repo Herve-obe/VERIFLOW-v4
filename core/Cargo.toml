@@ -25,6 +25,8 @@ gethostname = "1"
 pdf-writer = "0.14"
 fs4 = "1"
 walkdir = "2"
+# Comparaison des noms de fichiers en NFC (MIT ou Apache 2.0).
+unicode-normalization = "0.1"
 sha1 = "0.10"
 sha2 = "0.10"
 xxhash-rust = { version = "0.8", features = ["xxh64", "xxh3"] }

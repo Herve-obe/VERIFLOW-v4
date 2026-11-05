@@ -14,6 +14,7 @@ use serde::Serialize;
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
 use super::mhl::REPORTS_DIR;
+use super::mhl_verify::{VerifyStatus, VerifySummary};
 use super::scan::SourceInventory;
 use crate::{Result, VERSION};
 
@@ -372,6 +373,270 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
         }
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Rapport de vérification ASC MHL (revérification d'un disque sans la source).
+// ---------------------------------------------------------------------------
+
+/// Tout ce que le rapport de vérification affiche.
+pub struct VerifyData<'a> {
+    pub summary: &'a VerifySummary,
+    pub info: &'a ReportInfo,
+}
+
+fn verify_status_text(s: &VerifyStatus) -> &'static str {
+    match s {
+        VerifyStatus::Ok => "CONFORME",
+        VerifyStatus::Different => "DIFFÉRENT",
+        VerifyStatus::Missing => "MANQUANT",
+        VerifyStatus::New => "NOUVEAU",
+        VerifyStatus::Unreadable(_) => "ILLISIBLE",
+    }
+}
+
+impl VerifyData<'_> {
+    fn verdict(&self) -> String {
+        let s = self.summary;
+        let mut text = if s.cancelled {
+            "INTERROMPU : vérification annulée avant la fin".to_string()
+        } else if s.conform {
+            format!(
+                "CONFORME : {} fichier(s) relus et identiques à l'historique",
+                s.ok
+            )
+        } else {
+            let mut causes = Vec::new();
+            if s.empty_history {
+                causes.push("historique vide, rien à comparer".to_string());
+            }
+            if s.different > 0 {
+                causes.push(format!("{} différent(s)", s.different));
+            }
+            if s.missing > 0 {
+                causes.push(format!("{} manquant(s)", s.missing));
+            }
+            if s.unreadable > 0 {
+                causes.push(format!("{} illisible(s)", s.unreadable));
+            }
+            if !s.chain.issues.is_empty() {
+                causes.push(format!("{} anomalie(s) de chaîne", s.chain.issues.len()));
+            }
+            format!("ÉCART : {}", causes.join(", "))
+        };
+        if s.new > 0 && !s.cancelled {
+            text += &format!(" ({} nouveau(x) fichier(s) signalé(s))", s.new);
+        }
+        text
+    }
+
+    fn header_rows(&self, csv_sha: &str) -> Vec<(String, String)> {
+        let s = self.summary;
+        let mut rows = vec![
+            (
+                "Projet".into(),
+                self.info.project.clone().unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "Opérateur".into(),
+                self.info.operator.clone().unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "Poste".into(),
+                gethostname::gethostname().to_string_lossy().into_owned(),
+            ),
+            ("Logiciel".into(), format!("VERIFLOW {VERSION}")),
+            ("Début".into(), s.started_at.clone()),
+            ("Fin".into(), s.finished_at.clone()),
+            ("Durée".into(), duration_text(s.duration_s)),
+            ("Disque".into(), s.root.display().to_string()),
+            ("Volume relu".into(), human_size(s.total_bytes)),
+            (
+                "Vérification".into(),
+                "relecture intégrale depuis le support physique, comparée à l'empreinte la plus récente de l'historique ASC MHL"
+                    .into(),
+            ),
+            (
+                "Générations lues".into(),
+                s.chain.entries.len().to_string(),
+            ),
+            (
+                "Résultat".into(),
+                format!(
+                    "{} conforme(s), {} différent(s), {} manquant(s), {} nouveau(x), {} illisible(s)",
+                    s.ok, s.different, s.missing, s.new, s.unreadable
+                ),
+            ),
+        ];
+        for issue in &s.chain.issues {
+            rows.push(match issue {
+                super::mhl_read::ChainIssue::Altered(n) => (
+                    "Chaîne ALTÉRÉE".into(),
+                    format!("{n} (C4 différent de la chaîne)"),
+                ),
+                super::mhl_read::ChainIssue::Missing(n) => {
+                    ("Chaîne : fichier ABSENT".into(), n.clone())
+                }
+            });
+        }
+        if let Some(m) = &s.mhl {
+            let sha = fs::read(m)
+                .map(|b| hash_data(HashAlgo::Sha256, &b))
+                .unwrap_or_default();
+            rows.push((
+                "Génération écrite".into(),
+                format!("{} (SHA-256 {sha})", m.display()),
+            ));
+        }
+        if let Some(e) = &s.write_error {
+            rows.push(("Écriture de la génération".into(), format!("ÉCHEC : {e}")));
+        }
+        rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
+        if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+            rows.push(("Remarques".into(), n.to_owned()));
+        }
+        rows
+    }
+
+    fn detail(f: &super::mhl_verify::VerifyFile) -> String {
+        match &f.status {
+            VerifyStatus::Unreadable(m) => m.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// CSV (séparateur « ; », UTF-8 avec BOM pour Excel).
+    pub fn csv(&self) -> String {
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let mut out = String::from("\u{feff}");
+        out +=
+            "fichier;taille_octets;statut;methode;empreinte_historique;empreinte_relue;detail\r\n";
+        for f in &self.summary.files {
+            let row = [
+                q(&f.rel),
+                f.size.to_string(),
+                verify_status_text(&f.status).into(),
+                f.algo.map(|a| a.id().to_string()).unwrap_or_default(),
+                f.expected.clone().unwrap_or_default(),
+                f.actual.clone().unwrap_or_default(),
+                q(&Self::detail(f)),
+            ];
+            out += &row.join(";");
+            out += "\r\n";
+        }
+        out
+    }
+
+    pub fn html(&self, csv_sha: &str) -> String {
+        let e = |s: &str| {
+            s.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        };
+        let mut h = String::from(
+            "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Vérification ASC MHL VERIFLOW</title><style>\
+body{font:13px/1.45 system-ui,Segoe UI,Helvetica,sans-serif;color:#111;margin:32px}h1{font-size:20px;margin:0 0 4px}\
+.v{padding:10px 14px;border-radius:6px;font-weight:700;margin:12px 0}.ok{background:#d8f5e3;color:#0b6b2f}.ko{background:#fde0e0;color:#a10e0e}\
+table{border-collapse:collapse;width:100%;margin-top:12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}\
+th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all}.r{text-align:right;white-space:nowrap}\
+.info td:first-child{width:220px;color:#555}.f{color:#a10e0e;font-weight:600}</style></head><body>",
+        );
+        h += &format!("<h1>VÉRIFICATION ASC MHL</h1><div>VERIFLOW {VERSION}</div>");
+        h += &format!(
+            "<div class=\"v {}\">{}</div><table class=\"info\">",
+            if self.summary.conform { "ok" } else { "ko" },
+            e(&self.verdict())
+        );
+        for (k, v) in self.header_rows(csv_sha) {
+            h += &format!("<tr><td>{}</td><td class=\"m\">{}</td></tr>", e(&k), e(&v));
+        }
+        h += "</table><table><tr><th>#</th><th>Fichier</th><th>Taille</th><th>Méthode</th><th>Empreinte relue</th><th>Statut</th></tr>";
+        for (n, f) in self.summary.files.iter().enumerate() {
+            let bad = !matches!(f.status, VerifyStatus::Ok | VerifyStatus::New);
+            let detail = Self::detail(f);
+            h += &format!(
+                "<tr><td class=\"r\">{}</td><td class=\"m\">{}</td><td class=\"r\">{}</td><td>{}</td><td class=\"m\">{}</td><td{}>{}{}</td></tr>",
+                n + 1,
+                e(&f.rel),
+                f.size,
+                f.algo.map(|a| a.label()).unwrap_or(""),
+                f.actual.as_deref().unwrap_or(""),
+                if bad { " class=\"f\"" } else { "" },
+                verify_status_text(&f.status),
+                if detail.is_empty() { String::new() } else { format!(" : {}", e(&detail)) }
+            );
+        }
+        h += "</table></body></html>\n";
+        h
+    }
+
+    pub fn pdf(&self, csv_sha: &str) -> Vec<u8> {
+        let mut doc = PdfDoc::new();
+        doc.text(&Font::Bold, 18.0, "VÉRIFICATION ASC MHL");
+        doc.gap(4.0);
+        doc.text(&Font::Regular, 9.0, &format!("VERIFLOW {VERSION}"));
+        doc.gap(8.0);
+        doc.banner(&self.verdict(), self.summary.conform);
+        doc.gap(8.0);
+        for (k, v) in self.header_rows(csv_sha) {
+            doc.key_value(&k, &v);
+        }
+        doc.gap(10.0);
+        let cols = vec![
+            ("#", 24.0),
+            ("Fichier", 0.0),
+            ("Taille", 62.0),
+            ("Empreinte relue", 150.0),
+            ("Statut", 58.0),
+        ];
+        doc.table_header(&cols);
+        for (n, f) in self.summary.files.iter().enumerate() {
+            let cells = vec![
+                (n + 1).to_string(),
+                f.rel.clone(),
+                f.size.to_string(),
+                f.actual.clone().unwrap_or_default(),
+                verify_status_text(&f.status).into(),
+            ];
+            let bad = !matches!(f.status, VerifyStatus::Ok | VerifyStatus::New);
+            doc.table_row(&cols, &cells, bad);
+            if let VerifyStatus::Unreadable(m) = &f.status {
+                doc.note(m);
+            }
+        }
+        doc.finish(&format!(
+            "Vérification ASC MHL {} - {}",
+            super::scan::source_name(&self.summary.root),
+            self.summary.finished_at
+        ))
+    }
+}
+
+/// Écrit les rapports de vérification dans `<disque>/_VERIFLOW/`.
+pub fn write_verify_reports(data: &VerifyData) -> Result<ReportFiles> {
+    let csv = data.csv();
+    let csv_sha = hash_data(HashAlgo::Sha256, csv.as_bytes());
+    let html = data.html(&csv_sha);
+    let pdf = data.pdf(&csv_sha);
+    let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
+    let base = format!(
+        "{}_verification_{stamp}",
+        super::scan::source_name(&data.summary.root)
+    );
+    let dir = data.summary.root.join(REPORTS_DIR);
+    fs::create_dir_all(&dir)?;
+    let p = |ext: &str| dir.join(format!("{base}.{ext}"));
+    fs::write(p("csv"), &csv)?;
+    fs::write(p("html"), &html)?;
+    fs::write(p("pdf"), &pdf)?;
+    fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
+    Ok(ReportFiles {
+        csv: p("csv"),
+        html: p("html"),
+        pdf: p("pdf"),
+        pdf_sha256: pdf_sha,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -781,6 +1046,74 @@ mod tests {
         );
         assert!(f.pdf.with_extension("pdf.sha256").exists());
         assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
+    }
+
+    #[test]
+    fn writes_verify_reports_conform_and_gap() {
+        use crate::offload::mhl_verify::verify_root;
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), b"abcde").unwrap();
+        fs::write(src.join("b.mov"), b"fghij").unwrap();
+        let dest = dir.path().join("SSD/A001");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dest.clone()],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        crate::offload::mhl::write_generation(
+            &inv,
+            &s,
+            0,
+            &dest,
+            &spec.algorithms,
+            &Default::default(),
+        )
+        .unwrap();
+        let info = ReportInfo::default();
+        let v = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap();
+        let f = write_verify_reports(&VerifyData {
+            summary: &v,
+            info: &info,
+        })
+        .unwrap();
+        let html = fs::read_to_string(&f.html).unwrap();
+        assert!(html.contains("VÉRIFICATION ASC MHL") && html.contains("CONFORME"));
+        let csv = fs::read_to_string(&f.csv).unwrap();
+        assert_eq!(csv.lines().count(), 3);
+        assert!(fs::read(&f.pdf).unwrap().starts_with(b"%PDF-"));
+        assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
+
+        // Un fichier modifié, un manquant, un nouveau : écart, le nouveau seul n'échoue pas.
+        fs::write(dest.join("a.mov"), b"abcdX").unwrap();
+        fs::remove_file(dest.join("b.mov")).unwrap();
+        fs::write(dest.join("c.mov"), b"neuf").unwrap();
+        let v = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap();
+        let f = write_verify_reports(&VerifyData {
+            summary: &v,
+            info: &info,
+        })
+        .unwrap();
+        let html = fs::read_to_string(&f.html).unwrap();
+        assert!(html.contains("ÉCART") && html.contains("DIFFÉRENT") && html.contains("MANQUANT"));
+        assert!(html.contains("NOUVEAU"));
+        let csv = fs::read_to_string(&f.csv).unwrap();
+        assert!(csv.contains(";MANQUANT;") && csv.contains(";NOUVEAU;"));
+
+        // Rapports impossibles à écrire : erreur rendue, résultat intact.
+        let blocked = tempfile::tempdir().unwrap();
+        let mut moved = v.clone();
+        moved.root = blocked.path().to_path_buf();
+        fs::write(blocked.path().join(REPORTS_DIR), b"fichier").unwrap();
+        assert!(write_verify_reports(&VerifyData {
+            summary: &moved,
+            info: &info
+        })
+        .is_err());
     }
 
     #[test]

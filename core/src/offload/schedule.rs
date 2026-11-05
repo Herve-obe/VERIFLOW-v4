@@ -24,6 +24,22 @@ pub struct Claim {
     pub dest_volumes: Vec<(PathBuf, bool, u64)>,
 }
 
+impl Claim {
+    /// Ressources d'une revérification de `root` : le volume de `root` est lu
+    /// comme source et `root` compte comme dossier occupé (une copie qui y
+    /// écrit, ou qui en contient une partie, attend, et inversement). Aucune
+    /// destination, donc aucun espace réservé.
+    pub fn verify(root: PathBuf, volume: PathBuf, hdd: bool) -> Self {
+        Self {
+            roots: vec![root.clone()],
+            source: root,
+            source_hdd: hdd,
+            source_volume: volume,
+            dest_volumes: Vec::new(),
+        }
+    }
+}
+
 /// Raison pour laquelle un travail attend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -492,6 +508,44 @@ mod tests {
             can_start(&hdd_src, &[writer], &no_limit),
             Err(Wait::HddBusy)
         );
+    }
+
+    #[test]
+    fn schedule_verify_and_copy_into_root_wait_each_other() {
+        let verify = Claim::verify("/ssd/J01".into(), "/ssd".into(), false);
+        // Une copie écrit dans le dossier vérifié (ou dans un de ses sous-dossiers).
+        let copy = claim("/A", &["/ssd/J01/A002"], &[("/ssd", false, 10)]);
+        assert_eq!(
+            can_start(&copy, std::slice::from_ref(&verify), &no_limit),
+            Err(Wait::RootBusy)
+        );
+        assert_eq!(
+            can_start(&verify, std::slice::from_ref(&copy), &no_limit),
+            Err(Wait::RootBusy)
+        );
+        // Copie dans un dossier voisin sur un autre lecteur : permis.
+        let other = claim("/A", &["/ssd2/J02"], &[("/ssd2", false, 10)]);
+        assert_eq!(
+            can_start(&other, std::slice::from_ref(&verify), &no_limit),
+            Ok(())
+        );
+        // Deux vérifications d'un même volume ne se lisent pas ensemble.
+        let twin = Claim::verify("/ssd/J02".into(), "/ssd".into(), false);
+        assert_eq!(
+            can_start(&twin, &[verify], &no_limit),
+            Err(Wait::SourceBusy)
+        );
+    }
+
+    #[test]
+    fn schedule_verify_hdd_waits_for_writer() {
+        let verify = Claim::verify("/hdd/J01".into(), "/hdd".into(), true);
+        let writer = claim("/A", &["/hdd/J02"], &[("/hdd", true, 10)]);
+        assert_eq!(
+            can_start(&verify, std::slice::from_ref(&writer), &no_limit),
+            Err(Wait::HddBusy)
+        );
+        assert_eq!(can_start(&writer, &[verify], &no_limit), Err(Wait::HddBusy));
     }
 
     #[test]

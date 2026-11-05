@@ -1,11 +1,12 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
 export interface Job {
   id: number;
   source: string;
+  kind: JobKindName;
   state: JobState;
   /** Raison de l'attente (état waiting), null sinon. */
   waitReason: WaitReason | null;
@@ -22,6 +23,9 @@ export interface Job {
   failed: FileResult[];
   recent: FileResult[];
   result: JobResult | null;
+  verify: VerifySummary | null;
+  verifyReports: ReportFiles | null;
+  reportError: string | null;
   error: string | null;
   errorCode: ErrorCode | null;
   ejected: string | null;
@@ -110,6 +114,16 @@ function syncPowerWatch() {
   }
 }
 
+/** Travaux de vérification dont la notification de mise en file peut précéder le retour de la commande. */
+const verifyIds = new Set<number>();
+
+/** Signale que le travail `id` est une revérification (avant son premier `running`). */
+export function markVerify(id: number) {
+  verifyIds.add(id);
+  const j = job(id);
+  if (j) j.kind = "verify";
+}
+
 /** Retire une fiche de la file (les fichiers sur les disques ne sont pas touchés). */
 export function removeJob(id: number) {
   offload.jobs = offload.jobs.filter((j) => j.id !== id);
@@ -119,6 +133,7 @@ export function removeJob(id: number) {
 /** Vrai si la copie s'est arrêtée avant d'être complète et vérifiée. */
 export function interrupted(j: Job): boolean {
   if (j.state === "failed") return true;
+  if (j.kind === "verify") return false;
   if (j.state !== "done" || !j.result) return false;
   return j.result.summary.cancelled || j.result.summary.failed_files > 0;
 }
@@ -137,6 +152,7 @@ function applyNotice(n: Notice) {
     offload.jobs.unshift({
       id: n.job,
       source: n.source,
+      kind: verifyIds.has(n.job) ? "verify" : "offload",
       state: "queued",
       waitReason: null,
       dropped: false,
@@ -151,6 +167,9 @@ function applyNotice(n: Notice) {
       failed: [],
       recent: [],
       result: null,
+      verify: null,
+      verifyReports: null,
+      reportError: null,
       error: null,
       errorCode: null,
       ejected: null,
@@ -172,7 +191,7 @@ function applyNotice(n: Notice) {
       if (j.state === "queued" || j.state === "waiting") Object.assign(j, { state: "starting", waitReason: null });
       break;
     case "running":
-      Object.assign(j, { state: "running", waitReason: null, files: n.files, totalBytes: n.total_bytes, roots: n.roots, startedAt: Date.now() });
+      Object.assign(j, { state: "running", kind: n.job_kind ?? "offload", waitReason: null, files: n.files, totalBytes: n.total_bytes, roots: n.roots, startedAt: Date.now() });
       break;
     case "engine": {
       const e = n.event;
@@ -189,7 +208,11 @@ function applyNotice(n: Notice) {
     }
     case "done":
       j.state = "done";
-      j.result = n.result;
+      j.result = n.result ?? null;
+      j.verify = n.verify ?? null;
+      j.verifyReports = n.reports ?? null;
+      j.reportError = n.report_error ?? null;
+      if (n.job_kind) j.kind = n.job_kind;
       j.current = "";
       if (n.ejected && "Ok" in n.ejected) j.ejected = "ok";
       else if (n.ejected && "Err" in n.ejected) j.ejected = n.ejected.Err;
