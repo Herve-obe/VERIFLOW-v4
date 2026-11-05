@@ -38,7 +38,7 @@
   const vs = $derived(job.verify);
   const vOk = $derived(!!vs && vs.conform && !vs.cancelled && !vs.empty_history);
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
-  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length, job.speed));
+  const eta = $derived(remainingSecs(job.total, job.done, job.rate, isVerify ? 0 : job.roots.length, job.speed));
   const tp = $derived(job.result?.summary.throughput ?? null);
   const bottleneck = $derived.by(() => {
     const b = tp?.bottleneck ?? "";
@@ -173,6 +173,9 @@
     {#if job.reportError || (!job.verifyReports && !vs.cancelled)}
       <div class="small err">{t("offload.verify.readonly")}{job.reportError ? ` : ${job.reportError}` : ""}</div>
     {/if}
+    {#if vs.read && vs.read.busy_s > 0}
+      <div class="small mono">{t("offload.verify.read_rate")} : {rate(vs.read.bytes / vs.read.busy_s)}</div>
+    {/if}
     {#if vs.omitted > 0}
       <div class="small">{t("offload.verify.omitted").replace("{n}", String(vs.omitted))}</div>
     {/if}
@@ -181,6 +184,7 @@
         <button onclick={() => open(job.verifyReports!.pdf)}>{t("offload.report.pdf")}</button>
         <button class="ghost" onclick={() => open(job.verifyReports!.html)}>{t("offload.verify.report.html")}</button>
         <button class="ghost" onclick={() => open(job.verifyReports!.csv)}>{t("offload.verify.report.csv")}</button>
+        {#if job.verifyReports.rates_csv}<button class="ghost" onclick={() => open(job.verifyReports!.rates_csv!)}>{t("offload.report.throughput_csv")}</button>{/if}
       {/if}
       <button class="ghost" onclick={() => open(vs.root)}>{t("offload.open.folder")}</button>
     </div>

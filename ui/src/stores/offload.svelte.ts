@@ -69,7 +69,7 @@ function runningEta(): number | null {
   let max: number | null = null;
   for (const j of offload.jobs) {
     if (j.state !== "running") continue;
-    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length, j.speed);
+    const s = remainingSecs(j.total, j.done, j.rate, j.kind === "verify" ? 0 : j.roots.length, j.speed);
     if (Number.isFinite(s) && (max === null || s > max)) max = s;
   }
   return max;

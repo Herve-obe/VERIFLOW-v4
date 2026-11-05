@@ -898,5 +898,6 @@
   "offload.verify.empty_history": "Historique vide : rien à comparer",
   "offload.verify.write_error": "Génération de vérification non écrite",
   "offload.verify.omitted": "et {n} autres dans le rapport CSV",
-  "offload.verify.loading": "Lecture de l'historique en cours"
+  "offload.verify.loading": "Lecture de l'historique en cours",
+  "offload.verify.read_rate": "Débit de relecture"
 }

@@ -187,6 +187,8 @@ export interface VerifySummary {
   empty_history: boolean;
   /** Fichiers retirés de `files` (conformes, nouveaux au-delà de 200) : détail dans le CSV. */
   omitted: number;
+  /** Lecture de la vérification (octets et temps d'activité). */
+  read?: PhaseMeter;
 }
 
 export interface ReportFiles {
@@ -194,6 +196,7 @@ export interface ReportFiles {
   html: string;
   pdf: string;
   pdf_sha256: string;
+  rates_csv?: string | null;
 }
 
 export interface MhlInfo {

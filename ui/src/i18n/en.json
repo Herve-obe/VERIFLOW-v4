@@ -898,5 +898,6 @@
   "offload.verify.empty_history": "Empty history: nothing to compare",
   "offload.verify.write_error": "Verification generation not written",
   "offload.verify.omitted": "and {n} more in the CSV report",
-  "offload.verify.loading": "Reading the history"
+  "offload.verify.loading": "Reading the history",
+  "offload.verify.read_rate": "Read-back rate"
 }
