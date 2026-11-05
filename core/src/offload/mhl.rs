@@ -14,6 +14,7 @@ use std::sync::Mutex;
 
 use super::engine::{DestStatus, Hashes, OffloadSummary};
 use super::hash::{digest_bytes, hash_data, hash_of_hash_list, HashAlgo};
+use super::mhl_read::{parse_chain_file, ChainEntry};
 use super::scan::{SourceInventory, IGNORED};
 use crate::{Result, VERSION};
 
@@ -340,10 +341,14 @@ fn write_core(
     let mhl_dir = dest_root.join("ascmhl");
     fs::create_dir_all(&mhl_dir)?;
     let chain_path = mhl_dir.join("ascmhl_chain.xml");
-    let mut chain: Vec<(u32, String, String)> = fs::read_to_string(&chain_path)
-        .map(|s| parse_chain(&s))
-        .unwrap_or_default();
-    let seq = chain.iter().map(|(n, _, _)| *n).max().unwrap_or(0) + 1;
+    // Une chaîne illisible ou tronquée n'est jamais réécrite : l'historique
+    // existant serait perdu. Seule une chaîne absente repart de zéro.
+    let mut chain: Vec<ChainEntry> = match fs::read_to_string(&chain_path) {
+        Ok(xml) => parse_chain_file(&xml)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let seq = chain.iter().map(|e| e.seq).max().unwrap_or(0) + 1;
     let root_name = dest_root
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -353,44 +358,59 @@ fn write_core(
         now.format("%Y-%m-%d_%H%M%SZ")
     );
     let mhl_path = mhl_dir.join(&file_name);
-    fs::write(&mhl_path, xml.as_bytes())?;
-    chain.push((seq, file_name, hash_data(HashAlgo::C4, xml.as_bytes())));
+    write_atomic(&mhl_path, xml.as_bytes())?;
+    chain.push(ChainEntry {
+        seq,
+        file: file_name,
+        c4: hash_data(HashAlgo::C4, xml.as_bytes()),
+    });
 
     let mut cx = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ascmhldirectory xmlns=\"urn:ASC:MHL:DIRECTORY:v2.0\">\n",
     );
-    for (n, path, c4) in &chain {
+    for e in &chain {
         cx += &format!(
-            "  <hashlist sequencenr=\"{n}\">\n    <path>{}</path>\n    <c4>{c4}</c4>\n  </hashlist>\n",
-            esc(path)
+            "  <hashlist sequencenr=\"{}\">\n    <path>{}</path>\n",
+            e.seq,
+            esc(&e.file)
         );
+        // Entrée d'un autre outil sans C4 : conservée telle quelle.
+        if !e.c4.is_empty() {
+            cx += &format!("    <c4>{}</c4>\n", e.c4);
+        }
+        cx += "  </hashlist>\n";
     }
     cx += "</ascmhldirectory>\n";
-    fs::write(&chain_path, cx)?;
+    write_atomic(&chain_path, cx.as_bytes())?;
     Ok(mhl_path)
 }
 
-/// Lit les entrées d'un fichier ascmhl_chain.xml existant.
-fn parse_chain(xml: &str) -> Vec<(u32, String, String)> {
-    let mut out = Vec::new();
-    for block in xml.split("<hashlist").skip(1) {
-        let seq = block
-            .split("sequencenr=\"")
-            .nth(1)
-            .and_then(|s| s.split('"').next())
-            .and_then(|s| s.parse().ok());
-        let tag = |t: &str| {
-            block
-                .split(&format!("<{t}>"))
-                .nth(1)
-                .and_then(|s| s.split(&format!("</{t}>")).next())
-                .map(|s| s.trim().to_owned())
-        };
-        if let (Some(seq), Some(path), Some(c4)) = (seq, tag("path"), tag("c4")) {
-            out.push((seq, path, c4));
-        }
+/// Écriture atomique : fichier temporaire du même dossier, fsync, renommage,
+/// puis fsync du dossier quand le système le permet. Une coupure laisse
+/// l'ancien fichier ou le nouveau, jamais un fichier tronqué.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.vfpart"));
+    let result = (|| -> std::io::Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)
+    })();
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
-    out
+    #[cfg(unix)]
+    if let Some(dir) = path.parent().and_then(|d| fs::File::open(d).ok()) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -399,6 +419,15 @@ mod tests {
     use crate::offload::engine::{run, OffloadSpec};
     use crate::offload::scan::scan;
     use std::sync::atomic::AtomicBool;
+
+    /// Entrées (numéro, fichier, C4) de la chaîne écrite.
+    fn parse_chain(xml: &str) -> Vec<(u32, String, String)> {
+        parse_chain_file(xml)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.seq, e.file, e.c4))
+            .collect()
+    }
 
     #[test]
     fn writes_generations_and_chain() {
@@ -443,6 +472,58 @@ mod tests {
         let chain = parse_chain(&fs::read_to_string(dest.join("ascmhl/ascmhl_chain.xml")).unwrap());
         assert_eq!(chain.len(), 2);
         assert_eq!(chain[0].2, hash_data(HashAlgo::C4, xml.as_bytes()));
+    }
+
+    #[test]
+    fn foreign_chain_entries_are_kept_without_c4() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        let mhl_dir = root.join("ascmhl");
+        fs::create_dir_all(&mhl_dir).unwrap();
+        // Autre outil : guillemets simples, aucun C4, un numéro absent.
+        fs::write(
+            mhl_dir.join("ascmhl_chain.xml"),
+            "<ascmhldirectory><hashlist sequencenr='1'><path>0001_D_a.mhl</path></hashlist>\
+             <hashlist><path>0002_D_b.mhl</path><c4>c4abc</c4></hashlist></ascmhldirectory>",
+        )
+        .unwrap();
+        write_entries(&root, &[], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let chain = parse_chain(&fs::read_to_string(mhl_dir.join("ascmhl_chain.xml")).unwrap());
+        assert_eq!(chain.len(), 3);
+        assert_eq!(
+            (chain[0].0, chain[0].1.as_str(), chain[0].2.as_str()),
+            (1, "0001_D_a.mhl", "")
+        );
+        assert_eq!((chain[1].0, chain[1].2.as_str()), (2, "c4abc"));
+        assert_eq!(chain[2].0, 3);
+        assert!(!chain[2].2.is_empty());
+        let leftovers = fs::read_dir(&mhl_dir)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".vfpart")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn truncated_chain_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        let mhl_dir = root.join("ascmhl");
+        fs::create_dir_all(&mhl_dir).unwrap();
+        let broken = "<ascmhldirectory><hashlist sequencenr=\"1\"><path>0001_D_a.mhl</path>";
+        fs::write(mhl_dir.join("ascmhl_chain.xml"), broken).unwrap();
+        assert!(write_entries(&root, &[], &[], "in-place", "t", &MhlAuthor::default()).is_err());
+        assert_eq!(
+            fs::read_to_string(mhl_dir.join("ascmhl_chain.xml")).unwrap(),
+            broken
+        );
+        assert_eq!(fs::read_dir(&mhl_dir).unwrap().count(), 1);
     }
 
     /// Deux écritures simultanées dans un même dossier : numéros 1 et 2, chaîne

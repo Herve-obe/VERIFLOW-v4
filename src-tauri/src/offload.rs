@@ -134,7 +134,8 @@ enum Notice {
         /// Absent pour une vérification.
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<Box<JobResult>>,
-        /// Vérification : résultat et fichiers de rapport (absents si annulée).
+        /// Vérification : compteurs, chaîne et écarts (`VerifySummary::for_ui`,
+        /// sans les fichiers conformes) et fichiers de rapport (absents si annulée).
         #[serde(skip_serializing_if = "Option::is_none")]
         verify: Option<Box<VerifySummary>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -351,7 +352,8 @@ fn run_verify(
         job: id,
         job_kind: JobType::Verify,
         result: None,
-        verify: Some(Box::new(summary)),
+        // Compteurs, chaîne et écarts seulement : le détail est dans le CSV.
+        verify: Some(Box::new(summary.for_ui())),
         reports,
         report_error,
         ejected: None,
