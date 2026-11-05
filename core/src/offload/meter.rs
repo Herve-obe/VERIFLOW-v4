@@ -97,8 +97,11 @@ pub struct Meters {
     pub source: Meter,
     pub writes: Vec<Meter>,
     pub verifies: Vec<Meter>,
-    /// Temps où le calcul d'empreintes a fait attendre la lecture.
-    pub cpu: Meter,
+    /// Temps où le calcul d'empreintes a fait attendre un fil : un compteur
+    /// par fil (0 : lecture de la source, 1 + i : relecture de la destination i).
+    /// Le goulot processeur est le plus attentiste, pas la somme (des fils
+    /// qui attendent en même temps ne s'additionnent pas).
+    pub cpu: Vec<Meter>,
 }
 
 /// Compteurs d'une relecture : disque lu et attente du calcul.
@@ -114,7 +117,8 @@ pub struct Snapshot {
     pub source: u64,
     pub write: Vec<u64>,
     pub verify: Vec<u64>,
-    pub cpu_ns: u64,
+    /// Attente du calcul, un relevé par fil (voir `Meters::cpu`).
+    pub cpu_ns: Vec<u64>,
 }
 
 impl Meters {
@@ -125,15 +129,25 @@ impl Meters {
             source: Meter::new(origin),
             writes: many(),
             verifies: many(),
-            cpu: Meter::new(origin),
+            cpu: (0..=destinations).map(|_| Meter::new(origin)).collect(),
         }
+    }
+
+    /// Attente du calcul côté lecture de la source.
+    pub fn source_cpu(&self) -> &Meter {
+        &self.cpu[0]
     }
 
     pub fn probe(&self, dest: usize) -> Probe<'_> {
         Probe {
             io: &self.verifies[dest],
-            cpu: &self.cpu,
+            cpu: &self.cpu[1 + dest],
         }
+    }
+
+    /// Plus longue attente du calcul parmi les fils, en secondes.
+    fn cpu_max_s(&self) -> f64 {
+        self.cpu.iter().map(Meter::busy_ns).max().unwrap_or(0) as f64 / 1e9
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -141,13 +155,16 @@ impl Meters {
             source: self.source.bytes(),
             write: self.writes.iter().map(Meter::bytes).collect(),
             verify: self.verifies.iter().map(Meter::bytes).collect(),
-            cpu_ns: self.cpu.busy_ns(),
+            cpu_ns: self.cpu.iter().map(Meter::busy_ns).collect(),
         }
     }
 
-    /// Bilan de fin de copie. `total_bytes` : octets de la source ;
-    /// `duration_s` : durée totale, copie et vérification comprises.
-    pub fn throughput(&self, total_bytes: u64, duration_s: f64) -> Throughput {
+    /// Bilan de fin de copie. `duration_s` : durée totale, copie et
+    /// vérification comprises. Le débit global compte les octets réellement
+    /// lus à la source ; il est absent si la copie est annulée ou si rien
+    /// n'a été lu.
+    pub fn throughput(&self, duration_s: f64, cancelled: bool) -> Throughput {
+        let read = self.source.bytes();
         let dest_busy: Vec<f64> = self
             .writes
             .iter()
@@ -158,16 +175,13 @@ impl Meters {
             source_read: self.source.stat(),
             write: self.writes.iter().map(Meter::stat).collect(),
             verify: self.verifies.iter().map(Meter::stat).collect(),
-            effective_rate: if duration_s > 0.0 {
-                total_bytes as f64 / duration_s
-            } else {
-                0.0
-            },
+            effective_rate: (!cancelled && read > 0 && duration_s > 0.0)
+                .then(|| read as f64 / duration_s),
             bottleneck: bottleneck(
                 duration_s,
                 self.source.busy_ns() as f64 / 1e9,
                 &dest_busy,
-                self.cpu.busy_ns() as f64 / 1e9,
+                self.cpu_max_s(),
             ),
         }
     }
@@ -180,16 +194,24 @@ pub struct Throughput {
     /// Une entrée par destination.
     pub write: Vec<PhaseStat>,
     pub verify: Vec<PhaseStat>,
-    /// Octets de la source divisés par la durée totale (copie et vérification),
-    /// en octets par seconde : le chiffre comparable aux autres logiciels.
-    pub effective_rate: f64,
-    /// `source`, `dest:<i>` (i depuis 0) ou `cpu` ; vide si rien n'a été mesuré.
+    /// Octets réellement lus à la source divisés par la durée totale (copie et
+    /// vérification), en octets par seconde : le chiffre comparable aux autres
+    /// logiciels. `null` si annulé ou si rien n'a été lu.
+    pub effective_rate: Option<f64>,
+    /// `source`, `dest:<i>` (i depuis 0) ou `cpu` ; vide si aucun facteur ne
+    /// dépasse 60 % d'occupation.
     pub bottleneck: String,
 }
 
+/// Occupation minimale pour désigner un facteur limitant : en dessous, rien
+/// ne sature vraiment et la réponse est vide.
+const BOTTLENECK_MIN: f64 = 0.6;
+
 /// Facteur limitant : le plus fort taux d'occupation (temps d'E/S sur durée
-/// totale). Un disque de destination cumule écriture et relecture. À égalité,
-/// la source passe avant les destinations, puis le calcul.
+/// totale), s'il atteint 60 %. Un disque de destination cumule écriture et
+/// relecture ; en recouvrement les deux se chevauchent, donc son occupation
+/// est plafonnée à 1. À égalité, la source passe avant les destinations,
+/// puis le calcul.
 pub fn bottleneck(
     duration_s: f64,
     source_busy_s: f64,
@@ -198,9 +220,9 @@ pub fn bottleneck(
 ) -> String {
     let ratio = |busy: f64| {
         if duration_s > 0.0 {
-            busy / duration_s
+            (busy / duration_s).min(1.0)
         } else {
-            busy
+            0.0
         }
     };
     let mut best = (0.0, String::new());
@@ -214,7 +236,11 @@ pub fn bottleneck(
         consider(b, format!("dest:{i}"));
     }
     consider(cpu_busy_s, "cpu".into());
-    best.1
+    if best.0 >= BOTTLENECK_MIN {
+        best.1
+    } else {
+        String::new()
+    }
 }
 
 /// Débits sur la fenêtre glissante, en octets par seconde.
@@ -275,7 +301,14 @@ impl RateWindow {
             source: rate(cur.source, old.source),
             write: zip(&cur.write, &old.write),
             verify: zip(&cur.verify, &old.verify),
-            hash_wait_ratio: (cur.cpu_ns.saturating_sub(old.cpu_ns) as f64 / dt.as_nanos() as f64)
+            // Le fil le plus attentiste, pas la somme des fils.
+            hash_wait_ratio: cur
+                .cpu_ns
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| n.saturating_sub(old.cpu_ns.get(i).copied().unwrap_or(0)))
+                .max()
+                .map_or(0.0, |n| n as f64 / dt.as_nanos() as f64)
                 .clamp(0.0, 1.0),
         })
     }
@@ -290,7 +323,7 @@ mod tests {
             source,
             write: vec![write],
             verify: vec![verify],
-            cpu_ns,
+            cpu_ns: vec![cpu_ns, 0],
         }
     }
 
@@ -327,6 +360,35 @@ mod tests {
         assert_eq!(bottleneck(10.0, 9.0, &[3.0, 8.0], 1.0), "source");
         assert_eq!(bottleneck(10.0, 2.0, &[3.0], 9.5), "cpu");
         assert_eq!(bottleneck(10.0, 0.0, &[0.0], 0.0), "");
+        // Sous 60 % d'occupation, rien ne limite vraiment.
+        assert_eq!(bottleneck(10.0, 2.0, &[5.0], 1.0), "");
+        // Recouvrement : écriture + relecture plafonnées à 1, la source ne passe pas devant.
+        assert_eq!(bottleneck(10.0, 9.5, &[15.0, 12.0], 0.0), "dest:0");
+    }
+
+    #[test]
+    fn cpu_wait_is_max_not_sum() {
+        let m = Meters::new(3);
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        // Trois relectures attendent chacune 400 ms sur 1 s : la somme (1,2 s)
+        // désignerait le calcul, le maximum (0,4 s) non.
+        for d in 0..3 {
+            m.probe(d).cpu.record_between(0, at(0), at(400));
+        }
+        m.source.record_between(1, at(0), at(500));
+        m.verifies[0].record_between(1, at(0), at(700));
+        let t = m.throughput(1.0, false);
+        assert_ne!(t.bottleneck, "cpu");
+        assert_eq!(t.bottleneck, "dest:0");
+        // Fenêtre : même règle pour le ratio d'attente.
+        let mut w = RateWindow::new(t0, Meters::new(3).snapshot());
+        let mut later = Meters::new(3).snapshot();
+        for c in &mut later.cpu_ns {
+            *c = 300_000_000;
+        }
+        let r = w.tick(at(1000), later).unwrap();
+        assert!((r.hash_wait_ratio - 0.3).abs() < 1e-9);
     }
 
     #[test]
