@@ -44,7 +44,7 @@ fn split(path: &str) -> (Root, Vec<String>) {
 }
 
 /// Encodage pour cent UTF-8 d'un segment (la forme NFD de macOS est conservée).
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

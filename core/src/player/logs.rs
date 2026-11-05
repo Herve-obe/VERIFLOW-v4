@@ -402,9 +402,13 @@ pub fn to_edl(title: &str, clips: &[LogClip]) -> String {
     out
 }
 
+/// Cadence en texte pour l'en-tête ALE : « 23.976 » (et non 23.98, que les
+/// logiciels de montage ne reconnaissent pas), « 29.97 », « 59.94 », « 25 ».
 pub(crate) fn fps_text(rate: FrameRate) -> String {
     if rate.den == 1 {
         rate.num.to_string()
+    } else if rate == FrameRate::new(24000, 1001) {
+        "23.976".into()
     } else {
         format!("{:.2}", rate.as_f64())
     }
@@ -1042,7 +1046,7 @@ pub(crate) mod tests {
 }
 
 /// Écrit les cinq exports de l'exemple dans `$VERIFLOW_LOGS_DUMP` (contrôle
-/// externe avec OpenTimelineIO, voir `scripts/validate-logs.py`).
+/// externe avec OpenTimelineIO, voir `scripts/validate-exports.py`).
 #[cfg(test)]
 #[test]
 fn dump_for_external_check() {
