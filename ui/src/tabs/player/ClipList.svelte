@@ -18,12 +18,14 @@
     loadFolder,
     checkPlaylist,
     describeNow,
+    resetChecked,
     addToPlaylist,
     removeFromPlaylist,
     moveInPlaylist,
     clearPlaylist,
   } from "../../stores/player.svelte";
   import type { Described, MediaEntry } from "../../lib/media";
+  import { explorer } from "../../stores/explorer.svelte";
   import { t } from "../../i18n/index.svelte";
 
   let { mode }: { mode: Mode } = $props();
@@ -114,6 +116,16 @@
     });
   });
 
+  // Ouverture de la playlist ou volume éjecté : les fichiers sont réexaminés.
+  $effect(() => {
+    void explorer.volumes.length;
+    void (src.source === "playlist");
+    untrack(() => {
+      resetChecked(mode);
+      if (src.source === "playlist") void checkPlaylist(mode);
+    });
+  });
+
   // Playlist : repère les fichiers disparus à l'ouverture et à chaque changement de contenu.
   $effect(() => {
     void src.playlist.length;
@@ -135,9 +147,11 @@
   const visibleRows = $derived(shown.slice(first, last));
 
   // Les lignes visibles sans détails sont analysées tout de suite, sans attendre les lots.
+  // Attend ~150 ms après l'arrêt du défilement.
   $effect(() => {
     const paths = visibleRows.map((e) => e.path);
-    untrack(() => void describeNow(paths));
+    const id = window.setTimeout(() => describeNow(paths), 150);
+    return () => window.clearTimeout(id);
   });
 
   onMount(() => {

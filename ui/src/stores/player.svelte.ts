@@ -59,26 +59,61 @@ export function cacheDetails(list: Described[]) {
 }
 
 const inflight = new Set<string>();
+/** Chemins dont l'analyse a échoué : pas de nouvel essai avant un rechargement explicite. */
+const failed = new Set<string>();
+const pending = new Set<string>();
+let pumping = false;
+const NOW_MAX = 48;
 
-/** Décrit tout de suite (hors lots) les chemins absents du cache. */
-export async function describeNow(paths: string[]) {
-  const todo = paths.filter((p) => !player.details.has(p) && !inflight.has(p));
-  if (todo.length === 0) return;
-  for (const p of todo) inflight.add(p);
+const usable = (d: Described) => !d.details.error || !!d.details.probe || !!d.details.wav;
+
+/** Range les descriptions valides ; les erreurs ne vont pas dans le cache. */
+function keep(batch: Described[]) {
+  cacheDetails(batch.filter(usable));
+  for (const d of batch) if (!usable(d)) failed.add(d.path);
+}
+
+async function pump() {
+  if (pumping) return;
+  pumping = true;
   try {
-    cacheDetails(await describe(todo));
-  } catch {
-    /* le cœur ne répond pas : la ligne reste sans détails */
+    while (pending.size > 0) {
+      const todo = [...pending].slice(0, NOW_MAX);
+      for (const p of todo) {
+        pending.delete(p);
+        inflight.add(p);
+      }
+      try {
+        keep(await describe(todo));
+      } catch {
+        for (const p of todo) failed.add(p);
+      } finally {
+        for (const p of todo) inflight.delete(p);
+      }
+    }
   } finally {
-    for (const p of todo) inflight.delete(p);
+    pumping = false;
   }
+}
+
+/** Décrit tout de suite (hors lots) les chemins absents du cache : un seul appel à la fois, demandes fusionnées. */
+export function describeNow(paths: string[]) {
+  for (const p of paths) {
+    if (!player.details.has(p) && !inflight.has(p) && !failed.has(p)) pending.add(p);
+  }
+  void pump();
+}
+
+/** Oublie les analyses de la playlist du mode (ouverture de la playlist, volume éjecté). */
+export function resetChecked(mode: Mode) {
+  checked[mode].clear();
 }
 
 export function select(i: number) {
   const c = player.clips[i];
   if (!c) return;
   player.current = i;
-  void describeNow([c.path]);
+  describeNow([c.path]);
   if (c.kind === "audio") app.playerAudio = [c.path];
   else app.playerVideo = c.path;
 }
@@ -135,6 +170,8 @@ const BATCH = 24;
 export async function loadFolder(mode: Mode, dir: string) {
   const m = playerSources[mode];
   const gen = ++generation[mode];
+  const reload = m.dir === dir;
+  const old = m.entries;
   m.dir = dir;
   m.source = "folder";
   m.entries = [];
@@ -145,14 +182,29 @@ export async function loadFolder(mode: Mode, dir: string) {
     if (gen !== generation[mode]) return;
     const entries = all.filter((e) => e.kind === mode);
     m.entries = entries;
+    if (reload) {
+      // Rechargement explicite du dossier courant : tout est réanalysé.
+      for (const e of old) {
+        player.details.delete(e.path);
+        failed.delete(e.path);
+      }
+    }
     // Le clip chargé passe en premier, puis le reste par lots.
     const loaded = mode === "video" ? app.playerVideo : (app.playerAudio?.[0] ?? null);
     const paths = entries.map((e) => e.path);
     if (loaded) paths.sort((a, b) => Number(b === loaded) - Number(a === loaded));
     for (let i = 0; i < paths.length; i += BATCH) {
-      const batch = await describe(paths.slice(i, i + BATCH).filter((p) => !player.details.has(p) || p === loaded));
+      const todo = paths.slice(i, i + BATCH).filter((p) => !inflight.has(p) && !failed.has(p) && (!player.details.has(p) || p === loaded));
+      if (todo.length === 0) continue;
+      for (const p of todo) inflight.add(p);
+      let batch: Described[];
+      try {
+        batch = await describe(todo);
+      } finally {
+        for (const p of todo) inflight.delete(p);
+      }
       if (gen !== generation[mode]) return;
-      cacheDetails(batch);
+      keep(batch);
     }
   } catch (e) {
     if (gen === generation[mode]) m.error = String(e);
@@ -182,6 +234,7 @@ export function removeFromPlaylist(mode: Mode, paths: string[]) {
   const m = playerSources[mode];
   const gone = new Set(paths);
   m.playlist = m.playlist.filter((e) => !gone.has(e.path));
+  for (const p of paths) checked[mode].delete(p);
   m.missing = m.missing.filter((p) => !gone.has(p));
   m.unreadable = m.unreadable.filter((p) => !gone.has(p));
   savePlaylist(mode);
@@ -201,6 +254,7 @@ export function moveInPlaylist(mode: Mode, path: string, delta: -1 | 1) {
 export function clearPlaylist(mode: Mode) {
   const m = playerSources[mode];
   m.playlist = [];
+  checked[mode].clear();
   m.missing = [];
   m.unreadable = [];
   savePlaylist(mode);

@@ -56,6 +56,15 @@
     return () => window.clearTimeout(id);
   });
   onDestroy(saveBoth);
+  // Fermeture de la fenêtre : dernière écriture sans attendre le délai.
+  onMount(() => {
+    window.addEventListener("pagehide", saveBoth);
+    window.addEventListener("beforeunload", saveBoth);
+    return () => {
+      window.removeEventListener("pagehide", saveBoth);
+      window.removeEventListener("beforeunload", saveBoth);
+    };
+  });
 
   // Le bandeau ou l'inspecteur affichent déjà codec, cadence, TC et iXML : les vues les masquent alors.
   const infoPanels = $derived(vis.banner || vis.inspector);
