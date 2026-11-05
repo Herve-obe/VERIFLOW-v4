@@ -50,7 +50,7 @@ En niveau DÉBUTANT, la lecture se fait sans marqueurs : les commandes d'entrée
 - LUT d'inversion appliquée puis retirée ; LUT invalide refusée ; noms de fichiers contenant espace, apostrophe, « : » et « , ».
 
 ### Contrôle externe des exports
-`scripts/validate-logs.py` fait relire les exports par **OpenTimelineIO 0.18.1**, avec les adaptateurs officiels cmx_3600, fcpx_xml et ale. Les clips, les plages source et les marqueurs ont été retrouvés à l'identique dans les cinq formats.
+`scripts/validate-exports.py` fait relire les exports par **OpenTimelineIO 0.18.1**, avec les adaptateurs officiels cmx_3600, fcpx_xml et ale. Les clips, les plages source et les marqueurs ont été retrouvés à l'identique dans les cinq formats.
 
 ### Essai dans l'application (Linux, Xvfb)
 - ProRes 422 1280x720 avec TC et son :
