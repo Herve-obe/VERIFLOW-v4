@@ -11,6 +11,24 @@
   let showAll = $state(false);
   let openError = $state("");
 
+  /** Nom court du disque d'après le dossier final (volume, lecteur ou dernier dossier). */
+  function baseName(root: string | undefined, i: number): string {
+    const fallback = `${t("offload.dest.short")} ${i + 1}`;
+    if (!root) return fallback;
+    const parts = root.replace(/\\/g, "/").split("/").filter(Boolean);
+    if (parts[0] === "Volumes" || parts[0] === "mnt") return parts[1] ?? fallback;
+    if (parts[0] === "media") return (parts[1] === "user" ? parts[2] : parts[1]) ?? fallback;
+    if (parts[0] === "run" && parts[1] === "media") return parts[3] ?? fallback;
+    if (/^[A-Za-z]:$/.test(parts[0] ?? "")) return parts[0];
+    return parts[parts.length - 1] ?? fallback;
+  }
+  /** Deux destinations au même nom court sont préfixées par leur numéro. */
+  function diskName(root: string | undefined, i: number): string {
+    const n = baseName(root, i);
+    const dup = job.roots.some((r, k) => k !== i && baseName(r, k) === n);
+    return dup ? `${i + 1} · ${n}` : n;
+  }
+
   const open = (path: string) => {
     openError = "";
     reveal(path).catch((e) => (openError = String(e)));
@@ -20,7 +38,19 @@
   const vs = $derived(job.verify);
   const vOk = $derived(!!vs && vs.conform && !vs.cancelled && !vs.empty_history);
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
-  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
+  const eta = $derived(remainingSecs(job.total, job.done, job.rate, isVerify ? 0 : job.roots.length, job.speed));
+  const tp = $derived(job.result?.summary.throughput ?? null);
+  const bottleneck = $derived.by(() => {
+    const b = tp?.bottleneck ?? "";
+    if (b === "source") return t("offload.meter.bottleneck.source");
+    if (b === "cpu") return t("offload.meter.bottleneck.cpu");
+    if (b.startsWith("dest:")) {
+      const i = Number(b.slice(5));
+      return `${t("offload.meter.bottleneck.dest")} ${i + 1} (${diskName(job.roots[i], i)})`;
+    }
+    return "";
+  });
+  const phaseRate = (m: { bytes: number; busy_s: number }) => (m.busy_s > 0 ? rate(m.bytes / m.busy_s) : "-");
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
   const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) || (isVerify && job.state === "done" && !vOk) ? "error" : job.state === "done" ? "ok" : "running");
   const GAP_MAX = 200;
@@ -100,9 +130,23 @@
       <span>{job.result.summary.files.length} {t("offload.files")}</span>
       <span>{bytes(job.result.summary.total_bytes)} ({bytesBinary(job.result.summary.total_bytes)})</span>
       <span>{duration(job.result.summary.duration_s)}</span>
-      <span>{rate(job.result.summary.total_bytes / Math.max(job.result.summary.duration_s, 0.001))}</span>
     {/if}
   </div>
+
+  {#if job.state === "running" && job.rates}
+    <table class="meter mono">
+      <thead>
+        <tr><th></th><th>{t("offload.meter.write")}</th><th>{t("offload.meter.verify")}</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>{t("offload.meter.source")}</th><td colspan="2">{rate(job.rates.source)}</td></tr>
+        {#each job.rates.write as w, i (i)}
+          <tr><th title={job.roots[i]}>{diskName(job.roots[i], i)}</th><td>{rate(w)}</td><td>{rate(job.rates.verify[i] ?? 0)}</td></tr>
+        {/each}
+      </tbody>
+    </table>
+    {#if job.rates.hash_wait_ratio > 0.3}<div class="small cpu">{t("offload.meter.cpu_bound")}</div>{/if}
+  {/if}
 
   {#if job.current}
     <div class="current mono" title={job.current}>{job.current}</div>
@@ -129,6 +173,9 @@
     {#if job.reportError || (!job.verifyReports && !vs.cancelled)}
       <div class="small err">{t("offload.verify.readonly")}{job.reportError ? ` : ${job.reportError}` : ""}</div>
     {/if}
+    {#if vs.read && vs.read.busy_s > 0}
+      <div class="small mono">{t("offload.verify.read_rate")} : {rate(vs.read.bytes / vs.read.busy_s)}</div>
+    {/if}
     {#if vs.omitted > 0}
       <div class="small">{t("offload.verify.omitted").replace("{n}", String(vs.omitted))}</div>
     {/if}
@@ -137,6 +184,7 @@
         <button onclick={() => open(job.verifyReports!.pdf)}>{t("offload.report.pdf")}</button>
         <button class="ghost" onclick={() => open(job.verifyReports!.html)}>{t("offload.verify.report.html")}</button>
         <button class="ghost" onclick={() => open(job.verifyReports!.csv)}>{t("offload.verify.report.csv")}</button>
+        {#if job.verifyReports.rates_csv}<button class="ghost" onclick={() => open(job.verifyReports!.rates_csv!)}>{t("offload.report.throughput_csv")}</button>{/if}
       {/if}
       <button class="ghost" onclick={() => open(vs.root)}>{t("offload.open.folder")}</button>
     </div>
@@ -171,12 +219,33 @@
         {job.result.summary.failed_files} {t("offload.verdict.failed")}
       {/if}
     </div>
+    {#if tp}
+      <div class="small global mono">
+        <span>{t("offload.meter.global")} : {tp.effective_rate ? rate(tp.effective_rate) : "-"}</span>
+        {#if bottleneck}<span>{t("offload.meter.bottleneck")} : {bottleneck}</span>{/if}
+      </div>
+      <details class="phases">
+        <summary>{t("offload.meter.details")}</summary>
+        <table class="meter mono">
+          <thead>
+            <tr><th></th><th>{t("offload.meter.write")}</th><th>{t("offload.meter.verify")}</th></tr>
+          </thead>
+          <tbody>
+            <tr><th>{t("offload.meter.source")}</th><td colspan="2">{phaseRate(tp.source_read)}</td></tr>
+            {#each tp.write as w, i (i)}
+              <tr><th title={job.roots[i]}>{diskName(job.roots[i], i)}</th><td>{phaseRate(w)}</td><td>{tp.verify[i] ? phaseRate(tp.verify[i]) : "-"}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </details>
+    {/if}
     {#if job.ejected}
       <div class="small">{job.ejected === "ok" ? t("offload.ejected") : `${t("offload.eject.error")} : ${job.ejectCode ? t(`offload.eject.code.${job.ejectCode}`) : job.ejected}`}</div>
     {/if}
     <div class="actions">
       {#each job.result.reports as r, i (r.pdf)}
         <button onclick={() => open(r.pdf)}>{t("offload.report.pdf")} {i + 1}</button>
+        {#if r.rates_csv}<button class="ghost" onclick={() => open(r.rates_csv!)}>{t("offload.report.throughput_csv")} {i + 1}</button>{/if}
       {/each}
       {#each job.result.roots as root, i (root)}
         <button class="ghost" onclick={() => open(root)}>{t("offload.open.folder")} {i + 1}</button>
@@ -402,6 +471,31 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--vf-text-muted);
+  }
+  .meter {
+    table-layout: auto;
+    width: auto;
+    min-width: 50%;
+  }
+  .meter th {
+    max-width: 14em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cpu {
+    color: var(--vf-warning);
+  }
+  .global {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vf-space-4);
+    color: var(--vf-text);
+  }
+  .phases summary {
+    cursor: pointer;
+    font-size: var(--vf-text-sm);
+    color: var(--vf-accent);
   }
   .st.verified,
   .st.resumed_verified {

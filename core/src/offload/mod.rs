@@ -5,6 +5,7 @@ pub mod existing;
 pub mod hash;
 mod io;
 pub mod job;
+pub mod meter;
 pub mod mhl;
 pub mod mhl_read;
 pub mod mhl_verify;

@@ -19,7 +19,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
+use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -29,6 +29,7 @@ use serde::Serialize;
 use super::existing::Known;
 use super::hash::{HashAlgo, ParallelHasher};
 use super::io::{drop_cache, open_uncached, read_full, AlignedBuf};
+use super::meter::{Meters, Probe, RateWindow, Throughput};
 use super::scan::{SourceFile, SourceInventory};
 use crate::{Error, Result};
 
@@ -102,6 +103,15 @@ pub enum Event {
         index: usize,
         result: FileResult,
     },
+    /// Débits réels sur la dernière seconde, en octets par seconde (au plus
+    /// un événement par seconde). `write` et `verify` : une valeur par destination.
+    Rates {
+        source: f64,
+        write: Vec<f64>,
+        verify: Vec<f64>,
+        /// Part du temps (0 à 1) où la lecture attend le calcul des empreintes.
+        hash_wait_ratio: f64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +123,8 @@ pub struct OffloadSummary {
     pub duration_s: f64,
     pub cancelled: bool,
     pub failed_files: usize,
+    /// Débit réel par disque et par phase.
+    pub throughput: Throughput,
 }
 
 fn rfc3339(t: SystemTime) -> String {
@@ -171,13 +183,34 @@ pub(super) fn temp_path(final_path: &Path) -> PathBuf {
     final_path.with_file_name(format!(".{name}.vfpart"))
 }
 
+/// Écrit les blocs reçus et mesure chaque écriture. Renvoie les octets écrits.
+fn write_chunks(
+    f: &mut impl Write,
+    rx: std::sync::mpsc::Receiver<Arc<Vec<u8>>>,
+    meter: &super::meter::Meter,
+) -> std::io::Result<u64> {
+    let mut written = 0u64;
+    for chunk in rx {
+        let t = Instant::now();
+        let r = f.write_all(&chunk);
+        // Le temps d'un appel en échec compte aussi, avant de propager l'erreur.
+        meter.record(if r.is_ok() { chunk.len() as u64 } else { 0 }, t);
+        r?;
+        written += chunk.len() as u64;
+    }
+    Ok(written)
+}
+
 /// Écrit les blocs reçus dans un fichier temporaire, puis le finalise.
 fn writer(
     rx: std::sync::mpsc::Receiver<Arc<Vec<u8>>>,
     final_path: PathBuf,
     modified: SystemTime,
     expected: u64,
+    meters: &Meters,
+    dest: usize,
 ) -> std::result::Result<(), String> {
+    let meter = &meters.writes[dest];
     let tmp = temp_path(&final_path);
     let result = (|| -> std::io::Result<()> {
         if let Some(parent) = final_path.parent() {
@@ -188,11 +221,7 @@ fn writer(
             .create(true)
             .truncate(true)
             .open(&tmp)?;
-        let mut written = 0u64;
-        for chunk in rx {
-            f.write_all(&chunk)?;
-            written += chunk.len() as u64;
-        }
+        let written = write_chunks(&mut f, rx, meter)?;
         // Le canal se ferme aussi quand la lecture est interrompue (annulation,
         // source illisible) : seul le compte complet d'octets autorise le renommage.
         if written != expected {
@@ -200,7 +229,10 @@ fn writer(
                 "copie incomplète ({written} octets sur {expected})"
             )));
         }
+        // Le fsync fait partie du temps d'écriture du disque.
+        let t = Instant::now();
         f.sync_all()?;
+        meter.record(0, t);
         drop_cache(&f);
         drop(f);
         filetime::set_file_mtime(&tmp, filetime::FileTime::from_system_time(modified))?;
@@ -219,7 +251,7 @@ pub(super) fn hash_from_disk(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
-    hash_from_disk_progress(path, algos, cancel, |_| {})
+    hash_from_disk_progress(path, algos, cancel, None, |_| {})
 }
 
 /// Comme `hash_from_disk`, avec un rappel appelé après chaque bloc lu
@@ -228,6 +260,7 @@ pub(super) fn hash_from_disk_progress(
     path: &Path,
     algos: &[HashAlgo],
     cancel: &AtomicBool,
+    probe: Option<Probe>,
     mut progress: impl FnMut(u64),
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let mut buf = AlignedBuf::new(CHUNK);
@@ -244,6 +277,7 @@ pub(super) fn hash_from_disk_progress(
         algos,
         cancel,
         &mut progress,
+        probe,
     )
 }
 
@@ -255,6 +289,7 @@ fn hash_file(
     algos: &[HashAlgo],
     buf: &mut [u8],
     cancel: &AtomicBool,
+    probe: Probe,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let mut f = retry_busy(
         || open_uncached(path),
@@ -262,7 +297,7 @@ fn hash_file(
         Duration::from_millis(200),
     )?;
     let size = f.metadata()?.len();
-    hash_uncached(&mut f, size, buf, algos, cancel)
+    hash_uncached_with(&mut f, size, buf, algos, cancel, &mut |_| {}, Some(probe))
 }
 
 /// Lecture sans cache : sous Windows (FILE_FLAG_NO_BUFFERING), chaque lecture
@@ -270,6 +305,7 @@ fn hash_file(
 /// lecture, partielle, la position ne l'est plus : on s'arrête donc à la
 /// taille connue du fichier au lieu de relire pour constater la fin
 /// (relecture qui échouait avec « Paramètre incorrect », os error 87).
+#[cfg(test)]
 fn hash_uncached(
     f: &mut impl Read,
     size: u64,
@@ -277,7 +313,7 @@ fn hash_uncached(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
-    hash_uncached_with(f, size, buf, algos, cancel, &mut |_| {})
+    hash_uncached_with(f, size, buf, algos, cancel, &mut |_| {}, None)
 }
 
 fn hash_uncached_with(
@@ -287,6 +323,7 @@ fn hash_uncached_with(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(u64),
+    probe: Option<Probe>,
 ) -> std::io::Result<Vec<(HashAlgo, String)>> {
     let hasher = ParallelHasher::new(algos);
     let mut done = 0u64;
@@ -295,16 +332,24 @@ fn hash_uncached_with(
             return Err(std::io::Error::other("annulé"));
         }
         // Lecture du tampon entier : la taille demandée reste un multiple du secteur.
+        let t = Instant::now();
         let n = loop {
             match f.read(buf) {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 r => break r?,
             }
         };
+        if let Some(p) = probe {
+            p.io.record(n as u64, t);
+        }
         if n == 0 {
             break; // fichier raccourci pendant la lecture : l'empreinte différera
         }
+        let t = Instant::now();
         hasher.update(&Arc::new(buf[..n].to_vec()));
+        if let Some(p) = probe {
+            p.cpu.record(0, t);
+        }
         done += n as u64;
         progress(done);
     }
@@ -317,6 +362,8 @@ struct Counter {
     started: Instant,
     source_bytes: u64,
     last_emit: Instant,
+    meters: Arc<Meters>,
+    window: RateWindow,
 }
 
 impl Counter {
@@ -337,7 +384,41 @@ impl Counter {
             total: self.total,
             rate: self.source_bytes as f64 / secs,
         });
+        self.tick_rates(emit);
     }
+
+    /// Débits réels de la dernière seconde (au plus un événement par seconde).
+    fn tick_rates(&mut self, emit: &mut impl FnMut(Event)) {
+        let snap = self.meters.snapshot();
+        if let Some(r) = self.window.tick(Instant::now(), snap) {
+            emit(Event::Rates {
+                source: r.source,
+                write: r.write,
+                verify: r.verify,
+                hash_wait_ratio: r.hash_wait_ratio,
+            });
+        }
+    }
+}
+
+/// Intervalle de réveil pendant les attentes longues (débits, annulation).
+const RATES_TICK: Duration = Duration::from_millis(250);
+
+/// Attend la fin d'un fil en continuant d'émettre les débits.
+fn join_ticking<T>(
+    h: thread::JoinHandle<T>,
+    col: &mut Collector,
+    emit: &mut impl FnMut(Event),
+) -> thread::Result<T> {
+    let mut last = Instant::now();
+    while !h.is_finished() {
+        thread::sleep(Duration::from_millis(10));
+        if last.elapsed() >= RATES_TICK {
+            col.counter.tick_rates(emit);
+            last = Instant::now();
+        }
+    }
+    h.join()
 }
 
 /// Nombre maximal de vérifications en attente par destination (mémoire bornée).
@@ -451,9 +532,11 @@ impl Collector<'_> {
     ) {
         self.drain(emit);
         while busy(&self.pending) {
-            match self.rx.recv() {
+            // Réveil régulier : les débits continuent pendant une longue relecture.
+            match self.rx.recv_timeout(RATES_TICK) {
                 Ok(reply) => self.handle(reply, emit),
-                Err(_) => {
+                Err(RecvTimeoutError::Timeout) => self.counter.tick_rates(emit),
+                Err(RecvTimeoutError::Disconnected) => {
                     let lost: Vec<_> = self.pending.drain().collect();
                     for (index, mut p) in lost {
                         // Relectures jamais faites : la progression doit quand même finir.
@@ -510,6 +593,7 @@ fn verifier(
     algos: &[HashAlgo],
     cancel: &AtomicBool,
     before_verify: &(dyn Fn(usize, &Path) + Sync),
+    probe: Probe,
 ) {
     let mut buf = AlignedBuf::new(CHUNK);
     for task in rx {
@@ -520,7 +604,7 @@ fn verifier(
             // suivantes et le fil principal en dépendent.
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 before_verify(task.index, &task.path);
-                hash_file(&task.path, algos, buf.as_mut_slice(), cancel)
+                hash_file(&task.path, algos, buf.as_mut_slice(), cancel, probe)
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("vérification interrompue")))
         };
@@ -590,6 +674,7 @@ fn copy_stage(
 
     // Destinations à écrire (les fichiers complets déjà présents sont seulement
     // revérifiés ; en mode « compléter », les fichiers non identiques sont remplacés).
+    let meters = col.counter.meters.clone();
     let mut senders: Vec<(usize, SyncSender<Arc<Vec<u8>>>)> = Vec::new();
     let mut handles = Vec::new();
     for (i, path) in finals.iter().enumerate() {
@@ -610,7 +695,11 @@ fn copy_stage(
                 let modified = file.modified;
                 senders.push((i, tx));
                 let size = file.size;
-                handles.push((i, thread::spawn(move || writer(rx, path, modified, size))));
+                let meters = meters.clone();
+                handles.push((
+                    i,
+                    thread::spawn(move || writer(rx, path, modified, size, &meters, i)),
+                ));
             }
         }
     }
@@ -628,13 +717,18 @@ fn copy_stage(
                 return Err(std::io::Error::other("annulé"));
             }
             let mut buf = vec![0u8; CHUNK];
+            let t = Instant::now();
             let got = read_full(&mut src, &mut buf)?;
+            meters.source.record(got as u64, t);
             if got == 0 {
                 break;
             }
             buf.truncate(got);
             let chunk = Arc::new(buf);
+            // Si le calcul est en retard, `update` bloque : c'est le goulot processeur.
+            let t = Instant::now();
             hasher.update(&chunk);
+            meters.source_cpu().record(0, t);
             // Un disque en échec ferme son canal : on continue avec les autres.
             senders.retain(|(_, tx)| tx.send(chunk.clone()).is_ok());
             read_bytes += got as u64;
@@ -653,7 +747,7 @@ fn copy_stage(
             // Source illisible ou annulation : les fichiers temporaires sont supprimés
             // (le fil d'écriture refuse de renommer une copie incomplète).
             for (_, h) in handles {
-                let _ = h.join();
+                let _ = join_ticking(h, col, emit);
             }
             for path in &finals {
                 let _ = fs::remove_file(temp_path(path));
@@ -677,10 +771,29 @@ fn copy_stage(
             }));
         }
     };
-    let source_hashes = hasher.finish();
+    // Fin du calcul : si elle est longue, les débits continuent d'être émis.
+    let t = Instant::now();
+    let source_hashes = {
+        let (tx, rx) = channel();
+        thread::scope(|sc| {
+            sc.spawn(move || {
+                let _ = tx.send(hasher.finish());
+            });
+            loop {
+                match rx.recv_timeout(RATES_TICK) {
+                    Ok(h) => break h,
+                    Err(RecvTimeoutError::Timeout) => col.counter.tick_rates(emit),
+                    Err(RecvTimeoutError::Disconnected) => {
+                        panic!("fil de calcul d'empreinte")
+                    }
+                }
+            }
+        })
+    };
+    meters.source_cpu().record(0, t);
     let mut written = Vec::new();
     for (i, h) in handles {
-        match h.join() {
+        match join_ticking(h, col, emit) {
             Ok(Ok(())) => written.push(i),
             Ok(Err(e)) => status[i] = Some(DestStatus::Failed(format!("écriture : {e}"))),
             Err(_) => status[i] = Some(DestStatus::Failed("écriture interrompue".into())),
@@ -828,15 +941,17 @@ fn run_hooked(
     }
     let started_at = SystemTime::now();
     let algos = &spec.algorithms;
+    let meters = Arc::new(Meters::new(spec.destinations.len()));
     let (files, cancelled) = thread::scope(|s| -> Result<(Vec<FileResult>, bool)> {
         // Un vérificateur persistant par destination.
         let (reply_tx, reply_rx) = channel::<VerifyReply>();
         let mut task_tx = Vec::new();
-        for _ in &spec.destinations {
+        for dest in 0..spec.destinations.len() {
             let (tx, rx) = sync_channel::<VerifyTask>(VERIFY_AHEAD);
             let reply = reply_tx.clone();
             let before_verify = hooks.before_verify;
-            s.spawn(move || verifier(rx, reply, algos, cancel, before_verify));
+            let probe = meters.probe(dest);
+            s.spawn(move || verifier(rx, reply, algos, cancel, before_verify, probe));
             task_tx.push(tx);
         }
         drop(reply_tx);
@@ -847,6 +962,8 @@ fn run_hooked(
                 started: Instant::now(),
                 source_bytes: 0,
                 last_emit: Instant::now(),
+                meters: meters.clone(),
+                window: RateWindow::new(Instant::now(), meters.snapshot()),
             },
             rx: reply_rx,
             pending: HashMap::new(),
@@ -908,15 +1025,17 @@ fn run_hooked(
         Ok((col.done.into_iter().flatten().collect(), cancelled))
     })?;
     let finished_at = SystemTime::now();
+    let duration_s = finished_at
+        .duration_since(started_at)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
     Ok(OffloadSummary {
         failed_files: files.iter().filter(|f| !f.ok()).count(),
         total_bytes: inv.total_bytes,
         started_at: rfc3339(started_at),
         finished_at: rfc3339(finished_at),
-        duration_s: finished_at
-            .duration_since(started_at)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0),
+        duration_s,
+        throughput: meters.throughput(duration_s, cancelled),
         cancelled,
         files,
     })
@@ -1606,13 +1725,217 @@ mod tests {
     }
 
     #[test]
+    fn rates_and_throughput_json_contract() {
+        let e = Event::Rates {
+            source: 100.0,
+            write: vec![50.0],
+            verify: vec![10.0],
+            hash_wait_ratio: 0.25,
+        };
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::json!({"type":"rates","source":100.0,"write":[50.0],"verify":[10.0],"hash_wait_ratio":0.25})
+        );
+        let t = serde_json::to_value(Throughput::default()).unwrap();
+        for k in [
+            "source_read",
+            "write",
+            "verify",
+            "effective_rate",
+            "bottleneck",
+        ] {
+            assert!(t.get(k).is_some(), "{k}");
+        }
+        assert!(t["source_read"].get("active_s").is_some());
+    }
+
+    #[test]
+    fn meters_count_exact_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let dests = [dir.path().join("D1/A001"), dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let mut rates = Vec::new();
+        let s = run(&inv, &spec(&dests), &AtomicBool::new(false), |e| {
+            if let Event::Rates { .. } = e {
+                rates.push(e);
+            }
+        })
+        .unwrap();
+        let t = &s.throughput;
+        assert_eq!(t.source_read.bytes, inv.total_bytes);
+        assert_eq!(t.write.len(), 2);
+        assert_eq!(t.verify.len(), 2);
+        for i in 0..2 {
+            assert_eq!(t.write[i].bytes, inv.total_bytes);
+            assert_eq!(t.verify[i].bytes, inv.total_bytes);
+            assert!(t.write[i].busy_s > 0.0 && t.verify[i].busy_s > 0.0);
+        }
+        assert!(t.effective_rate.unwrap() > 0.0);
+        assert!(
+            t.bottleneck.is_empty()
+                || t.bottleneck == "source"
+                || t.bottleneck.starts_with("dest:")
+                || t.bottleneck == "cpu"
+        );
+        // Les événements de débit (s'il y en a eu) portent une valeur par destination.
+        for e in rates {
+            if let Event::Rates { write, verify, .. } = e {
+                assert_eq!((write.len(), verify.len()), (2, 2));
+            }
+        }
+    }
+
+    #[test]
+    fn resumed_files_not_counted_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let dests = [dir.path().join("D1/A001")];
+        let inv = scan(&src).unwrap();
+        run(&inv, &spec(&dests), &AtomicBool::new(false), |_| {}).unwrap();
+        // Reprise : tout est déjà là, seule la relecture a lieu.
+        let s = run(&inv, &spec(&dests), &AtomicBool::new(false), |_| {}).unwrap();
+        let t = &s.throughput;
+        assert_eq!(t.write[0].bytes, 0);
+        assert_eq!(t.verify[0].bytes, inv.total_bytes);
+        assert_eq!(t.source_read.bytes, inv.total_bytes);
+    }
+
+    #[test]
+    fn known_identical_not_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let dests = [dir.path().join("D1/A001")];
+        let inv = scan(&src).unwrap();
+        let first = run(&inv, &spec(&dests), &AtomicBool::new(false), |_| {}).unwrap();
+        let known = Known {
+            source: first
+                .files
+                .iter()
+                .map(|f| (f.rel.clone(), f.hashes.clone()))
+                .collect(),
+            identical: vec![first
+                .files
+                .iter()
+                .map(|f| {
+                    let m = fs::metadata(dests[0].join(&f.rel)).unwrap();
+                    (f.rel.clone(), (m.len(), m.modified().ok()))
+                })
+                .collect()],
+        };
+        let mut sp = spec(&dests);
+        sp.known = Some(known);
+        let s = run(&inv, &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        let t = &s.throughput;
+        assert_eq!(t.source_read.bytes, 0);
+        assert_eq!(t.write[0].bytes, 0);
+        assert_eq!(t.verify[0].bytes, 0);
+        assert_eq!(t.bottleneck, "");
+        // Rien n'a été lu à la source : pas de débit global.
+        assert_eq!(t.effective_rate, None);
+        assert!(s.failed_files == 0 && !s.files.is_empty());
+    }
+
+    #[test]
+    fn meters_count_exact_bytes_with_overlap() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = many_files_card(dir.path());
+        let dests = [dir.path().join("D1/A001"), dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let s = run(
+            &inv,
+            &spec_overlap(&dests, true),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let t = &s.throughput;
+        assert_eq!(t.source_read.bytes, inv.total_bytes);
+        for i in 0..2 {
+            assert_eq!(t.write[i].bytes, inv.total_bytes);
+            assert_eq!(t.verify[i].bytes, inv.total_bytes);
+        }
+    }
+
+    #[test]
+    fn failed_write_counts_fewer_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let broken = dir.path().join("BROKEN/A001");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("CLIP"), b"je suis un fichier").unwrap();
+        let good = dir.path().join("SSD1/A001");
+        let inv = scan(&src).unwrap();
+        let s = run(
+            &inv,
+            &spec(&[broken, good]),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let t = &s.throughput;
+        assert!(t.write[0].bytes < inv.total_bytes);
+        assert_eq!(t.write[1].bytes, inv.total_bytes);
+        assert_eq!(t.source_read.bytes, inv.total_bytes);
+    }
+
+    #[test]
+    fn cancelled_run_has_no_effective_rate() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let dest = dir.path().join("SSD1/A001");
+        let inv = scan(&src).unwrap();
+        let s = run(
+            &inv,
+            &spec(std::slice::from_ref(&dest)),
+            &AtomicBool::new(true),
+            |_| {},
+        )
+        .unwrap();
+        assert!(s.cancelled);
+        assert_eq!(s.throughput.effective_rate, None);
+    }
+
+    #[test]
+    fn failing_write_is_timed_but_not_counted() {
+        /// Accepte `ok` écritures, puis échoue après une courte attente.
+        struct Failing(usize);
+        impl Write for Failing {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if self.0 == 0 {
+                    thread::sleep(Duration::from_millis(20));
+                    return Err(std::io::Error::other("disque plein"));
+                }
+                self.0 -= 1;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let meters = Meters::new(1);
+        let (tx, rx) = sync_channel::<Arc<Vec<u8>>>(4);
+        for _ in 0..3 {
+            tx.send(Arc::new(vec![1u8; 100])).unwrap();
+        }
+        drop(tx);
+        let r = write_chunks(&mut Failing(2), rx, &meters.writes[0]);
+        assert!(r.is_err());
+        let st = meters.writes[0].stat();
+        // Deux blocs écrits ; le troisième, en échec, n'ajoute que du temps.
+        assert_eq!(st.bytes, 200);
+        assert!(st.busy_s >= 0.02, "{}", st.busy_s);
+    }
+
+    #[test]
     fn writer_refuses_to_rename_an_incomplete_copy() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sous/F.bin");
         let (tx, rx) = sync_channel::<Arc<Vec<u8>>>(4);
         tx.send(Arc::new(vec![1u8; 100])).unwrap();
         drop(tx);
-        let r = writer(rx, path.clone(), SystemTime::now(), 200);
+        let meters = Meters::new(1);
+        let r = writer(rx, path.clone(), SystemTime::now(), 200, &meters, 0);
         assert!(r.is_err());
         assert!(!path.exists());
         assert!(!temp_path(&path).exists());
@@ -1620,7 +1943,7 @@ mod tests {
         let (tx, rx) = sync_channel::<Arc<Vec<u8>>>(4);
         tx.send(Arc::new(vec![1u8; 200])).unwrap();
         drop(tx);
-        writer(rx, path.clone(), SystemTime::now(), 200).unwrap();
+        writer(rx, path.clone(), SystemTime::now(), 200, &meters, 0).unwrap();
         assert_eq!(fs::metadata(&path).unwrap().len(), 200);
     }
 

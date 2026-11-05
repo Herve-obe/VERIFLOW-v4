@@ -16,6 +16,7 @@ use walkdir::WalkDir;
 
 use super::engine::{hash_from_disk_progress, DestStatus, Event, FileResult, Hashes};
 use super::hash::HashAlgo;
+use super::meter::{Meter, PhaseStat, Probe};
 use super::mhl::{write_entries, Action, GenEntry, MhlAuthor, REPORTS_DIR};
 use super::mhl_read::{best_algo, load_history, nested_error, nfc, to_path, Chain, MHL_DIR};
 use super::scan::IGNORED;
@@ -58,6 +59,8 @@ pub struct VerifySummary {
     pub files: Vec<VerifyFile>,
     /// Octets relus.
     pub total_bytes: u64,
+    /// Mesure de la relecture : octets, temps d'E/S, durée d'activité.
+    pub read: PhaseStat,
     pub ok: usize,
     pub different: usize,
     pub missing: usize,
@@ -288,6 +291,8 @@ pub fn verify_root(
         .map(|f| f.size)
         .sum();
     let mut done = 0u64;
+    let io = Meter::new(started);
+    let cpu = Meter::new(started);
     let mut files: Vec<VerifyFile> = Vec::new();
     let mut entries: Vec<GenEntry> = Vec::new();
     let mut cancelled = walk_cancelled;
@@ -350,13 +355,19 @@ pub fn verify_root(
             known.and_then(|(_, h)| h.iter().find(|(a, _)| *a == algo).map(|(_, v)| v.clone()));
         let read = match &f.error {
             Some(e) => Err(std::io::Error::other(e.clone())),
-            None => hash_from_disk_progress(&f.path, &[algo], cancel, |n| {
-                // Au plus une dizaine d'événements par seconde.
-                if last_emit.elapsed().as_millis() >= 100 {
-                    last_emit = Instant::now();
-                    progress(done + n, &mut emit);
-                }
-            }),
+            None => hash_from_disk_progress(
+                &f.path,
+                &[algo],
+                cancel,
+                Some(Probe { io: &io, cpu: &cpu }),
+                |n| {
+                    // Au plus une dizaine d'événements par seconde.
+                    if last_emit.elapsed().as_millis() >= 100 {
+                        last_emit = Instant::now();
+                        progress(done + n, &mut emit);
+                    }
+                },
+            ),
         };
         let (status, actual): (VerifyStatus, Option<String>) = match read {
             Err(e) => {
@@ -496,6 +507,7 @@ pub fn verify_root(
         root: root.to_path_buf(),
         files,
         total_bytes,
+        read: io.stat(),
         ok,
         different,
         missing,

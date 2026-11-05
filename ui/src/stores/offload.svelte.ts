@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
@@ -18,6 +18,12 @@ export interface Job {
   done: number;
   total: number;
   rate: number;
+  /** Derniers débits mesurés par disque et par phase. */
+  rates: Rates | null;
+  /** Vitesse d'avancement lissée sur ~8 s (octets/s), 0 si inconnue. */
+  speed: number;
+  /** Relevés récents de la vitesse (horodatage ms, octets/s). */
+  speedHist: { t: number; v: number }[];
   current: string;
   verified: number;
   failed: FileResult[];
@@ -33,6 +39,8 @@ export interface Job {
   startedAt: number;
 }
 
+/** Fenêtre de la moyenne glissante de la vitesse. */
+const SMOOTH_MS = 8000;
 const RECENT = 200; // lignes affichées dans le tableau d'avancement
 
 export const offload = $state({
@@ -61,7 +69,7 @@ function runningEta(): number | null {
   let max: number | null = null;
   for (const j of offload.jobs) {
     if (j.state !== "running") continue;
-    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length);
+    const s = remainingSecs(j.total, j.done, j.rate, j.kind === "verify" ? 0 : j.roots.length, j.speed);
     if (Number.isFinite(s) && (max === null || s > max)) max = s;
   }
   return max;
@@ -162,6 +170,9 @@ function applyNotice(n: Notice) {
       done: 0,
       total: 0,
       rate: 0,
+      rates: null,
+      speed: 0,
+      speedHist: [],
       current: "",
       verified: 0,
       failed: [],
@@ -196,6 +207,13 @@ function applyNotice(n: Notice) {
     case "engine": {
       const e = n.event;
       if (e.type === "progress") Object.assign(j, { done: e.done, total: e.total, rate: e.rate });
+      else if (e.type === "rates") {
+        j.rates = { source: e.source, write: e.write, verify: e.verify, hash_wait_ratio: e.hash_wait_ratio };
+        const now = Date.now();
+        j.speedHist.push({ t: now, v: progressSpeed(j.rates, j.roots.length) });
+        while (j.speedHist.length > 1 && now - j.speedHist[0].t > SMOOTH_MS) j.speedHist.shift();
+        j.speed = j.speedHist.reduce((a, h) => a + h.v, 0) / j.speedHist.length;
+      }
       else if (e.type === "file_started") j.current = e.rel;
       else {
         const ok = e.result.destinations.every((d) => d.state !== "failed");

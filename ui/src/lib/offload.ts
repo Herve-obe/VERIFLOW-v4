@@ -107,9 +107,36 @@ export interface FileResult {
   destinations: DestStatus[];
 }
 
+/** Débits instantanés (octets/s) : source, écriture et relecture par destination. */
+export interface Rates {
+  source: number;
+  write: number[];
+  verify: number[];
+  /** Part du temps où la lecture attend le calcul des empreintes (0 à 1). */
+  hash_wait_ratio: number;
+}
+
+/** Temps d'activité d'une phase (disque ou calcul). */
+export interface PhaseMeter {
+  bytes: number;
+  busy_s: number;
+  active_s: number;
+}
+
+export interface Throughput {
+  source_read: PhaseMeter;
+  write: PhaseMeter[];
+  verify: PhaseMeter[];
+  /** Taille de la source / durée totale (octets/s). */
+  effective_rate?: number | null;
+  /** "source", "dest:<i>" (à partir de 0), "cpu" ou "". */
+  bottleneck: string;
+}
+
 export type EngineEvent =
   | { type: "file_started"; index: number; rel: string; size: number }
   | { type: "progress"; done: number; total: number; rate: number }
+  | ({ type: "rates" } & Rates)
   | { type: "file_done"; index: number; result: FileResult };
 
 export interface JobResult {
@@ -121,10 +148,11 @@ export interface JobResult {
     duration_s: number;
     cancelled: boolean;
     failed_files: number;
+    throughput?: Throughput;
   };
   roots: string[];
   mhl: (string | null)[];
-  reports: { csv: string; html: string; pdf: string; pdf_sha256: string }[];
+  reports: { csv: string; html: string; pdf: string; pdf_sha256: string; rates_csv?: string | null }[];
   source_name: string;
   fingerprint: string;
 }
@@ -159,6 +187,8 @@ export interface VerifySummary {
   empty_history: boolean;
   /** Fichiers retirés de `files` (conformes, nouveaux au-delà de 200) : détail dans le CSV. */
   omitted: number;
+  /** Lecture de la vérification (octets et temps d'activité). */
+  read?: PhaseMeter;
 }
 
 export interface ReportFiles {
@@ -166,6 +196,7 @@ export interface ReportFiles {
   html: string;
   pdf: string;
   pdf_sha256: string;
+  rates_csv?: string | null;
 }
 
 export interface MhlInfo {
@@ -223,13 +254,29 @@ export const powerStatus = () => invoke<PowerStatus | null>("power_status");
 export const batteryWarning = (estimatedSecs: number) =>
   invoke<BatteryWarning | null>("battery_warning", { estimatedSecs });
 
+/** Sous ce débit mesuré (octets/s), on revient à l'ancienne formule (sync_all en cours, etc.). */
+export const MIN_MEASURED_RATE = 1_000_000;
+
 /**
- * Secondes restantes d'une copie. `total` compte les octets lus et écrits
+ * Vitesse d'avancement instantanée de la progression (octets/s) : lecture source plus relectures.
+ * Tant que les relectures n'ont pas démarré, chacune est comptée au débit source.
+ */
+export function progressSpeed(r: Rates, destinations: number): number {
+  const v = r.verify.reduce((a, b) => a + b, 0);
+  return v > 0 ? r.source + v : r.source * (1 + destinations);
+}
+
+/**
+ * Secondes restantes d'une copie. `total` compte les octets lus et relus
  * (octets × (1 + nb destinations)) alors que `rate` est le débit de lecture de la source.
+ * `speed` : vitesse d'avancement mesurée et lissée (voir progressSpeed) ; utilisée si elle
+ * dépasse MIN_MEASURED_RATE, sinon repli sur l'ancienne formule.
  * NaN si le débit ou le total est inconnu.
  */
-export function remainingSecs(total: number, done: number, rate: number, destinations: number): number {
-  if (!(rate > 0) || !(total > 0)) return NaN;
+export function remainingSecs(total: number, done: number, rate: number, destinations: number, speed = 0): number {
+  if (!(total > 0)) return NaN;
+  if (speed >= MIN_MEASURED_RATE) return Math.max(total - done, 0) / speed;
+  if (!(rate > 0)) return NaN;
   return (total - done) / (rate * (1 + destinations));
 }
 

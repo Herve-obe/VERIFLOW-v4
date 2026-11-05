@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
+use super::meter::{PhaseStat, Throughput};
 use super::mhl::REPORTS_DIR;
 use super::mhl_verify::{VerifyStatus, VerifySummary};
 use super::scan::SourceInventory;
@@ -30,6 +31,8 @@ pub struct ReportInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportFiles {
     pub csv: PathBuf,
+    /// CSV de débit (`<rapport>_debit.csv`, `libelle;valeur`) ; absent si non écrit.
+    pub rates_csv: Option<PathBuf>,
     pub html: PathBuf,
     pub pdf: PathBuf,
     pub pdf_sha256: String,
@@ -83,6 +86,125 @@ fn rate_text(bytes: u64, secs: f64) -> String {
     format!("{:.1} Mo/s", bytes as f64 / 1e6 / secs).replace('.', ",")
 }
 
+/// Une phase : volume, temps passé dans les appels d'E/S et débit pendant ce temps.
+fn phase_text(p: &PhaseStat) -> String {
+    format!(
+        "{} en {} s d'E/S, {}",
+        human_size(p.bytes),
+        format!("{:.1}", p.busy_s).replace('.', ","),
+        rate_text(p.bytes, p.busy_s)
+    )
+}
+
+/// Lignes de débit communes aux rapports de copie (libellé, valeur).
+fn throughput_rows(t: &Throughput) -> Vec<(String, String)> {
+    let mut rows = vec![(
+        "Débit global (taille / durée totale)".to_string(),
+        match t.effective_rate {
+            Some(r) => format!("{:.1} Mo/s", r / 1e6).replace('.', ","),
+            None => "-".into(),
+        },
+    )];
+    rows.push(("Lecture source".into(), phase_text(&t.source_read)));
+    for (i, p) in t.write.iter().enumerate() {
+        rows.push((format!("Écriture destination {}", i + 1), phase_text(p)));
+    }
+    for (i, p) in t.verify.iter().enumerate() {
+        rows.push((format!("Relecture destination {}", i + 1), phase_text(p)));
+    }
+    rows.push(("Limité par".into(), bottleneck_text(&t.bottleneck)));
+    rows
+}
+
+/// Lignes de débit du rapport de vérification MHL.
+fn verify_throughput_rows(s: &VerifySummary) -> Vec<(String, String)> {
+    // Annulée : pas de débit global (comme dans le CSV de débit).
+    let global = if s.cancelled || s.read.bytes == 0 {
+        "-".into()
+    } else {
+        rate_text(s.read.bytes, s.duration_s)
+    };
+    vec![
+        ("Débit global (taille / durée totale)".into(), global),
+        ("Relecture du disque".into(), phase_text(&s.read)),
+    ]
+}
+
+/// Lignes brutes du CSV de débit : nombres sans unité dans la valeur
+/// (octets, octets par seconde, secondes), point décimal.
+fn phase_raw(name: &str, p: &PhaseStat) -> Vec<(String, String)> {
+    let rate = if p.busy_s > 0.0 {
+        format!("{:.1}", p.bytes as f64 / p.busy_s)
+    } else {
+        String::new()
+    };
+    vec![
+        (format!("{name} : octets"), p.bytes.to_string()),
+        (
+            format!("{name} : temps d'E/S (s)"),
+            format!("{:.3}", p.busy_s),
+        ),
+        (
+            format!("{name} : activité (s)"),
+            format!("{:.3}", p.active_s),
+        ),
+        (format!("{name} : débit sur temps d'E/S (octets/s)"), rate),
+    ]
+}
+
+fn global_raw(rate: Option<f64>) -> (String, String) {
+    (
+        "Débit global (octets/s)".into(),
+        rate.map(|r| format!("{r:.1}")).unwrap_or_default(),
+    )
+}
+
+/// CSV de débit d'une copie (`libelle;valeur`, UTF-8 avec BOM).
+fn throughput_csv(t: &Throughput) -> String {
+    let mut rows = vec![global_raw(t.effective_rate)];
+    rows.extend(phase_raw("Lecture source", &t.source_read));
+    for (i, p) in t.write.iter().enumerate() {
+        rows.extend(phase_raw(&format!("Écriture destination {}", i + 1), p));
+    }
+    for (i, p) in t.verify.iter().enumerate() {
+        rows.extend(phase_raw(&format!("Relecture destination {}", i + 1), p));
+    }
+    rows.push(("Limité par".into(), t.bottleneck.clone()));
+    rates_csv(&rows)
+}
+
+/// CSV de débit d'une vérification MHL.
+fn verify_throughput_csv(s: &VerifySummary) -> String {
+    let rate = (!s.cancelled && s.duration_s > 0.0 && s.read.bytes > 0)
+        .then(|| s.read.bytes as f64 / s.duration_s);
+    let mut rows = vec![global_raw(rate)];
+    rows.extend(phase_raw("Relecture du disque", &s.read));
+    rates_csv(&rows)
+}
+
+fn rates_csv(rows: &[(String, String)]) -> String {
+    let mut out = String::from("\u{feff}libelle;valeur\r\n");
+    for (k, v) in rows {
+        out += &format!("\"{}\";{v}\r\n", k.replace('"', "\"\""));
+    }
+    out
+}
+
+fn bottleneck_text(b: &str) -> String {
+    match b {
+        "source" => "lecture de la source".into(),
+        "cpu" => "calcul des empreintes (processeur)".into(),
+        "" => "-".into(),
+        d => match d
+            .strip_prefix("dest:")
+            .and_then(|i| i.parse::<usize>().ok())
+        {
+            Some(i) => format!("destination {}", i + 1),
+            None => d.to_owned(),
+        },
+    }
+}
+
 impl ReportData<'_> {
     fn ok(&self) -> bool {
         !self.summary.cancelled && self.summary.failed_files == 0
@@ -119,7 +241,7 @@ impl ReportData<'_> {
     }
 
     /// Lignes d'en-tête communes (libellé, valeur).
-    fn header_rows(&self, csv_sha: &str) -> Vec<(String, String)> {
+    fn header_rows(&self, csv_sha: &str, rates_sha: &str) -> Vec<(String, String)> {
         let mut rows = vec![
             (
                 "Projet".into(),
@@ -137,10 +259,6 @@ impl ReportData<'_> {
             ("Début".into(), self.summary.started_at.clone()),
             ("Fin".into(), self.summary.finished_at.clone()),
             ("Durée".into(), duration_text(self.summary.duration_s)),
-            (
-                "Débit moyen".into(),
-                rate_text(self.summary.total_bytes, self.summary.duration_s),
-            ),
             (
                 "Source".into(),
                 format!("{} ({})", self.inv.name, self.inv.root.display()),
@@ -188,7 +306,9 @@ impl ReportData<'_> {
                 ));
             }
         }
+        rows.extend(throughput_rows(&self.summary.throughput));
         rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
+        rows.push(("Débit (CSV)".into(), format!("SHA-256 {rates_sha}")));
         if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             rows.push(("Remarques".into(), n.to_owned()));
         }
@@ -236,7 +356,7 @@ impl ReportData<'_> {
     }
 
     /// HTML autonome, prêt à imprimer.
-    pub fn html(&self, csv_sha: &str) -> String {
+    pub fn html(&self, csv_sha: &str, rates_sha: &str) -> String {
         let e = |s: &str| {
             s.replace('&', "&amp;")
                 .replace('<', "&lt;")
@@ -256,7 +376,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
             if self.ok() { "ok" } else { "ko" },
             e(&self.verdict())
         );
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             h += &format!("<tr><td>{}</td><td class=\"m\">{}</td></tr>", e(&k), e(&v));
         }
         h += "</table><table><tr><th>#</th><th>Fichier</th><th>Taille</th>";
@@ -287,7 +407,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
     }
 
     /// PDF A4, polices standard (aucune police à embarquer).
-    pub fn pdf(&self, csv_sha: &str) -> Vec<u8> {
+    pub fn pdf(&self, csv_sha: &str, rates_sha: &str) -> Vec<u8> {
         let mut doc = PdfDoc::new();
         doc.text(&Font::Bold, 18.0, "Rapport de transfert (OFFLOAD)");
         doc.gap(4.0);
@@ -295,7 +415,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
         doc.gap(8.0);
         doc.banner(&self.verdict(), self.ok());
         doc.gap(8.0);
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             doc.key_value(&k, &v);
         }
         doc.gap(10.0);
@@ -344,8 +464,10 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
 pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
     let csv = data.csv();
     let csv_sha = hash_data(HashAlgo::Sha256, csv.as_bytes());
-    let html = data.html(&csv_sha);
-    let pdf = data.pdf(&csv_sha);
+    let rates = throughput_csv(&data.summary.throughput);
+    let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+    let html = data.html(&csv_sha, &rates_sha);
+    let pdf = data.pdf(&csv_sha, &rates_sha);
     let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
     let base = format!("{}_offload_{stamp}", data.inv.name);
@@ -355,9 +477,14 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
         if fs::create_dir_all(&dir).is_err() {
             continue; // destination inaccessible : rapport écrit sur les autres
         }
-        let p = |ext: &str| dir.join(format!("{base}.{ext}"));
+        let p = |ext: &str| {
+            // Extension précédée de « _ » : fichier annexe (`_debit.csv`), sinon « . ».
+            let sep = if ext.starts_with('_') { "" } else { "." };
+            dir.join(format!("{base}{sep}{ext}"))
+        };
         let write = || -> std::io::Result<()> {
             fs::write(p("csv"), &csv)?;
+            fs::write(p("_debit.csv"), &rates)?;
             fs::write(p("html"), &html)?;
             fs::write(p("pdf"), &pdf)?;
             fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
@@ -366,6 +493,7 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
         if write().is_ok() {
             out.push(ReportFiles {
                 csv: p("csv"),
+                rates_csv: Some(p("_debit.csv")),
                 html: p("html"),
                 pdf: p("pdf"),
                 pdf_sha256: pdf_sha.clone(),
@@ -430,7 +558,7 @@ impl VerifyData<'_> {
         text
     }
 
-    fn header_rows(&self, csv_sha: &str) -> Vec<(String, String)> {
+    fn header_rows(&self, csv_sha: &str, rates_sha: &str) -> Vec<(String, String)> {
         let s = self.summary;
         let mut rows = vec![
             (
@@ -468,6 +596,7 @@ impl VerifyData<'_> {
                 ),
             ),
         ];
+        rows.extend(verify_throughput_rows(s));
         for issue in &s.chain.issues {
             rows.push(match issue {
                 super::mhl_read::ChainIssue::Altered(n) => (
@@ -492,6 +621,7 @@ impl VerifyData<'_> {
             rows.push(("Écriture de la génération".into(), format!("ÉCHEC : {e}")));
         }
         rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
+        rows.push(("Débit (CSV)".into(), format!("SHA-256 {rates_sha}")));
         if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             rows.push(("Remarques".into(), n.to_owned()));
         }
@@ -527,7 +657,7 @@ impl VerifyData<'_> {
         out
     }
 
-    pub fn html(&self, csv_sha: &str) -> String {
+    pub fn html(&self, csv_sha: &str, rates_sha: &str) -> String {
         let e = |s: &str| {
             s.replace('&', "&amp;")
                 .replace('<', "&lt;")
@@ -547,7 +677,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
             if self.summary.conform { "ok" } else { "ko" },
             e(&self.verdict())
         );
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             h += &format!("<tr><td>{}</td><td class=\"m\">{}</td></tr>", e(&k), e(&v));
         }
         h += "</table><table><tr><th>#</th><th>Fichier</th><th>Taille</th><th>Méthode</th><th>Empreinte relue</th><th>Statut</th></tr>";
@@ -570,7 +700,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
         h
     }
 
-    pub fn pdf(&self, csv_sha: &str) -> Vec<u8> {
+    pub fn pdf(&self, csv_sha: &str, rates_sha: &str) -> Vec<u8> {
         let mut doc = PdfDoc::new();
         doc.text(&Font::Bold, 18.0, "VÉRIFICATION ASC MHL");
         doc.gap(4.0);
@@ -578,7 +708,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
         doc.gap(8.0);
         doc.banner(&self.verdict(), self.summary.conform);
         doc.gap(8.0);
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             doc.key_value(&k, &v);
         }
         doc.gap(10.0);
@@ -616,8 +746,10 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
 pub fn write_verify_reports(data: &VerifyData) -> Result<ReportFiles> {
     let csv = data.csv();
     let csv_sha = hash_data(HashAlgo::Sha256, csv.as_bytes());
-    let html = data.html(&csv_sha);
-    let pdf = data.pdf(&csv_sha);
+    let rates = verify_throughput_csv(data.summary);
+    let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+    let html = data.html(&csv_sha, &rates_sha);
+    let pdf = data.pdf(&csv_sha, &rates_sha);
     let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
     let base = format!(
@@ -626,13 +758,19 @@ pub fn write_verify_reports(data: &VerifyData) -> Result<ReportFiles> {
     );
     let dir = data.summary.root.join(REPORTS_DIR);
     fs::create_dir_all(&dir)?;
-    let p = |ext: &str| dir.join(format!("{base}.{ext}"));
+    let p = |ext: &str| {
+        // Extension précédée de « _ » : fichier annexe (`_debit.csv`), sinon « . ».
+        let sep = if ext.starts_with('_') { "" } else { "." };
+        dir.join(format!("{base}{sep}{ext}"))
+    };
     fs::write(p("csv"), &csv)?;
+    fs::write(p("_debit.csv"), &rates)?;
     fs::write(p("html"), &html)?;
     fs::write(p("pdf"), &pdf)?;
     fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
     Ok(ReportFiles {
         csv: p("csv"),
+        rates_csv: Some(p("_debit.csv")),
         html: p("html"),
         pdf: p("pdf"),
         pdf_sha256: pdf_sha,
@@ -1085,6 +1223,11 @@ mod tests {
         assert!(html.contains("VÉRIFICATION ASC MHL") && html.contains("CONFORME"));
         let csv = fs::read_to_string(&f.csv).unwrap();
         assert_eq!(csv.lines().count(), 3);
+        let rates = fs::read_to_string(f.rates_csv.as_ref().unwrap()).unwrap();
+        assert!(
+            rates.contains("\"Relecture du disque : octets\";10")
+                && html.contains("Relecture du disque")
+        );
         assert!(fs::read(&f.pdf).unwrap().starts_with(b"%PDF-"));
         assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
 
@@ -1104,6 +1247,12 @@ mod tests {
         let csv = fs::read_to_string(&f.csv).unwrap();
         assert!(csv.contains(";MANQUANT;") && csv.contains(";NOUVEAU;"));
 
+        // Annulée : pas de débit global dans le PDF et le HTML.
+        let mut cut = v.clone();
+        cut.cancelled = true;
+        assert!(verify_throughput_rows(&v)[0].1.ends_with("Mo/s"));
+        assert_eq!(verify_throughput_rows(&cut)[0].1, "-");
+
         // Rapports impossibles à écrire : erreur rendue, résultat intact.
         let blocked = tempfile::tempdir().unwrap();
         let mut moved = v.clone();
@@ -1114,6 +1263,62 @@ mod tests {
             info: &info
         })
         .is_err());
+    }
+
+    #[test]
+    fn report_contains_throughput_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), vec![7u8; 5000]).unwrap();
+        let dests = vec![dir.path().join("D1/A001"), dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: dests.clone(),
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let info = ReportInfo::default();
+        let data = ReportData {
+            inv: &inv,
+            summary: &summary,
+            spec: &spec,
+            info: &info,
+            mhl: &[None, None],
+        };
+        let files = write_reports(&data).unwrap();
+        let labels = [
+            "Débit global (taille / durée totale)",
+            "Lecture source",
+            "Écriture destination 1",
+            "Écriture destination 2",
+            "Relecture destination 1",
+            "Relecture destination 2",
+            "Limité par",
+        ];
+        let csv = fs::read_to_string(&files[0].csv).unwrap();
+        let html = fs::read_to_string(&files[0].html).unwrap();
+        // CSV de données pur, mesures dans le CSV de débit.
+        assert!(!csv.contains('#'));
+        let rates_path = files[0].rates_csv.clone().unwrap();
+        assert!(rates_path.to_string_lossy().ends_with("_debit.csv"));
+        let rates = fs::read_to_string(&rates_path).unwrap();
+        assert!(rates.starts_with("\u{feff}libelle;valeur\r\n"));
+        let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+        assert!(html.contains(&rates_sha));
+        for l in labels {
+            assert!(html.contains(l), "HTML sans « {l} »");
+        }
+        assert!(rates.contains("\"Écriture destination 2 : octets\";5000"));
+        assert!(rates.contains("\"Lecture source : octets\";5000"));
+        // PDF : les libellés passent par le même tableau d'en-tête.
+        assert!(data
+            .header_rows("x", "y")
+            .iter()
+            .any(|(k, _)| k == "Limité par"));
+        assert!(fs::read(&files[0].pdf).unwrap().starts_with(b"%PDF-"));
     }
 
     #[test]

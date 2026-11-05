@@ -852,6 +852,17 @@
   "offload.error.job_spawn": "The copy could not start",
   "offload.eject.code.source_in_use_eject": "Card not ejected: another copy is still using it",
   "offload.eject.code.eject_not_removable": "Cannot eject: the source is not a removable drive",
+  "offload.meter.source": "Source (read)",
+  "offload.meter.write": "Write",
+  "offload.meter.verify": "Read-back",
+  "offload.meter.global": "Overall rate",
+  "offload.meter.bottleneck": "Limited by",
+  "offload.meter.bottleneck.source": "the source",
+  "offload.meter.bottleneck.dest": "destination",
+  "offload.meter.bottleneck.cpu": "the processor",
+  "offload.meter.cpu_bound": "Limited by hash computation",
+  "offload.meter.details": "Details by phase",
+  "offload.report.throughput_csv": "Rate CSV",
   "offload.verify.button": "Re-verify a disk (ASC MHL)",
   "offload.verify.title": "Re-verify a disk",
   "offload.verify.no_history": "No ASC MHL history in this folder or its subfolders.",
@@ -887,5 +898,6 @@
   "offload.verify.empty_history": "Empty history: nothing to compare",
   "offload.verify.write_error": "Verification generation not written",
   "offload.verify.omitted": "and {n} more in the CSV report",
-  "offload.verify.loading": "Reading the history"
+  "offload.verify.loading": "Reading the history",
+  "offload.verify.read_rate": "Read-back rate"
 }
