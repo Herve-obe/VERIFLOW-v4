@@ -292,6 +292,7 @@ Aucun logiciel ne peut garantir à lui seul une valeur juridique. VERIFLOW fourn
 **Commun**
 - Raccourcis (VALIDÉ, tous reconfigurables) : **Espace** lecture/pause, **J/K/L** shuttle arrière/pause/avant (appuis répétés = vitesse ×2, ×4, ×8), **flèches gauche/droite** image par image, **I/O** points d'entrée/sortie, **Entrée** stop et retour au début, **M** marqueur, une touche dédiée pour ouvrir le pop-up REPORT.
 - Pop-up de saisie vers REPORT : raccourci dédié + ouverture automatique au changement de prise (PROPOSÉ).
+- Disposition en panneaux (ajout du 05/11/2026) : explorateur, liste de clips et playlist à gauche ; bandeau d'infos, lecteur et bande de clips au centre ; inspecteur de métadonnées en lecture seule à droite. Panneaux redimensionnables et masquables, disposition mémorisée par mode (VIDEO, AUDIO).
 
 **Mode VIDEO**
 - Lecture fluide et **précise à l'image**, shuttle, jog.
