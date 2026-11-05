@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
+use super::meter::{PhaseStat, Throughput};
 use super::mhl::REPORTS_DIR;
 use super::mhl_verify::{VerifyStatus, VerifySummary};
 use super::scan::SourceInventory;
@@ -81,6 +82,63 @@ fn rate_text(bytes: u64, secs: f64) -> String {
         return "-".into();
     }
     format!("{:.1} Mo/s", bytes as f64 / 1e6 / secs).replace('.', ",")
+}
+
+/// Une phase : volume, temps passé dans les appels d'E/S et débit pendant ce temps.
+fn phase_text(p: &PhaseStat) -> String {
+    format!(
+        "{} en {} s d'E/S, {}",
+        human_size(p.bytes),
+        format!("{:.1}", p.busy_s).replace('.', ","),
+        rate_text(p.bytes, p.busy_s)
+    )
+}
+
+/// Lignes de débit communes aux rapports de copie (libellé, valeur).
+fn throughput_rows(t: &Throughput) -> Vec<(String, String)> {
+    let mut rows = vec![(
+        "Débit global (taille / durée totale)".to_string(),
+        if t.effective_rate > 0.0 {
+            format!("{:.1} Mo/s", t.effective_rate / 1e6).replace('.', ",")
+        } else {
+            "-".into()
+        },
+    )];
+    rows.push(("Lecture source".into(), phase_text(&t.source_read)));
+    for (i, p) in t.write.iter().enumerate() {
+        rows.push((format!("Écriture destination {}", i + 1), phase_text(p)));
+    }
+    for (i, p) in t.verify.iter().enumerate() {
+        rows.push((format!("Relecture destination {}", i + 1), phase_text(p)));
+    }
+    rows.push(("Limité par".into(), bottleneck_text(&t.bottleneck)));
+    rows
+}
+
+/// Lignes de débit du rapport de vérification MHL.
+fn verify_throughput_rows(s: &VerifySummary) -> Vec<(String, String)> {
+    vec![
+        (
+            "Débit global (taille / durée totale)".into(),
+            rate_text(s.total_bytes, s.duration_s),
+        ),
+        ("Relecture du disque".into(), phase_text(&s.read)),
+    ]
+}
+
+fn bottleneck_text(b: &str) -> String {
+    match b {
+        "source" => "lecture de la source".into(),
+        "cpu" => "calcul des empreintes (processeur)".into(),
+        "" => "-".into(),
+        d => match d
+            .strip_prefix("dest:")
+            .and_then(|i| i.parse::<usize>().ok())
+        {
+            Some(i) => format!("destination {}", i + 1),
+            None => d.to_owned(),
+        },
+    }
 }
 
 impl ReportData<'_> {
@@ -188,6 +246,7 @@ impl ReportData<'_> {
                 ));
             }
         }
+        rows.extend(throughput_rows(&self.summary.throughput));
         rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
         if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             rows.push(("Remarques".into(), n.to_owned()));
@@ -231,6 +290,10 @@ impl ReportData<'_> {
             }
             out += &row.join(";");
             out += "\r\n";
+        }
+        // Mesures de débit : lignes « #libellé;valeur » après les fichiers.
+        for (k, v) in throughput_rows(&self.summary.throughput) {
+            out += &format!("#{k};{}\r\n", q(&v));
         }
         out
     }
@@ -465,6 +528,7 @@ impl VerifyData<'_> {
                 ),
             ),
         ];
+        rows.extend(verify_throughput_rows(s));
         for issue in &s.chain.issues {
             rows.push(match issue {
                 super::mhl_read::ChainIssue::Altered(n) => (
@@ -520,6 +584,9 @@ impl VerifyData<'_> {
             ];
             out += &row.join(";");
             out += "\r\n";
+        }
+        for (k, v) in verify_throughput_rows(self.summary) {
+            out += &format!("#{k};{}\r\n", q(&v));
         }
         out
     }
@@ -1021,7 +1088,7 @@ mod tests {
         let f = &files[0];
         let csv = fs::read_to_string(&f.csv).unwrap();
         assert!(csv.starts_with('\u{feff}'));
-        assert_eq!(csv.lines().count(), 81);
+        assert_eq!(csv.lines().filter(|l| !l.starts_with('#')).count(), 81);
         assert!(csv.contains(";VÉRIFIÉ;"));
         let html = fs::read_to_string(&f.html).unwrap();
         assert!(
@@ -1081,7 +1148,8 @@ mod tests {
         let html = fs::read_to_string(&f.html).unwrap();
         assert!(html.contains("VÉRIFICATION ASC MHL") && html.contains("CONFORME"));
         let csv = fs::read_to_string(&f.csv).unwrap();
-        assert_eq!(csv.lines().count(), 3);
+        assert_eq!(csv.lines().filter(|l| !l.starts_with('#')).count(), 3);
+        assert!(csv.contains("#Relecture du disque;") && html.contains("Relecture du disque"));
         assert!(fs::read(&f.pdf).unwrap().starts_with(b"%PDF-"));
         assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
 
@@ -1111,6 +1179,50 @@ mod tests {
             info: &info
         })
         .is_err());
+    }
+
+    #[test]
+    fn report_contains_throughput_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), vec![7u8; 5000]).unwrap();
+        let dests = vec![dir.path().join("D1/A001"), dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: dests.clone(),
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let info = ReportInfo::default();
+        let data = ReportData {
+            inv: &inv,
+            summary: &summary,
+            spec: &spec,
+            info: &info,
+            mhl: &[None, None],
+        };
+        let files = write_reports(&data).unwrap();
+        let labels = [
+            "Débit global (taille / durée totale)",
+            "Lecture source",
+            "Écriture destination 1",
+            "Écriture destination 2",
+            "Relecture destination 1",
+            "Relecture destination 2",
+            "Limité par",
+        ];
+        let csv = fs::read_to_string(&files[0].csv).unwrap();
+        let html = fs::read_to_string(&files[0].html).unwrap();
+        for l in labels {
+            assert!(html.contains(l), "HTML sans « {l} »");
+            assert!(csv.contains(&format!("#{l};")), "CSV sans « {l} »");
+        }
+        // PDF : les libellés passent par le même tableau d'en-tête.
+        assert!(data.header_rows("x").iter().any(|(k, _)| k == "Limité par"));
+        assert!(fs::read(&files[0].pdf).unwrap().starts_with(b"%PDF-"));
     }
 
     #[test]
