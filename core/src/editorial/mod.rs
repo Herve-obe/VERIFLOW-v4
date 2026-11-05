@@ -2,6 +2,7 @@
 //! MEDIA : des clips de chutier, sans séquence (sauf l'EDL). Ce module porte
 //! le modèle commun et les chemins ; chaque format a son fichier.
 
+pub mod fcpxml;
 pub mod model;
 pub mod paths;
 
