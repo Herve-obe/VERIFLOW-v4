@@ -851,5 +851,15 @@
   "offload.error.job_panic": "The copy stopped unexpectedly",
   "offload.error.job_spawn": "The copy could not start",
   "offload.eject.code.source_in_use_eject": "Card not ejected: another copy is still using it",
-  "offload.eject.code.eject_not_removable": "Cannot eject: the source is not a removable drive"
+  "offload.eject.code.eject_not_removable": "Cannot eject: the source is not a removable drive",
+  "offload.meter.source": "Source (read)",
+  "offload.meter.write": "Write",
+  "offload.meter.verify": "Read-back",
+  "offload.meter.global": "Overall rate",
+  "offload.meter.bottleneck": "Limited by",
+  "offload.meter.bottleneck.source": "the source",
+  "offload.meter.bottleneck.dest": "destination",
+  "offload.meter.bottleneck.cpu": "the processor",
+  "offload.meter.cpu_bound": "Limited by hash computation",
+  "offload.meter.details": "Details by phase"
 }

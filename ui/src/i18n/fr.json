@@ -851,5 +851,15 @@
   "offload.error.job_panic": "Arrêt inattendu de la copie",
   "offload.error.job_spawn": "La copie n'a pas pu démarrer",
   "offload.eject.code.source_in_use_eject": "Carte non éjectée : une autre copie l'utilise encore",
-  "offload.eject.code.eject_not_removable": "Éjection impossible : la source n'est pas un support amovible"
+  "offload.eject.code.eject_not_removable": "Éjection impossible : la source n'est pas un support amovible",
+  "offload.meter.source": "Source (lecture)",
+  "offload.meter.write": "Écriture",
+  "offload.meter.verify": "Relecture",
+  "offload.meter.global": "Débit global",
+  "offload.meter.bottleneck": "Limité par",
+  "offload.meter.bottleneck.source": "la source",
+  "offload.meter.bottleneck.dest": "la destination",
+  "offload.meter.bottleneck.cpu": "le processeur",
+  "offload.meter.cpu_bound": "Limité par le calcul des empreintes",
+  "offload.meter.details": "Détail par phase"
 }

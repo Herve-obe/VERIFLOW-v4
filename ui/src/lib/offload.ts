@@ -107,9 +107,36 @@ export interface FileResult {
   destinations: DestStatus[];
 }
 
+/** Débits instantanés (octets/s) : source, écriture et relecture par destination. */
+export interface Rates {
+  source: number;
+  write: number[];
+  verify: number[];
+  /** Part du temps où la lecture attend le calcul des empreintes (0 à 1). */
+  hash_wait_ratio: number;
+}
+
+/** Temps d'activité d'une phase (disque ou calcul). */
+export interface PhaseMeter {
+  bytes: number;
+  busy_s: number;
+  active_s: number;
+}
+
+export interface Throughput {
+  source_read: PhaseMeter;
+  write: PhaseMeter[];
+  verify: PhaseMeter[];
+  /** Taille de la source / durée totale (octets/s). */
+  effective_rate: number;
+  /** "source", "dest:<i>" (à partir de 0), "cpu" ou "". */
+  bottleneck: string;
+}
+
 export type EngineEvent =
   | { type: "file_started"; index: number; rel: string; size: number }
   | { type: "progress"; done: number; total: number; rate: number }
+  | ({ type: "rates" } & Rates)
   | { type: "file_done"; index: number; result: FileResult };
 
 export interface JobResult {
@@ -121,6 +148,7 @@ export interface JobResult {
     duration_s: number;
     cancelled: boolean;
     failed_files: number;
+    throughput?: Throughput;
   };
   roots: string[];
   mhl: (string | null)[];
@@ -170,10 +198,17 @@ export const batteryWarning = (estimatedSecs: number) =>
 /**
  * Secondes restantes d'une copie. `total` compte les octets lus et écrits
  * (octets × (1 + nb destinations)) alors que `rate` est le débit de lecture de la source.
- * NaN si le débit ou le total est inconnu.
+ * Avec des débits mesurés (`rates`), la copie et la relecture se chevauchent : le
+ * reste avance au débit de lecture de la source plus celui des relectures.
+ * Sans eux, repli sur l'ancienne formule. NaN si le débit ou le total est inconnu.
  */
-export function remainingSecs(total: number, done: number, rate: number, destinations: number): number {
-  if (!(rate > 0) || !(total > 0)) return NaN;
+export function remainingSecs(total: number, done: number, rate: number, destinations: number, rates: Rates | null = null): number {
+  if (!(total > 0)) return NaN;
+  if (rates) {
+    const measured = rates.source + rates.verify.reduce((a, b) => a + b, 0);
+    if (measured > 0) return Math.max(total - done, 0) / measured;
+  }
+  if (!(rate > 0)) return NaN;
   return (total - done) / (rate * (1 + destinations));
 }
 

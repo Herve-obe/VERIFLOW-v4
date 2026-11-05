@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
@@ -17,6 +17,8 @@ export interface Job {
   done: number;
   total: number;
   rate: number;
+  /** Derniers débits mesurés par disque et par phase. */
+  rates: Rates | null;
   current: string;
   verified: number;
   failed: FileResult[];
@@ -57,7 +59,7 @@ function runningEta(): number | null {
   let max: number | null = null;
   for (const j of offload.jobs) {
     if (j.state !== "running") continue;
-    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length);
+    const s = remainingSecs(j.total, j.done, j.rate, j.roots.length, j.rates);
     if (Number.isFinite(s) && (max === null || s > max)) max = s;
   }
   return max;
@@ -146,6 +148,7 @@ function applyNotice(n: Notice) {
       done: 0,
       total: 0,
       rate: 0,
+      rates: null,
       current: "",
       verified: 0,
       failed: [],
@@ -177,6 +180,7 @@ function applyNotice(n: Notice) {
     case "engine": {
       const e = n.event;
       if (e.type === "progress") Object.assign(j, { done: e.done, total: e.total, rate: e.rate });
+      else if (e.type === "rates") j.rates = { source: e.source, write: e.write, verify: e.verify, hash_wait_ratio: e.hash_wait_ratio };
       else if (e.type === "file_started") j.current = e.rel;
       else {
         const ok = e.result.destinations.every((d) => d.state !== "failed");

@@ -11,13 +11,36 @@
   let showAll = $state(false);
   let openError = $state("");
 
+  /** Nom court du disque d'après le dossier final (volume, lecteur ou dernier dossier). */
+  function diskName(root: string | undefined, i: number): string {
+    const fallback = `${t("offload.dest.short")} ${i + 1}`;
+    if (!root) return fallback;
+    const parts = root.replace(/\\/g, "/").split("/").filter(Boolean);
+    if (parts[0] === "Volumes" || parts[0] === "mnt") return parts[1] ?? fallback;
+    if (parts[0] === "media") return (parts[1] === "user" ? parts[2] : parts[1]) ?? fallback;
+    if (parts[0] === "run" && parts[1] === "media") return parts[3] ?? fallback;
+    return parts[0] ?? fallback;
+  }
+
   const open = (path: string) => {
     openError = "";
     reveal(path).catch((e) => (openError = String(e)));
   };
 
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
-  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
+  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length, job.rates));
+  const tp = $derived(job.result?.summary.throughput ?? null);
+  const bottleneck = $derived.by(() => {
+    const b = tp?.bottleneck ?? "";
+    if (b === "source") return t("offload.meter.bottleneck.source");
+    if (b === "cpu") return t("offload.meter.bottleneck.cpu");
+    if (b.startsWith("dest:")) {
+      const i = Number(b.slice(5));
+      return `${t("offload.meter.bottleneck.dest")} ${i + 1} (${diskName(job.roots[i], i)})`;
+    }
+    return "";
+  });
+  const phaseRate = (m: { bytes: number; active_s: number }) => (m.active_s > 0 ? rate(m.bytes / m.active_s) : "-");
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
   const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
@@ -83,6 +106,21 @@
     {/if}
   </div>
 
+  {#if job.state === "running" && job.rates}
+    <table class="meter mono">
+      <thead>
+        <tr><th></th><th>{t("offload.meter.write")}</th><th>{t("offload.meter.verify")}</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>{t("offload.meter.source")}</th><td colspan="2">{rate(job.rates.source)}</td></tr>
+        {#each job.rates.write as w, i (i)}
+          <tr><th title={job.roots[i]}>{diskName(job.roots[i], i)}</th><td>{rate(w)}</td><td>{rate(job.rates.verify[i] ?? 0)}</td></tr>
+        {/each}
+      </tbody>
+    </table>
+    {#if job.rates.hash_wait_ratio > 0.3}<div class="small cpu">{t("offload.meter.cpu_bound")}</div>{/if}
+  {/if}
+
   {#if job.current}
     <div class="current mono" title={job.current}>{job.current}</div>
   {/if}
@@ -97,6 +135,26 @@
         {job.result.summary.failed_files} {t("offload.verdict.failed")}
       {/if}
     </div>
+    {#if tp}
+      <div class="small global mono">
+        <span>{t("offload.meter.global")} : {rate(tp.effective_rate)}</span>
+        {#if bottleneck}<span>{t("offload.meter.bottleneck")} : {bottleneck}</span>{/if}
+      </div>
+      <details class="phases">
+        <summary>{t("offload.meter.details")}</summary>
+        <table class="meter mono">
+          <thead>
+            <tr><th></th><th>{t("offload.meter.write")}</th><th>{t("offload.meter.verify")}</th></tr>
+          </thead>
+          <tbody>
+            <tr><th>{t("offload.meter.source")}</th><td colspan="2">{phaseRate(tp.source_read)}</td></tr>
+            {#each tp.write as w, i (i)}
+              <tr><th title={job.roots[i]}>{diskName(job.roots[i], i)}</th><td>{phaseRate(w)}</td><td>{tp.verify[i] ? phaseRate(tp.verify[i]) : "-"}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </details>
+    {/if}
     {#if job.ejected}
       <div class="small">{job.ejected === "ok" ? t("offload.ejected") : `${t("offload.eject.error")} : ${job.ejectCode ? t(`offload.eject.code.${job.ejectCode}`) : job.ejected}`}</div>
     {/if}
@@ -305,6 +363,31 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--vf-text-muted);
+  }
+  .meter {
+    table-layout: auto;
+    width: auto;
+    min-width: 50%;
+  }
+  .meter th {
+    max-width: 14em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cpu {
+    color: var(--vf-warning);
+  }
+  .global {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--vf-space-4);
+    color: var(--vf-text);
+  }
+  .phases summary {
+    cursor: pointer;
+    font-size: var(--vf-text-sm);
+    color: var(--vf-accent);
   }
   .st.verified,
   .st.resumed_verified {
