@@ -152,7 +152,7 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
-  reports: { csv: string; html: string; pdf: string; pdf_sha256: string; throughput_csv?: string | null }[];
+  reports: { csv: string; html: string; pdf: string; pdf_sha256: string; rates_csv?: string | null }[];
   source_name: string;
   fingerprint: string;
 }

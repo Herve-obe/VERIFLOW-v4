@@ -167,7 +167,7 @@
     <div class="actions">
       {#each job.result.reports as r, i (r.pdf)}
         <button onclick={() => open(r.pdf)}>{t("offload.report.pdf")} {i + 1}</button>
-        {#if r.throughput_csv}<button class="ghost" onclick={() => open(r.throughput_csv!)}>{t("offload.report.throughput_csv")} {i + 1}</button>{/if}
+        {#if r.rates_csv}<button class="ghost" onclick={() => open(r.rates_csv!)}>{t("offload.report.throughput_csv")} {i + 1}</button>{/if}
       {/each}
       {#each job.result.roots as root, i (root)}
         <button class="ghost" onclick={() => open(root)}>{t("offload.open.folder")} {i + 1}</button>
