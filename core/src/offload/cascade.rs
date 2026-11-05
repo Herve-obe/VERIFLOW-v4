@@ -15,12 +15,14 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::engine::{run, DestStatus, Event, FileResult, Hashes, OffloadSpec, OffloadSummary};
+use super::engine::{
+    check_space, run, DestStatus, Event, FileResult, Hashes, OffloadSpec, OffloadSummary,
+};
 use super::hash::{hash_data, HashAlgo};
 use super::job::{overlap_allowed, JobResult, MhlFailure};
 use super::mhl::{write_cascade_generation, Action, GenEntry, MhlAuthor, REPORTS_DIR};
 use super::mhl_read::{load_history, nfc, read_chain, to_path, History, MHL_DIR};
-use super::report::{write_reports, CascadeInfo, ReportData, ReportInfo};
+use super::report::{write_reports, CascadeInfo, ReportData, ReportFiles, ReportInfo};
 use super::scan::{scan, SourceInventory};
 use crate::{Error, Result};
 
@@ -41,10 +43,33 @@ pub struct Stage1Summary {
     pub bottleneck: String,
     /// Dossiers de l'étape 1 copiés.
     pub destinations: Vec<PathBuf>,
+    /// Noms des fichiers de rapport de l'étape 1 (recopiés en étape 2).
+    #[serde(default)]
+    pub reports: Vec<String>,
 }
 
 impl Stage1Summary {
-    pub(super) fn of(summary: &OffloadSummary, destinations: &[PathBuf]) -> Stage1Summary {
+    pub(super) fn of(
+        summary: &OffloadSummary,
+        destinations: &[PathBuf],
+        reports: &[ReportFiles],
+    ) -> Stage1Summary {
+        let mut names: Vec<String> = Vec::new();
+        for r in reports {
+            let pdf = file_name(&r.pdf);
+            let all = [
+                Some(file_name(&r.csv)),
+                r.rates_csv.as_deref().map(file_name),
+                Some(file_name(&r.html)),
+                Some(format!("{pdf}.sha256")),
+                Some(pdf),
+            ];
+            for n in all.into_iter().flatten() {
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+        }
         Stage1Summary {
             started_at: summary.started_at.clone(),
             finished_at: summary.finished_at.clone(),
@@ -54,8 +79,15 @@ impl Stage1Summary {
             effective_rate: summary.throughput.effective_rate,
             bottleneck: summary.throughput.bottleneck.clone(),
             destinations: destinations.to_vec(),
+            reports: names,
         }
     }
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Étape 2 en attente : tout ce qu'il faut pour la lancer plus tard, y compris
@@ -125,10 +157,32 @@ fn cascade_err(code: &str, detail: impl std::fmt::Display) -> Error {
 pub fn error_code(e: &Error) -> Option<&'static str> {
     match e {
         Error::Report(m) if m.starts_with("cascade_no_source : ") => Some("cascade_no_source"),
+        Error::Report(m) if m.starts_with("no_space : ") => Some("no_space"),
         Error::Unsupported(m) if m.starts_with("cascade_no_immediate : ") => {
             Some("cascade_no_immediate")
         }
         _ => super::mhl::cascade_error_code(e),
+    }
+}
+
+/// Refus si une destination de l'étape 2 manque d'espace (`no_space`).
+fn space_error(missing: &[Option<u64>]) -> Result<()> {
+    if missing.iter().any(Option::is_some) {
+        return Err(cascade_err(
+            "no_space",
+            "espace insuffisant sur une destination de l'étape 2",
+        ));
+    }
+    Ok(())
+}
+
+/// Message d'une erreur pour l'interface : pour une erreur à code stable
+/// (`cascade_xxx`, `no_space`), le texte nu « code : détail », sans le préfixe
+/// de la variante (« média non pris en charge : », « rapport : »).
+pub fn message(e: &Error) -> String {
+    match (error_code(e), e) {
+        (Some(_), Error::Report(m) | Error::Unsupported(m)) => m.clone(),
+        _ => e.to_string(),
     }
 }
 
@@ -201,12 +255,13 @@ pub fn inventory(stage1_root: &Path, history: &History, card: &str) -> Result<St
 }
 
 /// Copie `src` vers `dst` puis relit les deux : la copie est retirée si elle
-/// diffère. Vrai si `dst` est identique à `src`.
+/// diffère. Un fichier déjà présent n'est jamais écrasé : il compte comme
+/// conforme seulement s'il est identique. Vrai si `dst` est identique à `src`.
 fn copy_identical(src: &Path, dst: &Path) -> bool {
     let attempt = || -> std::io::Result<bool> {
         let bytes = fs::read(src)?;
-        if fs::read(dst).is_ok_and(|b| b == bytes) {
-            return Ok(true);
+        if dst.exists() {
+            return Ok(fs::read(dst)? == bytes);
         }
         let tmp = dst.with_extension("vfpart");
         let mut f = fs::File::create(&tmp)?;
@@ -223,20 +278,14 @@ fn copy_identical(src: &Path, dst: &Path) -> bool {
     attempt().unwrap_or(false)
 }
 
-/// Rapports de l'étape 1 de la carte (`<carte>_offload_*`), copiés à l'identique
+/// Rapports de cette étape 1 (`Stage1Summary::reports`), copiés à l'identique
 /// dans `_VERIFLOW/` de chaque destination de l'étape 2 puis comparés.
 /// Renvoie, par destination, les fichiers conformes sur le total.
-fn copy_stage1_reports(source: &Path, dests: &[PathBuf], card: &str) -> Vec<(usize, usize)> {
-    let prefix = format!("{card}_offload_");
-    let mut names: Vec<String> = fs::read_dir(source.join(REPORTS_DIR))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_file())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(&prefix))
+fn copy_stage1_reports(source: &Path, dests: &[PathBuf], names: &[String]) -> Vec<(usize, usize)> {
+    let names: Vec<&String> = names
+        .iter()
+        .filter(|n| source.join(REPORTS_DIR).join(n).is_file())
         .collect();
-    names.sort();
     dests
         .iter()
         .map(|dest| {
@@ -292,6 +341,8 @@ pub fn execute(
         overlap: overlap_allowed(&pending.stage2_roots, super::storage::is_hdd),
         expected: Some(expected),
     };
+    // L'espace a pu changer depuis l'étape 1 : recontrôlé avant d'écrire.
+    space_error(&check_space(&inv, &spec.destinations))?;
     let mut summary = run(&inv, &spec, cancel, emit)?;
     let n = spec.destinations.len();
     if !summary.cancelled {
@@ -339,7 +390,7 @@ pub fn execute(
         }
     }
 
-    let reports_copied = copy_stage1_reports(&source, &spec.destinations, &pending.card);
+    let reports_copied = copy_stage1_reports(&source, &spec.destinations, &pending.stage1.reports);
     let reference = read_chain(&source)
         .ok()
         .and_then(|c| c.entries.last().cloned())
@@ -425,16 +476,46 @@ pub fn load(path: &Path) -> Result<Vec<PendingCascade>> {
 }
 
 /// Inscrit une étape 2 en attente (remplace celle de même clé). Un fichier
-/// illisible est mis de côté (`.corrompu`) plutôt que d'empêcher l'inscription.
+/// dont le JSON est illisible est mis de côté sous un nom horodaté
+/// (`.corrompu-<date>`, jamais écrasé) ; toute erreur d'E/S est propagée.
 pub fn save(path: &Path, pending: &PendingCascade) -> Result<()> {
     let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut list = read_store(path).unwrap_or_else(|_| {
-        let _ = fs::rename(path, path.with_extension("json.corrompu"));
-        Vec::new()
-    });
+    let mut list: Vec<PendingCascade> = match fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(list) => list,
+            Err(_) => {
+                set_aside(path)?;
+                Vec::new()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
     list.retain(|p| p.key != pending.key);
     list.push(pending.clone());
     write_store(path, &list)
+}
+
+/// Renomme un fichier illisible en `<nom>.corrompu-<date>` (numéroté si ce nom existe).
+fn set_aside(path: &Path) -> Result<()> {
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    for n in 0.. {
+        let suffix = if n == 0 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        let target = path.with_file_name(format!("{name}.corrompu-{stamp}{suffix}"));
+        if !target.exists() {
+            fs::rename(path, target)?;
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Retire une étape 2 en attente. Faux si la clé n'y était pas.
@@ -813,10 +894,17 @@ mod tests {
         assert_eq!(pre.already_in_destination.len(), 2);
         assert_eq!(pre.elsewhere.len(), 2);
         assert!(pre.roots[1].ends_with("HDD/A001"));
+        // L'étape 2 ne bloque pas la copie de la carte : simple avertissement.
         assert!(
-            pre.missing_space[1].is_some(),
+            pre.cascade_space_warning[1].is_some(),
             "espace de l'étape 2 contrôlé"
         );
+        assert_eq!(pre.cascade_space_warning[0], None);
+        assert!(
+            pre.missing_space[0].is_some(),
+            "espace de l'étape 1 contrôlé"
+        );
+        assert_eq!(pre.missing_space[1], None);
     }
 
     #[test]
@@ -841,12 +929,27 @@ mod tests {
         assert!(remove(&store, &pending.key).unwrap());
         assert!(!remove(&store, &pending.key).unwrap());
         assert_eq!(load(&store).unwrap().len(), 1);
-        // Fichier illisible : signalé à la lecture, mis de côté à l'inscription.
-        fs::write(&store, b"{ pas du json").unwrap();
-        assert!(load(&store).is_err());
-        save(&store, &pending).unwrap();
-        assert_eq!(load(&store).unwrap().len(), 1);
-        assert!(store.with_extension("json.corrompu").exists());
+        // Fichier illisible : signalé à la lecture, mis de côté à l'inscription,
+        // sous un nom qui n'en écrase jamais un autre.
+        let aside = |dir: &Path| {
+            fs::read_dir(dir)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().contains(".corrompu-"))
+                .count()
+        };
+        for round in 1..=2 {
+            fs::write(&store, b"{ pas du json").unwrap();
+            assert!(load(&store).is_err());
+            save(&store, &pending).unwrap();
+            assert_eq!(load(&store).unwrap().len(), 1);
+            assert_eq!(aside(store.parent().unwrap()), round);
+        }
+        // Erreur d'E/S (ici : le chemin est un dossier) : propagée, rien de déplacé.
+        let blocked = dir.path().join("data/dossier.json");
+        fs::create_dir_all(&blocked).unwrap();
+        assert!(save(&blocked, &pending).is_err());
+        assert!(blocked.is_dir());
     }
 
     #[test]
@@ -907,5 +1010,65 @@ mod tests {
         let own = out.reports[0].html.parent().unwrap();
         assert_eq!(own, hdd.join(REPORTS_DIR));
         assert_eq!(fs::read_dir(own).unwrap().count(), 10);
+    }
+
+    #[test]
+    fn card_not_free_when_stage1_history_cannot_be_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let ssd = dir.path().join("SSD");
+        // Un fichier à la place du dossier ascmhl : copie possible, historique non.
+        fs::create_dir_all(ssd.join("A001")).unwrap();
+        fs::write(ssd.join("A001/ascmhl"), b"occupe").unwrap();
+        let req = request(&src, std::slice::from_ref(&ssd), &[dir.path().join("HDD")]);
+        let pre = preflight(&req).unwrap();
+        let res = execute_stage1(&req, pre, &no_cancel(), |_| {}, None, None).unwrap();
+        assert_eq!(res.summary.failed_files, 0);
+        assert!(res.mhl[0].is_none());
+        assert!(res.mhl_errors[0].is_some());
+        assert!(!res.card_free, "sans historique, la carte reste à garder");
+        assert!(res.cascade.is_none());
+        let html = fs::read_to_string(&res.reports[0].html).unwrap();
+        assert!(html.contains("Carte libérable</td><td class=\"m\">non<"));
+    }
+
+    #[test]
+    fn stage1_report_never_overwrites_a_different_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, ssd, hdd, res) = stage1(dir.path());
+        let pending = res.cascade.unwrap();
+        assert_eq!(pending.stage1.reports.len(), 5);
+        // Un autre rapport de la même carte, sans lien avec cette étape 1.
+        let foreign = ssd.join(REPORTS_DIR).join("A001_offload_ancien.csv");
+        fs::write(&foreign, b"ancien").unwrap();
+        // Un rapport différent déjà présent à la destination : conservé.
+        let name = pending.stage1.reports[0].clone();
+        fs::create_dir_all(hdd.join(REPORTS_DIR)).unwrap();
+        fs::write(hdd.join(REPORTS_DIR).join(&name), b"autre contenu").unwrap();
+        let out = execute(&pending, &no_cancel(), |_| {}).unwrap();
+        assert_eq!(
+            fs::read(hdd.join(REPORTS_DIR).join(&name)).unwrap(),
+            b"autre contenu"
+        );
+        assert!(!hdd
+            .join(REPORTS_DIR)
+            .join("A001_offload_ancien.csv")
+            .exists());
+        let html = fs::read_to_string(&out.reports[0].html).unwrap();
+        assert!(html.contains("4/5 recopiés"));
+    }
+
+    #[test]
+    fn stage2_space_is_rechecked_and_messages_are_bare() {
+        assert!(space_error(&[None, None]).is_ok());
+        let err = space_error(&[None, Some(10)]).unwrap_err();
+        assert_eq!(error_code(&err), Some("no_space"));
+        assert!(message(&err).starts_with("no_space : "));
+        let e = Error::Unsupported("cascade_no_immediate : x".into());
+        assert_eq!(message(&e), "cascade_no_immediate : x");
+        let e = Error::Report("cascade_no_source : y".into());
+        assert_eq!(message(&e), "cascade_no_source : y");
+        let e = Error::Report("autre chose".into());
+        assert_eq!(message(&e), "rapport : autre chose");
     }
 }

@@ -131,8 +131,13 @@ pub struct Preflight {
     pub fingerprint: String,
     /// Dossier final de chaque destination.
     pub roots: Vec<PathBuf>,
-    /// Octets manquants par destination (null = assez de place).
+    /// Octets manquants par destination de l'étape 1 (null = assez de place, et
+    /// toujours null pour une destination de l'étape 2).
     pub missing_space: Vec<Option<u64>>,
+    /// Octets manquants par destination de l'étape 2 : simple avertissement,
+    /// elle ne bloque pas la copie de la carte (l'étape 2 recontrôle l'espace
+    /// à son démarrage). Toujours null pour une destination de l'étape 1.
+    pub cascade_space_warning: Vec<Option<u64>>,
     /// Destinations contenant déjà une copie vérifiée (historique ascmhl).
     pub already_in_destination: Vec<bool>,
     /// Rushes de la source déjà présents dans chaque destination.
@@ -272,12 +277,21 @@ fn preflight_with(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> Resu
             }
         })
         .collect();
+    let space = check_space(&inv, &roots);
+    let stage_space = |wanted: u8| -> Vec<Option<u64>> {
+        space
+            .iter()
+            .zip(&stages)
+            .map(|(m, st)| if *st == wanted { *m } else { None })
+            .collect()
+    };
     Ok(Preflight {
         source_name: inv.name.clone(),
         files: inv.files.len(),
         total_bytes: inv.total_bytes,
         fingerprint: inv.fingerprint.clone(),
-        missing_space: check_space(&inv, &roots),
+        missing_space: stage_space(1),
+        cascade_space_warning: stage_space(2),
         already_in_destination: roots
             .iter()
             .map(|r| r.join("ascmhl/ascmhl_chain.xml").exists())
@@ -366,6 +380,9 @@ pub fn execute(
         }
         k
     });
+    // Pas de recouvrement si une destination de l'étape 1 est un disque dur
+    // mécanique (celles de l'étape 2 ne sont pas copiées ici).
+    let overlap = overlap_allowed(&roots1, super::storage::is_hdd);
     let spec = OffloadSpec {
         destinations: roots1,
         algorithms: if req.algorithms.is_empty() {
@@ -377,8 +394,7 @@ pub fn execute(
             ExistingMode::Complete => known,
             _ => None,
         },
-        // Pas de recouvrement si une destination est un disque dur mécanique.
-        overlap: overlap_allowed(&pre.roots, super::storage::is_hdd),
+        overlap,
         expected: None,
     };
     if req.existing == ExistingMode::Replace {
@@ -412,8 +428,30 @@ pub fn execute(
     } else {
         written.into_iter().map(|r| r.ok()).collect()
     };
-    let card_free =
-        !summary.cancelled && summary.failed_files == 0 && !spec.destinations.is_empty();
+    // Étape 2 : seules comptent les destinations dont tous les fichiers sont
+    // vérifiés et dont l'historique est écrit.
+    let sound: Vec<PathBuf> = spec
+        .destinations
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            mhl[*i].is_some()
+                && summary
+                    .files
+                    .iter()
+                    .all(|f| !matches!(f.destinations[*i], DestStatus::Failed(_)))
+        })
+        .map(|(_, d)| d.clone())
+        .collect();
+    let cascade_possible = !summary.cancelled && !roots2.is_empty() && !sound.is_empty();
+    // Carte libérable : tout est vérifié, l'historique de chaque destination de
+    // l'étape 1 est écrit (sans lui l'étape 2 est impossible) et, s'il y a une
+    // étape 2, elle peut être lancée.
+    let card_free = !summary.cancelled
+        && summary.failed_files == 0
+        && !spec.destinations.is_empty()
+        && mhl.iter().all(Option::is_some)
+        && (roots2.is_empty() || cascade_possible);
     let info = ReportInfo {
         project: project
             .map(str::to_owned)
@@ -433,22 +471,7 @@ pub fn execute(
         mhl: &mhl,
         cascade: (!roots2.is_empty()).then_some(&planned),
     })?;
-    // Étape 2 : seules comptent les destinations dont tous les fichiers sont
-    // vérifiés et dont l'historique est écrit.
-    let sound: Vec<PathBuf> = spec
-        .destinations
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| {
-            mhl[*i].is_some()
-                && summary
-                    .files
-                    .iter()
-                    .all(|f| !matches!(f.destinations[*i], DestStatus::Failed(_)))
-        })
-        .map(|(_, d)| d.clone())
-        .collect();
-    let pending = (!summary.cancelled && !roots2.is_empty() && !sound.is_empty()).then(|| {
+    let pending = cascade_possible.then(|| {
         PendingCascade::new(
             &inv,
             sound,
@@ -456,7 +479,7 @@ pub fn execute(
             spec.algorithms.clone(),
             &info,
             pre.date.clone(),
-            Stage1Summary::of(&summary, &spec.destinations),
+            Stage1Summary::of(&summary, &spec.destinations, &reports),
         )
     });
     Ok(JobResult {

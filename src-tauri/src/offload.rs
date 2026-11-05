@@ -162,6 +162,11 @@ enum Notice {
         /// Étape 1 : numéro du travail de l'étape 2 mis en file.
         #[serde(skip_serializing_if = "Option::is_none")]
         cascade_job: Option<u64>,
+        /// Étape 1 : l'étape 2 n'a pas pu être inscrite sur disque (elle est
+        /// quand même en file, mais ne survivrait pas à un redémarrage). Texte
+        /// « cascade_store : détail ».
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cascade_error: Option<String>,
         /// Code stable de l'échec d'éjection (traduction côté interface) :
         /// `source_in_use_eject` ou `eject_not_removable`. Absent si l'échec
         /// vient du système (texte de `ejected`).
@@ -428,6 +433,7 @@ fn run_verify(
         ejected: None,
         card_free: false,
         cascade_job: None,
+        cascade_error: None,
         eject_code: None,
     });
 }
@@ -487,10 +493,11 @@ fn run_cascade(app: &AppHandle, id: u64, pending: &PendingCascade, cancel: &Atom
                 ejected: None,
                 card_free: false,
                 cascade_job: None,
+                cascade_error: None,
                 eject_code: None,
             });
         }
-        Err(e) => send(failed(id, e.to_string(), cascade::error_code(&e))),
+        Err(e) => send(failed(id, cascade::message(&e), cascade::error_code(&e))),
     }
 }
 
@@ -511,7 +518,7 @@ fn run_offload(
     let pre = match preflight(&request) {
         Ok(p) => p,
         Err(e) => {
-            return send(failed(id, e.to_string(), None));
+            return send(failed(id, cascade::message(&e), cascade::error_code(&e)));
         }
     };
     // L'espace a pu manquer entre le préflight de l'interface et le lancement
@@ -550,9 +557,13 @@ fn run_offload(
             // Étape 2 : inscrite sur disque (reprise possible après un
             // redémarrage), puis mise en file depuis ce fil, sans attendre.
             let mut cascade_job = None;
+            let mut cascade_error = None;
             if let Some(pending) = result.cascade.clone() {
-                if let Ok(path) = cascade_store(app) {
-                    let _ = cascade::save(&path, &pending);
+                let saved = cascade_store(app)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| cascade::save(&path, &pending).map_err(|e| e.to_string()));
+                if let Err(detail) = saved {
+                    cascade_error = Some(format!("cascade_store : {detail}"));
                 }
                 cascade_job = queue_cascade(app, shared, pending, Some(id));
             }
@@ -598,10 +609,11 @@ fn run_offload(
                 ejected,
                 card_free,
                 cascade_job,
+                cascade_error,
                 eject_code,
             });
         }
-        Err(e) => send(failed(id, e.to_string(), cascade::error_code(&e))),
+        Err(e) => send(failed(id, cascade::message(&e), cascade::error_code(&e))),
     }
 }
 
@@ -683,7 +695,7 @@ pub async fn offload_preflight(
         tauri::async_runtime::spawn_blocking(move || preflight(&request).map(|p| (p, request)))
             .await
             .map_err(text)?
-            .map_err(text)?;
+            .map_err(|e| cascade::message(&e))?;
     let (pre, request) = pre;
     let previous = {
         let state = app.state::<AppState>();
@@ -701,10 +713,17 @@ pub async fn offload_preflight(
         .map(|d| storage::is_hdd(d))
         .collect();
     let source_hdd = storage::is_hdd(&request.source);
+    // Durée et batterie ne portent que sur l'étape 1 : l'étape 2 se fait plus
+    // tard, sans la carte.
+    let immediate: Vec<bool> = pre.stages.iter().map(|s| *s == 1).collect();
     let estimated_secs = veriflow_core::battery::estimate_secs(
         pre.total_bytes,
-        request.destinations.len() + request.cascade.len(),
-        source_hdd || hdd.iter().any(|h| *h),
+        immediate.iter().filter(|i| **i).count(),
+        source_hdd
+            || hdd
+                .iter()
+                .zip(&immediate)
+                .any(|(h, immediate)| *h && *immediate),
     );
     // Une lecture de batterie en échec ne fait jamais échouer le préflight.
     let status = tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
@@ -742,7 +761,7 @@ pub async fn offload_check_existing(
     *state.check_cancel.lock().map_err(text)? = Some(cancel.clone());
     let emitter = app.clone();
     let (view, known) = tauri::async_runtime::spawn_blocking(move || {
-        let pre = preflight(&request).map_err(text)?;
+        let pre = preflight(&request).map_err(|e| cascade::message(&e))?;
         let inv = pre.inventory.as_ref().ok_or("inventaire absent")?;
         let (destinations, known) = existing::verify(
             inv,
@@ -809,7 +828,7 @@ pub async fn offload_start(
     })
     .await
     .map_err(text)?
-    .map_err(text)?;
+    .map_err(|e| cascade::message(&e))?;
     enqueue(
         &app,
         &state.shared,
@@ -1222,6 +1241,7 @@ mod tests {
                 effective_rate: None,
                 bottleneck: String::new(),
                 destinations: Vec::new(),
+                reports: Vec::new(),
             },
         }
     }

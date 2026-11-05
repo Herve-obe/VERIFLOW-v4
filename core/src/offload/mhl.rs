@@ -413,6 +413,11 @@ pub fn cascade_error_code(e: &Error) -> Option<&'static str> {
     }
 }
 
+/// Simple nom de fichier : ni séparateur, ni `..`, ni lecteur.
+fn plain_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains("..") && !name.contains(['/', '\\', ':'])
+}
+
 /// Mêmes générations (numéro, fichier, C4) dans le même ordre.
 fn same_entries(a: &[ChainEntry], b: &[ChainEntry]) -> bool {
     a.len() == b.len()
@@ -449,6 +454,14 @@ pub fn write_cascade_generation(
         return Err(cascade_err(
             "cascade_history",
             format!("historique de l'étape 1 altéré ({issue:?})"),
+        ));
+    }
+    // Un nom de génération vient d'un fichier : jamais de chemin (lecture ou
+    // écriture hors du dossier ascmhl).
+    if let Some(e) = s1.entries.iter().find(|e| !plain_file_name(&e.file)) {
+        return Err(cascade_err(
+            "cascade_history",
+            format!("nom de génération refusé dans la chaîne ({:?})", e.file),
         ));
     }
     let src_dir = stage1_root.join("ascmhl");
@@ -879,6 +892,28 @@ mod tests {
         let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
         assert_eq!(cascade_error_code(&err), Some("cascade_diverged"));
         assert_eq!(snapshot(&hdd), before, "destination intacte");
+    }
+
+    #[test]
+    fn cascade_refuses_generation_names_that_are_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        let g1 = read_chain(&ssd).unwrap().entries[0].file.clone();
+        // La génération est aussi présente hors de ascmhl : la chaîne reste
+        // intacte (C4 identique), seul le nom la rend inacceptable.
+        fs::copy(ssd.join("ascmhl").join(&g1), ssd.join("dehors.mhl")).unwrap();
+        let chain = ssd.join("ascmhl").join(CHAIN_FILE);
+        let xml = fs::read_to_string(&chain).unwrap();
+        fs::write(&chain, xml.replace(&g1, "../dehors.mhl")).unwrap();
+        assert!(read_chain(&ssd).unwrap().issues.is_empty());
+        let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
+        assert_eq!(cascade_error_code(&err), Some("cascade_history"));
+        assert!(!hdd.exists(), "rien écrit");
+        assert!(plain_file_name("0001_A001_2026-11-05.mhl"));
+        for bad in ["", "..", "a/b.mhl", "a\\b.mhl", "C:x.mhl", "a..b"] {
+            assert!(!plain_file_name(bad), "{bad}");
+        }
     }
 
     #[test]
