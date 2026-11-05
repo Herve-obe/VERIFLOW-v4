@@ -860,5 +860,7 @@
   "edit.done": "fichier(s) écrit(s)",
   "edit.warn.ale_mixed_rates": "Les clips ont des cadences différentes : un fichier ALE a été écrit par cadence.",
   "edit.warn.edl_mixed_rates": "Les clips ont des cadences différentes : l'EDL suit la cadence du premier clip, vérifie les durées.",
-  "edit.warn.xmeml_rounding": "XMEML compte en images entières : le décalage du son synchronisé a été arrondi à l'image."
+  "edit.warn.xmeml_rounding": "XMEML compte en images entières : le décalage du son synchronisé a été arrondi à l'image.",
+  "edit.warn.sound_no_overlap": "Le son synchronisé ne chevauche pas la vidéo : il n'a pas été ajouté.",
+  "edit.sync.later": "Le son synchronisé de SYNC sera ajouté dans une prochaine version."
 }

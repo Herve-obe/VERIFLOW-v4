@@ -37,7 +37,8 @@ export const TARGET_FCPXML: Record<EditTarget, FcpxmlVersion> = {
 export interface EditOptions {
   title: string;
   paths: "absolute" | "relative";
-  base: string;
+  /** Null : le cœur prend le dossier du fichier écrit. */
+  base: string | null;
   markers: boolean;
   fcpxml_version: FcpxmlVersion;
   ale_ascii: boolean;

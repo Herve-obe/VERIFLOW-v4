@@ -860,5 +860,7 @@
   "edit.done": "file(s) written",
   "edit.warn.ale_mixed_rates": "Clips have different frame rates: one ALE file was written per rate.",
   "edit.warn.edl_mixed_rates": "Clips have different frame rates: the EDL follows the first clip's rate. Check durations.",
-  "edit.warn.xmeml_rounding": "XMEML counts whole frames: the synced sound offset was rounded to the frame."
+  "edit.warn.xmeml_rounding": "XMEML counts whole frames: the synced sound offset was rounded to the frame.",
+  "edit.warn.sound_no_overlap": "The synced sound does not overlap the video: it was not added.",
+  "edit.sync.later": "Synced sound from SYNC will be added in a future version."
 }

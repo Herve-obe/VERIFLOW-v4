@@ -335,7 +335,6 @@
   <EditExportDialog
     selectionPaths={selection.map((m) => m.path)}
     folderPaths={visible.map((m) => m.path)}
-    base={dir}
     defaultTitle={dir.split(/[\\/]/).filter(Boolean).pop() ?? ""}
     onClose={() => (editExport = false)}
   />

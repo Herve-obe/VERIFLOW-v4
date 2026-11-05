@@ -21,13 +21,11 @@
   let {
     selectionPaths,
     folderPaths,
-    base,
     defaultTitle,
     onClose,
   }: {
     selectionPaths: string[];
     folderPaths: string[];
-    base: string;
     defaultTitle: string;
     onClose: () => void;
   } = $props();
@@ -65,11 +63,20 @@
     formats = on ? [...formats, f] : formats.filter((x) => x !== f);
   }
 
-  const warn = (w: { code: string; detail: string }) => {
-    const k = `edit.warn.${w.code}`;
-    return t(k) === k ? w.detail : t(k);
+  /** Une ligne par code d'avertissement, avec le nombre d'occurrences. */
+  const warnings = $derived.by(() => {
+    const map = new Map<string, { code: string; detail: string; count: number }>();
+    for (const w of result?.warnings ?? []) {
+      const g = map.get(w.code);
+      if (g) g.count++;
+      else map.set(w.code, { ...w, count: 1 });
+    }
+    return [...map.values()];
+  });
+  const warnText = (code: string, detail: string) => {
+    const k = `edit.warn.${code}`;
+    return t(k) === k ? detail : t(k);
   };
-  const name = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   async function run() {
     if (formats.length === 0 || paths.length === 0) return;
@@ -82,7 +89,7 @@
       result = await editorialExport(
         formats,
         paths,
-        { title, paths: pathMode, base, markers, fcpxml_version: version, ale_ascii: ascii },
+        { title, paths: pathMode, base: null, markers, fcpxml_version: version, ale_ascii: ascii },
         r,
       );
     } catch (e) {
@@ -99,11 +106,14 @@
       <p class="ok">{result.written.length} {t("edit.done")}</p>
       <ul class="files mono">
         {#each result.written as w (w)}
-          <li title={w}>{name(w)}</li>
+          <li>{w}</li>
         {/each}
       </ul>
-      {#each result.warnings as w, i (i)}
-        <p class="warn">{warn(w)}</p>
+      {#each warnings as w (w.code)}
+        <p class="warn">
+          {warnText(w.code, w.detail)}{w.count > 1 ? ` (×${w.count})` : ""}
+          {#if warnText(w.code, w.detail) !== w.detail}<span class="detail">{w.detail}</span>{/if}
+        </p>
       {/each}
       <div class="buttons">
         <button onclick={() => result?.written[0] && reveal(result.written[0]).catch(() => {})}>{t("edit.reveal")}</button>
@@ -178,6 +188,8 @@
         {/if}
       </div>
 
+      <p class="hint">{t("edit.sync.later")}</p>
+
       {#if error}<p class="err">{error}</p>{/if}
       <div class="buttons">
         <button onclick={onClose}>{t("dialog.cancel")}</button>
@@ -251,6 +263,13 @@
     background: var(--vf-surface);
     border: 1px solid var(--vf-border);
     border-radius: var(--vf-radius-sm);
+  }
+  .files li {
+    overflow-wrap: anywhere;
+  }
+  .detail {
+    display: block;
+    color: var(--vf-text-muted);
   }
   .ok {
     margin: 0;
