@@ -861,5 +861,6 @@
   "offload.meter.bottleneck.dest": "la destination",
   "offload.meter.bottleneck.cpu": "le processeur",
   "offload.meter.cpu_bound": "Limité par le calcul des empreintes",
-  "offload.meter.details": "Détail par phase"
+  "offload.meter.details": "Détail par phase",
+  "offload.report.throughput_csv": "CSV débit"
 }

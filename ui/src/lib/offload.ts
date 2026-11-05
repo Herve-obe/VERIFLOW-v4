@@ -128,7 +128,7 @@ export interface Throughput {
   write: PhaseMeter[];
   verify: PhaseMeter[];
   /** Taille de la source / durée totale (octets/s). */
-  effective_rate: number;
+  effective_rate?: number | null;
   /** "source", "dest:<i>" (à partir de 0), "cpu" ou "". */
   bottleneck: string;
 }
@@ -152,7 +152,7 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
-  reports: { csv: string; html: string; pdf: string; pdf_sha256: string }[];
+  reports: { csv: string; html: string; pdf: string; pdf_sha256: string; throughput_csv?: string | null }[];
   source_name: string;
   fingerprint: string;
 }
@@ -195,19 +195,28 @@ export const powerStatus = () => invoke<PowerStatus | null>("power_status");
 export const batteryWarning = (estimatedSecs: number) =>
   invoke<BatteryWarning | null>("battery_warning", { estimatedSecs });
 
+/** Sous ce débit mesuré (octets/s), on revient à l'ancienne formule (sync_all en cours, etc.). */
+export const MIN_MEASURED_RATE = 1_000_000;
+
 /**
- * Secondes restantes d'une copie. `total` compte les octets lus et écrits
- * (octets × (1 + nb destinations)) alors que `rate` est le débit de lecture de la source.
- * Avec des débits mesurés (`rates`), la copie et la relecture se chevauchent : le
- * reste avance au débit de lecture de la source plus celui des relectures.
- * Sans eux, repli sur l'ancienne formule. NaN si le débit ou le total est inconnu.
+ * Vitesse d'avancement instantanée de la progression (octets/s) : lecture source plus relectures.
+ * Tant que les relectures n'ont pas démarré, chacune est comptée au débit source.
  */
-export function remainingSecs(total: number, done: number, rate: number, destinations: number, rates: Rates | null = null): number {
+export function progressSpeed(r: Rates, destinations: number): number {
+  const v = r.verify.reduce((a, b) => a + b, 0);
+  return v > 0 ? r.source + v : r.source * (1 + destinations);
+}
+
+/**
+ * Secondes restantes d'une copie. `total` compte les octets lus et relus
+ * (octets × (1 + nb destinations)) alors que `rate` est le débit de lecture de la source.
+ * `speed` : vitesse d'avancement mesurée et lissée (voir progressSpeed) ; utilisée si elle
+ * dépasse MIN_MEASURED_RATE, sinon repli sur l'ancienne formule.
+ * NaN si le débit ou le total est inconnu.
+ */
+export function remainingSecs(total: number, done: number, rate: number, destinations: number, speed = 0): number {
   if (!(total > 0)) return NaN;
-  if (rates) {
-    const measured = rates.source + rates.verify.reduce((a, b) => a + b, 0);
-    if (measured > 0) return Math.max(total - done, 0) / measured;
-  }
+  if (speed >= MIN_MEASURED_RATE) return Math.max(total - done, 0) / speed;
   if (!(rate > 0)) return NaN;
   return (total - done) / (rate * (1 + destinations));
 }

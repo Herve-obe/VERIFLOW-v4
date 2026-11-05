@@ -12,14 +12,21 @@
   let openError = $state("");
 
   /** Nom court du disque d'après le dossier final (volume, lecteur ou dernier dossier). */
-  function diskName(root: string | undefined, i: number): string {
+  function baseName(root: string | undefined, i: number): string {
     const fallback = `${t("offload.dest.short")} ${i + 1}`;
     if (!root) return fallback;
     const parts = root.replace(/\\/g, "/").split("/").filter(Boolean);
     if (parts[0] === "Volumes" || parts[0] === "mnt") return parts[1] ?? fallback;
     if (parts[0] === "media") return (parts[1] === "user" ? parts[2] : parts[1]) ?? fallback;
     if (parts[0] === "run" && parts[1] === "media") return parts[3] ?? fallback;
-    return parts[0] ?? fallback;
+    if (/^[A-Za-z]:$/.test(parts[0] ?? "")) return parts[0];
+    return parts[parts.length - 1] ?? fallback;
+  }
+  /** Deux destinations au même nom court sont préfixées par leur numéro. */
+  function diskName(root: string | undefined, i: number): string {
+    const n = baseName(root, i);
+    const dup = job.roots.some((r, k) => k !== i && baseName(r, k) === n);
+    return dup ? `${i + 1} · ${n}` : n;
   }
 
   const open = (path: string) => {
@@ -28,7 +35,7 @@
   };
 
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
-  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length, job.rates));
+  const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length, job.speed));
   const tp = $derived(job.result?.summary.throughput ?? null);
   const bottleneck = $derived.by(() => {
     const b = tp?.bottleneck ?? "";
@@ -40,7 +47,7 @@
     }
     return "";
   });
-  const phaseRate = (m: { bytes: number; active_s: number }) => (m.active_s > 0 ? rate(m.bytes / m.active_s) : "-");
+  const phaseRate = (m: { bytes: number; busy_s: number }) => (m.busy_s > 0 ? rate(m.bytes / m.busy_s) : "-");
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
   const barState = $derived((job.state === "failed" && !job.dropped) || (job.result && !ok) ? "error" : job.state === "done" ? "ok" : "running");
   const rows = $derived(showAll ? job.recent : job.recent.slice(0, 12));
@@ -102,7 +109,6 @@
       <span>{job.result.summary.files.length} {t("offload.files")}</span>
       <span>{bytes(job.result.summary.total_bytes)} ({bytesBinary(job.result.summary.total_bytes)})</span>
       <span>{duration(job.result.summary.duration_s)}</span>
-      <span>{rate(job.result.summary.total_bytes / Math.max(job.result.summary.duration_s, 0.001))}</span>
     {/if}
   </div>
 
@@ -137,7 +143,7 @@
     </div>
     {#if tp}
       <div class="small global mono">
-        <span>{t("offload.meter.global")} : {rate(tp.effective_rate)}</span>
+        <span>{t("offload.meter.global")} : {tp.effective_rate ? rate(tp.effective_rate) : "-"}</span>
         {#if bottleneck}<span>{t("offload.meter.bottleneck")} : {bottleneck}</span>{/if}
       </div>
       <details class="phases">
@@ -161,6 +167,7 @@
     <div class="actions">
       {#each job.result.reports as r, i (r.pdf)}
         <button onclick={() => open(r.pdf)}>{t("offload.report.pdf")} {i + 1}</button>
+        {#if r.throughput_csv}<button class="ghost" onclick={() => open(r.throughput_csv!)}>{t("offload.report.throughput_csv")} {i + 1}</button>{/if}
       {/each}
       {#each job.result.roots as root, i (root)}
         <button class="ghost" onclick={() => open(root)}>{t("offload.open.folder")} {i + 1}</button>

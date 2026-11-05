@@ -861,5 +861,6 @@
   "offload.meter.bottleneck.dest": "destination",
   "offload.meter.bottleneck.cpu": "the processor",
   "offload.meter.cpu_bound": "Limited by hash computation",
-  "offload.meter.details": "Details by phase"
+  "offload.meter.details": "Details by phase",
+  "offload.report.throughput_csv": "Rate CSV"
 }
