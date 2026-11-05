@@ -252,6 +252,7 @@ pub fn execute(
         },
         // Pas de recouvrement si une destination est un disque dur mécanique.
         overlap: overlap_allowed(&pre.roots, super::storage::is_hdd),
+        expected: None,
     };
     if req.existing == ExistingMode::Replace {
         existing::remove(&inv, &spec.destinations)?;

@@ -81,6 +81,10 @@ pub struct OffloadSpec {
     /// Relit le fichier N pendant la copie du fichier N+1. Faux : fichier par
     /// fichier (disque dur mécanique, où deux accès simultanés se gênent).
     pub overlap: bool,
+    /// Empreintes attendues par chemin relatif (clé `mhl_read::nfc`) : copie en
+    /// cascade, dont la source est la copie vérifiée de l'étape 1. Une source
+    /// qui diffère, ou absente de cet historique, est refusée.
+    pub expected: Option<HashMap<String, Hashes>>,
 }
 
 /// Événements envoyés pendant la copie.
@@ -803,6 +807,25 @@ fn copy_stage(
         (hooks.after_write)(index, &finals[i]);
     }
 
+    // Cascade : la source doit être la copie vérifiée de l'étape 1.
+    let mismatch = spec.expected.as_ref().and_then(|exp| {
+        match exp.get(&super::mhl_read::nfc(&file.rel)) {
+            None => Some("absent de l'historique de l'étape 1"),
+            Some(want) => {
+                let differs = source_hashes.iter().any(|(algo, hex)| {
+                    want.iter()
+                        .any(|(a, w)| a == algo && !same_digest(*algo, w, hex))
+                });
+                // Aucun algorithme commun : rien ne prouve l'identité.
+                let common = source_hashes
+                    .iter()
+                    .any(|(algo, _)| want.iter().any(|(a, _)| a == algo));
+                (differs || !common)
+                    .then_some("source de l'étape 2 différente de la copie vérifiée de l'étape 1")
+            }
+        }
+    });
+
     // Source modifiée pendant la copie : les empreintes ne décrivent plus un
     // état cohérent. Les copies écrites par ce passage sont retirées.
     let stale = before != (file.size, file.modified);
@@ -810,8 +833,10 @@ fn copy_stage(
         && fs::metadata(&file.path)
             .map(|m| stamp(&m) == before)
             .unwrap_or(false);
-    if !unchanged {
-        let why = if stale {
+    if !unchanged || mismatch.is_some() {
+        let why = if let Some(m) = mismatch {
+            m
+        } else if stale {
             "source modifiée depuis l'inventaire"
         } else {
             "source modifiée pendant la copie"
@@ -870,6 +895,16 @@ fn copy_stage(
         },
         checks,
     ))
+}
+
+/// Deux empreintes sont-elles égales ? Hexadécimal sans tenir compte de la
+/// casse ; C4 (base 58) est sensible à la casse.
+fn same_digest(algo: HashAlgo, a: &str, b: &str) -> bool {
+    if algo == HashAlgo::C4 {
+        a == b
+    } else {
+        a.eq_ignore_ascii_case(b)
+    }
 }
 
 /// Recrée les dossiers vides et rétablit les dates des dossiers d'origine
@@ -1113,6 +1148,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
             known: None,
             overlap: false,
+            expected: None,
         }
     }
 
@@ -1799,6 +1835,88 @@ mod tests {
         assert_eq!(t.write[0].bytes, 0);
         assert_eq!(t.verify[0].bytes, inv.total_bytes);
         assert_eq!(t.source_read.bytes, inv.total_bytes);
+    }
+
+    /// Empreintes d'un premier passage, au format attendu par la cascade.
+    fn expected_of(s: &OffloadSummary) -> HashMap<String, Hashes> {
+        s.files
+            .iter()
+            .map(|f| (super::super::mhl_read::nfc(&f.rel), f.hashes.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn expected_hashes_mismatch_fails_file_and_removes_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let d1 = [dir.path().join("D1/A001")];
+        let d2 = [dir.path().join("D2/A001")];
+        let first = run(
+            &scan(&src).unwrap(),
+            &spec(&d1),
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        // Un octet change, même taille, même date : la source n'est plus la copie vérifiée.
+        let file = src.join("CLIP/C0002.MP4");
+        let mut data = fs::read(&file).unwrap();
+        data[0] ^= 0xFF;
+        fs::write(&file, &data).unwrap();
+        let old = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+        filetime::set_file_mtime(&file, old).unwrap();
+        let mut sp = spec(&d2);
+        sp.expected = Some(expected_of(&first));
+        let s = run(&scan(&src).unwrap(), &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(s.failed_files, 1);
+        let bad = s.files.iter().find(|f| f.rel == "CLIP/C0002.MP4").unwrap();
+        assert!(matches!(&bad.destinations[0],
+            DestStatus::Failed(m) if m.contains("différente de la copie vérifiée")));
+        assert!(!d2[0].join("CLIP/C0002.MP4").exists());
+        assert_eq!(partials(&d2[0]), 0);
+        // Les autres fichiers sont copiés normalement.
+        assert!(d2[0].join("CLIP/C0001.MP4").exists());
+    }
+
+    #[test]
+    fn expected_hashes_missing_entry_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let d1 = [dir.path().join("D1/A001")];
+        let d2 = [dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let first = run(&inv, &spec(&d1), &AtomicBool::new(false), |_| {}).unwrap();
+        let mut exp = expected_of(&first);
+        exp.remove("CLIP/C0002.MP4");
+        let mut sp = spec(&d2);
+        sp.expected = Some(exp);
+        let s = run(&inv, &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(s.failed_files, 1);
+        let bad = s.files.iter().find(|f| f.rel == "CLIP/C0002.MP4").unwrap();
+        assert!(matches!(&bad.destinations[0],
+            DestStatus::Failed(m) if m.contains("absent de l'historique de l'étape 1")));
+        assert!(!d2[0].join("CLIP/C0002.MP4").exists());
+        assert_eq!(partials(&d2[0]), 0);
+    }
+
+    #[test]
+    fn expected_hashes_resume_reverifies_without_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let d1 = [dir.path().join("D1/A001")];
+        let d2 = [dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let first = run(&inv, &spec(&d1), &AtomicBool::new(false), |_| {}).unwrap();
+        let mut sp = spec(&d2);
+        sp.expected = Some(expected_of(&first));
+        run(&inv, &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        // Reprise : tout est déjà là, revérifié contre les mêmes empreintes.
+        let s = run(&inv, &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(s.failed_files, 0);
+        assert!(statuses(&s)
+            .iter()
+            .all(|d| *d == DestStatus::ResumedVerified));
+        assert_eq!(s.throughput.write[0].bytes, 0);
     }
 
     #[test]

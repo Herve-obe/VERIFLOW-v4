@@ -279,6 +279,7 @@ fn claim_for(request: &OffloadRequest, total_bytes: Option<u64>) -> Claim {
             })
             .collect(),
         source,
+        deferred: false,
     }
 }
 

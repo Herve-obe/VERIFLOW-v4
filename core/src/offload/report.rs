@@ -1143,6 +1143,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
             known: None,
             overlap: false,
+            expected: None,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo {
@@ -1201,6 +1202,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
             overlap: false,
+            expected: None,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         crate::offload::mhl::write_generation(
@@ -1278,6 +1280,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
             overlap: false,
+            expected: None,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo::default();
