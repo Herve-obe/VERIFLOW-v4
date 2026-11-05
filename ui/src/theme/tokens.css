@@ -103,6 +103,12 @@
   --vf-window-close-hover: #c42b1c;
   --vf-statusbar-height: 26px;
 
+  /* Onglet PLAYER : panneaux */
+  --vf-player-row-height: 24px;
+  --vf-player-strip-height: 72px;
+  --vf-player-panel-min: 120px;
+  --vf-player-banner-text: var(--vf-text);
+
   /* Animations */
   --vf-transition: 140ms ease;
 }

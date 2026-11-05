@@ -41,3 +41,19 @@ export function secondsToClock(seconds: number): string {
   const ms = Math.floor((t % 1) * 1000);
   return `${pad(h)}:${pad(m)}:${pad(s)}.${String(ms).padStart(3, "0")}`;
 }
+
+/** Convertit "HH:MM:SS:FF" (ou ";" avant les images en drop-frame) en nombre d'images. Null si illisible. */
+export function tcToFrames(tc: string, rate: FrameRate): number | null {
+  const m = /^(\d{1,2}):(\d{2}):(\d{2})([:;.])(\d{2,3})$/.exec(tc.trim());
+  if (!m) return null;
+  const [h, mi, s, f] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[5])];
+  const n = nominal(rate);
+  if (n <= 0) return null;
+  let frames = ((h * 60 + mi) * 60 + s) * n + f;
+  if (m[4] === ";" && supportsDropFrame(rate)) {
+    const drop = (n / 30) * 2;
+    const totalMin = h * 60 + mi;
+    frames -= drop * (totalMin - Math.floor(totalMin / 10));
+  }
+  return frames;
+}

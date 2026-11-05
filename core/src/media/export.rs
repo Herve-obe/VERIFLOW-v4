@@ -198,6 +198,7 @@ fn dummy() -> MediaRecord {
             probe: None,
             wav: None,
             embedded: BTreeMap::new(),
+            camera: BTreeMap::new(),
             error: None,
         },
         values: BTreeMap::new(),

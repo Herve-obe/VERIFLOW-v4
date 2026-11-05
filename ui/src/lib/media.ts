@@ -37,6 +37,7 @@ export interface Described {
     } | null;
     wav: { channels: number; sample_rate: number; bits: number; format: "Int" | "Float"; frames: number; time_reference: number | null } | null;
     embedded: Record<string, string>;
+    camera?: Record<string, string>;
     error: string | null;
   };
   values: Record<string, string>;

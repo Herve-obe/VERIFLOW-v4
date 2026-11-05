@@ -34,7 +34,8 @@
     paths: initialPaths = null,
     active = () => app.tab === "player" && app.mode === "audio",
     logs = true,
-  }: { slot?: Slot; paths?: string[] | null; active?: () => boolean; logs?: boolean } = $props();
+    details = true,
+  }: { slot?: Slot; paths?: string[] | null; active?: () => boolean; logs?: boolean; details?: boolean } = $props();
 
   interface Strip {
     name: string;
@@ -343,6 +344,7 @@
         </div>
       </div>
       <div class="side">
+        {#if details}
         <dl class="info">
           {#if first?.ixml.scene}<dt>{t("player.scene")}</dt><dd>{first.ixml.scene}</dd>{/if}
           {#if first?.ixml.take}<dt>{t("player.take")}</dt><dd>{first.ixml.take}</dd>{/if}
@@ -357,6 +359,7 @@
               : ""}, {session.output.sample_rate / 1000} kHz ({session.output.resampling ? t("player.resampling") : t("player.native")})
           </dd>
         </dl>
+        {/if}
         <div class="sound"><OutputPicker /></div>
       </div>
     </div>

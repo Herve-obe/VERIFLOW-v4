@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use serde::Serialize;
 use walkdir::WalkDir;
 
+use super::camera::{camera_meta, CameraMeta};
 use super::probe::{probe, MediaInfo};
 use super::wav::{read_info, WavInfo};
 use crate::offload::scan::IGNORED;
@@ -111,8 +112,22 @@ pub struct MediaDetails {
     pub wav: Option<WavInfo>,
     /// Métadonnées lues dans le fichier, avec les identifiants de `fields`.
     pub embedded: BTreeMap<String, String>,
+    /// Valeurs brutes des réglages caméra (sidecar, étiquettes), en lecture seule.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub camera: BTreeMap<String, String>,
     /// Erreur d'analyse éventuelle (fichier illisible, format inconnu).
     pub error: Option<String>,
+}
+
+/// Ajoute les champs caméra sans écraser les valeurs déjà lues ; rend les valeurs brutes.
+fn merge_camera(
+    embedded: &mut BTreeMap<String, String>,
+    meta: CameraMeta,
+) -> BTreeMap<String, String> {
+    for (k, v) in meta.fields {
+        embedded.entry(k).or_insert(v);
+    }
+    meta.raw
 }
 
 /// Lit les informations techniques et les métadonnées intégrées d'un fichier.
@@ -185,11 +200,19 @@ pub fn describe(path: &Path) -> MediaDetails {
             }
         }
     }
+    // Réglages caméra : l'iXML et les étiquettes ci-dessus restent prioritaires.
+    let mut camera = BTreeMap::new();
+    if kind == Some(MediaKind::Video) {
+        let none = BTreeMap::new();
+        let meta = camera_meta(path, probe.as_ref().map_or(&none, |p| &p.tags));
+        camera = merge_camera(&mut embedded, meta);
+    }
     MediaDetails {
         kind,
         probe,
         wav,
         embedded,
+        camera,
         error,
     }
 }
@@ -198,6 +221,44 @@ pub fn describe(path: &Path) -> MediaDetails {
 mod tests {
     use super::*;
     use crate::media::wav::write_test_wav;
+
+    #[test]
+    fn ixml_value_wins_over_camera() {
+        let dir = tempfile::tempdir().unwrap();
+        let clip = dir.path().join("C0001.MP4");
+        std::fs::write(&clip, b"x").unwrap();
+        std::fs::write(
+            dir.path().join("C0001M01.XML"),
+            "<NonRealTimeMeta><Device modelName=\"ILME-FX6\"/><AcquisitionRecord>\
+             <Group name=\"CameraUnitMetadataSet\"><Item name=\"ISOSensitivity\" value=\"800\"/>\
+             </Group></AcquisitionRecord></NonRealTimeMeta>",
+        )
+        .unwrap();
+        let d = describe(&clip);
+        assert_eq!(d.embedded.get("iso").map(String::as_str), Some("800"));
+        assert_eq!(
+            d.embedded.get("camera").map(String::as_str),
+            Some("ILME-FX6")
+        );
+        assert_eq!(
+            d.camera.get("Device.modelName").map(String::as_str),
+            Some("ILME-FX6")
+        );
+    }
+
+    #[test]
+    fn merge_camera_keeps_existing_values() {
+        let mut embedded = BTreeMap::new();
+        embedded.insert("camera".to_owned(), "A".to_owned());
+        let mut meta = CameraMeta::default();
+        meta.fields.insert("camera".to_owned(), "B".to_owned());
+        meta.fields.insert("iso".to_owned(), "800".to_owned());
+        meta.raw.insert("k".to_owned(), "v".to_owned());
+        let raw = merge_camera(&mut embedded, meta);
+        assert_eq!(embedded.get("camera").map(String::as_str), Some("A"));
+        assert_eq!(embedded.get("iso").map(String::as_str), Some("800"));
+        assert_eq!(raw.get("k").map(String::as_str), Some("v"));
+    }
 
     #[test]
     fn lists_media_and_reads_ixml_fields() {
