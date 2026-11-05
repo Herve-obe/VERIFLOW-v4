@@ -878,5 +878,13 @@
   "offload.verify.choose": "Pick this folder",
   "offload.verify.gaps": "Files with a mismatch",
   "offload.verify.report.html": "HTML report",
-  "offload.verify.report.csv": "CSV report"
+  "offload.verify.report.csv": "CSV report",
+  "offload.verify.cancelled": "Verification interrupted",
+  "offload.verify.panic": "Verification stopped unexpectedly",
+  "offload.verify.mhl_altered": "MHL altered",
+  "offload.verify.mhl_missing": "MHL missing",
+  "offload.verify.empty_history": "Empty history: nothing to compare",
+  "offload.verify.write_error": "Verification generation not written",
+  "offload.verify.omitted": "and {n} more in the CSV report",
+  "offload.verify.loading": "Reading the history"
 }

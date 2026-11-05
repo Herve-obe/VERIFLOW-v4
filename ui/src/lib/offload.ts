@@ -154,6 +154,11 @@ export interface VerifySummary {
   conform: boolean;
   mhl: string | null;
   write_error: string | null;
+  chain: { entries: { seq: number; file: string; c4: string }[]; issues: { kind: "altered" | "missing"; name: string }[] };
+  /** L'historique ne décrit aucun fichier : rien à comparer. */
+  empty_history: boolean;
+  /** Fichiers retirés de `files` (conformes, nouveaux au-delà de 200) : détail dans le CSV. */
+  omitted: number;
 }
 
 export interface ReportFiles {

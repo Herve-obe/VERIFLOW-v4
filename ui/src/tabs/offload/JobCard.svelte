@@ -18,7 +18,7 @@
 
   const isVerify = $derived(job.kind === "verify");
   const vs = $derived(job.verify);
-  const vOk = $derived(!!vs && vs.conform && !vs.cancelled);
+  const vOk = $derived(!!vs && vs.conform && !vs.cancelled && !vs.empty_history);
   const progress = $derived(job.total > 0 ? job.done / job.total : 0);
   const eta = $derived(remainingSecs(job.total, job.done, job.rate, job.roots.length));
   const ok = $derived(job.result ? !job.result.summary.cancelled && job.result.summary.failed_files === 0 : false);
@@ -46,6 +46,16 @@
     if (!ok) return;
     if (active) await cancel(job.id).catch(() => {});
     removeJob(job.id);
+  }
+
+  function errorText(): string {
+    const c = job.errorCode;
+    if (!c) return job.error ?? "";
+    if (job.kind === "verify") {
+      if (c === "no_history" || c === "mhl_v1" || c === "nested_history") return t(`offload.verify.${c}`);
+      if (c === "job_panic") return t("offload.verify.panic");
+    }
+    return t(`offload.error.${c}`);
   }
 
   const label = (d: DestStatus) =>
@@ -99,7 +109,7 @@
 
   {#if job.state === "done" && vs}
     <div class="verdict" class:good={vOk}>
-      {vs.cancelled ? t("offload.verdict.cancelled") : vOk ? t("offload.verify.verdict.ok") : t("offload.verify.verdict.gap")}
+      {vs.cancelled ? t("offload.verify.cancelled") : vOk ? t("offload.verify.verdict.ok") : t("offload.verify.verdict.gap")}
     </div>
     <div class="counts mono">
       <span class="good-n">{t("offload.verify.ok")} : {vs.ok}</span>
@@ -108,8 +118,18 @@
       <span>{t("offload.verify.new")} : {vs.new}</span>
       <span class:bad-n={vs.unreadable > 0}>{t("offload.verify.unreadable")} : {vs.unreadable}</span>
     </div>
-    {#if job.reportError || vs.write_error || (!job.verifyReports && !vs.cancelled)}
-      <div class="small err">{t("offload.verify.readonly")}</div>
+    {#if vs.empty_history}<div class="small err">{t("offload.verify.empty_history")}</div>{/if}
+    {#each vs.chain.issues as c (c.kind + c.name)}
+      <div class="small err">{t(`offload.verify.mhl_${c.kind}`)} : <span class="mono">{c.name}</span></div>
+    {/each}
+    {#if vs.write_error}
+      <div class="small err">{t("offload.verify.write_error")} : {vs.write_error}</div>
+    {/if}
+    {#if job.reportError || (!job.verifyReports && !vs.cancelled)}
+      <div class="small err">{t("offload.verify.readonly")}{job.reportError ? ` : ${job.reportError}` : ""}</div>
+    {/if}
+    {#if vs.omitted > 0}
+      <div class="small">{t("offload.verify.omitted").replace("{n}", String(vs.omitted))}</div>
     {/if}
     <div class="actions">
       {#if job.verifyReports}
@@ -124,7 +144,7 @@
       <details>
         <summary class="small err">{t("offload.verify.gaps")} ({gaps.length})</summary>
         <ul class="failures mono">
-          {#each gaps.slice(0, GAP_MAX) as f (f.rel)}
+          {#each gaps.slice(0, GAP_MAX) as f, i (i)}
             <li>{f.rel} : {t(`offload.verify.${f.status.state === "unreadable" ? "unreadable" : f.status.state}`)}{f.status.state === "unreadable" ? ` (${f.status.detail})` : ""}</li>
           {/each}
         </ul>
@@ -135,7 +155,7 @@
       <details>
         <summary class="small">{t("offload.verify.new")} ({news.length})</summary>
         <ul class="newfiles mono">
-          {#each news.slice(0, GAP_MAX) as f (f.rel)}<li>{f.rel}</li>{/each}
+          {#each news.slice(0, GAP_MAX) as f, i (i)}<li>{f.rel}</li>{/each}
         </ul>
         {#if news.length > GAP_MAX}<div class="small">{t("offload.verify.more").replace("{n}", String(news.length - GAP_MAX))}</div>{/if}
       </details>
@@ -165,7 +185,7 @@
   {/if}
 
   {#if job.error}
-    <div class="verdict">{job.errorCode ? t(`offload.error.${job.errorCode}`) : job.error}</div>
+    <div class="verdict">{errorText()}</div>
   {/if}
 
   {#if job.failed.length > 0}

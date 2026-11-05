@@ -878,5 +878,13 @@
   "offload.verify.choose": "Choisir ce dossier",
   "offload.verify.gaps": "Fichiers en écart",
   "offload.verify.report.html": "Rapport HTML",
-  "offload.verify.report.csv": "Rapport CSV"
+  "offload.verify.report.csv": "Rapport CSV",
+  "offload.verify.cancelled": "Vérification interrompue",
+  "offload.verify.panic": "Arrêt inattendu de la vérification",
+  "offload.verify.mhl_altered": "MHL altéré",
+  "offload.verify.mhl_missing": "MHL manquant",
+  "offload.verify.empty_history": "Historique vide : rien à comparer",
+  "offload.verify.write_error": "Génération de vérification non écrite",
+  "offload.verify.omitted": "et {n} autres dans le rapport CSV",
+  "offload.verify.loading": "Lecture de l'historique en cours"
 }

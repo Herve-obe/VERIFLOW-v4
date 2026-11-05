@@ -3,7 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Modal from "../../components/Modal.svelte";
-  import { t } from "../../i18n/index.svelte";
+  import { t, i18n } from "../../i18n/index.svelte";
   import { mhlInfo, mhlVerify, type MhlError, type MhlInfo } from "../../lib/offload";
   import { markVerify } from "../../stores/offload.svelte";
 
@@ -15,6 +15,11 @@
   let starting = $state(false);
   let choice = $state("");
 
+  const when = (d: string | null) => {
+    if (!d) return "";
+    const x = new Date(d);
+    return Number.isNaN(x.getTime()) ? d : x.toLocaleString(i18n.lang);
+  };
   const algoLabel = (a: string) => a.toUpperCase();
 
   async function load(path: string) {
@@ -50,10 +55,10 @@
 </script>
 
 <Modal title={t("offload.verify.title")} onClose={onClose} width="min(620px, 94vw)">
-  <div class="body">
+  <div class="body" aria-live="polite" aria-busy={loading}>
     <p class="mono path" title={info?.root ?? root}>{info?.root ?? root}</p>
     {#if loading}
-      <p class="muted">…</p>
+      <p class="muted" role="status">{t("offload.verify.loading")}</p>
     {:else if error}
       <p class="error">{error}</p>
     {:else if info && info.generations === 0 && info.histories.length > 0}
@@ -75,7 +80,7 @@
     {:else if info}
       <dl>
         <dt>{t("offload.verify.generations")}</dt><dd>{info.generations}</dd>
-        <dt>{t("offload.verify.last_date")}</dt><dd>{info.last_date ?? ""}</dd>
+        <dt>{t("offload.verify.last_date")}</dt><dd>{when(info.last_date)}</dd>
         <dt>{t("offload.verify.files")}</dt><dd>{info.files}</dd>
         <dt>{t("offload.verify.algos")}</dt><dd>{info.algos.map(algoLabel).join(", ")}</dd>
       </dl>
