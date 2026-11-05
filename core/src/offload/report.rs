@@ -13,7 +13,9 @@ use serde::Serialize;
 
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
+use super::meter::{PhaseStat, Throughput};
 use super::mhl::REPORTS_DIR;
+use super::mhl_verify::{VerifyStatus, VerifySummary};
 use super::pictures::{self, Jpeg};
 use super::scan::SourceInventory;
 use super::timestamp;
@@ -40,6 +42,8 @@ const MAX_THUMBS: usize = 60;
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportFiles {
     pub csv: PathBuf,
+    /// CSV de débit (`<rapport>_debit.csv`, `libelle;valeur`) ; absent si non écrit.
+    pub rates_csv: Option<PathBuf>,
     pub html: PathBuf,
     pub pdf: PathBuf,
     pub pdf_sha256: String,
@@ -99,6 +103,125 @@ fn rate_text(bytes: u64, secs: f64) -> String {
     format!("{:.1} Mo/s", bytes as f64 / 1e6 / secs).replace('.', ",")
 }
 
+/// Une phase : volume, temps passé dans les appels d'E/S et débit pendant ce temps.
+fn phase_text(p: &PhaseStat) -> String {
+    format!(
+        "{} en {} s d'E/S, {}",
+        human_size(p.bytes),
+        format!("{:.1}", p.busy_s).replace('.', ","),
+        rate_text(p.bytes, p.busy_s)
+    )
+}
+
+/// Lignes de débit communes aux rapports de copie (libellé, valeur).
+fn throughput_rows(t: &Throughput) -> Vec<(String, String)> {
+    let mut rows = vec![(
+        "Débit global (taille / durée totale)".to_string(),
+        match t.effective_rate {
+            Some(r) => format!("{:.1} Mo/s", r / 1e6).replace('.', ","),
+            None => "-".into(),
+        },
+    )];
+    rows.push(("Lecture source".into(), phase_text(&t.source_read)));
+    for (i, p) in t.write.iter().enumerate() {
+        rows.push((format!("Écriture destination {}", i + 1), phase_text(p)));
+    }
+    for (i, p) in t.verify.iter().enumerate() {
+        rows.push((format!("Relecture destination {}", i + 1), phase_text(p)));
+    }
+    rows.push(("Limité par".into(), bottleneck_text(&t.bottleneck)));
+    rows
+}
+
+/// Lignes de débit du rapport de vérification MHL.
+fn verify_throughput_rows(s: &VerifySummary) -> Vec<(String, String)> {
+    // Annulée : pas de débit global (comme dans le CSV de débit).
+    let global = if s.cancelled || s.read.bytes == 0 {
+        "-".into()
+    } else {
+        rate_text(s.read.bytes, s.duration_s)
+    };
+    vec![
+        ("Débit global (taille / durée totale)".into(), global),
+        ("Relecture du disque".into(), phase_text(&s.read)),
+    ]
+}
+
+/// Lignes brutes du CSV de débit : nombres sans unité dans la valeur
+/// (octets, octets par seconde, secondes), point décimal.
+fn phase_raw(name: &str, p: &PhaseStat) -> Vec<(String, String)> {
+    let rate = if p.busy_s > 0.0 {
+        format!("{:.1}", p.bytes as f64 / p.busy_s)
+    } else {
+        String::new()
+    };
+    vec![
+        (format!("{name} : octets"), p.bytes.to_string()),
+        (
+            format!("{name} : temps d'E/S (s)"),
+            format!("{:.3}", p.busy_s),
+        ),
+        (
+            format!("{name} : activité (s)"),
+            format!("{:.3}", p.active_s),
+        ),
+        (format!("{name} : débit sur temps d'E/S (octets/s)"), rate),
+    ]
+}
+
+fn global_raw(rate: Option<f64>) -> (String, String) {
+    (
+        "Débit global (octets/s)".into(),
+        rate.map(|r| format!("{r:.1}")).unwrap_or_default(),
+    )
+}
+
+/// CSV de débit d'une copie (`libelle;valeur`, UTF-8 avec BOM).
+fn throughput_csv(t: &Throughput) -> String {
+    let mut rows = vec![global_raw(t.effective_rate)];
+    rows.extend(phase_raw("Lecture source", &t.source_read));
+    for (i, p) in t.write.iter().enumerate() {
+        rows.extend(phase_raw(&format!("Écriture destination {}", i + 1), p));
+    }
+    for (i, p) in t.verify.iter().enumerate() {
+        rows.extend(phase_raw(&format!("Relecture destination {}", i + 1), p));
+    }
+    rows.push(("Limité par".into(), t.bottleneck.clone()));
+    rates_csv(&rows)
+}
+
+/// CSV de débit d'une vérification MHL.
+fn verify_throughput_csv(s: &VerifySummary) -> String {
+    let rate = (!s.cancelled && s.duration_s > 0.0 && s.read.bytes > 0)
+        .then(|| s.read.bytes as f64 / s.duration_s);
+    let mut rows = vec![global_raw(rate)];
+    rows.extend(phase_raw("Relecture du disque", &s.read));
+    rates_csv(&rows)
+}
+
+fn rates_csv(rows: &[(String, String)]) -> String {
+    let mut out = String::from("\u{feff}libelle;valeur\r\n");
+    for (k, v) in rows {
+        out += &format!("\"{}\";{v}\r\n", k.replace('"', "\"\""));
+    }
+    out
+}
+
+fn bottleneck_text(b: &str) -> String {
+    match b {
+        "source" => "lecture de la source".into(),
+        "cpu" => "calcul des empreintes (processeur)".into(),
+        "" => "-".into(),
+        d => match d
+            .strip_prefix("dest:")
+            .and_then(|i| i.parse::<usize>().ok())
+        {
+            Some(i) => format!("destination {}", i + 1),
+            None => d.to_owned(),
+        },
+    }
+}
+
 impl ReportData<'_> {
     fn ok(&self) -> bool {
         !self.summary.cancelled && self.summary.failed_files == 0
@@ -135,7 +258,7 @@ impl ReportData<'_> {
     }
 
     /// Lignes d'en-tête communes (libellé, valeur).
-    fn header_rows(&self, csv_sha: &str) -> Vec<(String, String)> {
+    fn header_rows(&self, csv_sha: &str, rates_sha: &str) -> Vec<(String, String)> {
         let mut rows = vec![
             (
                 "Projet".into(),
@@ -153,10 +276,6 @@ impl ReportData<'_> {
             ("Début".into(), self.summary.started_at.clone()),
             ("Fin".into(), self.summary.finished_at.clone()),
             ("Durée".into(), duration_text(self.summary.duration_s)),
-            (
-                "Débit moyen".into(),
-                rate_text(self.summary.total_bytes, self.summary.duration_s),
-            ),
             (
                 "Source".into(),
                 format!("{} ({})", self.inv.name, self.inv.root.display()),
@@ -204,7 +323,9 @@ impl ReportData<'_> {
                 ));
             }
         }
+        rows.extend(throughput_rows(&self.summary.throughput));
         rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
+        rows.push(("Débit (CSV)".into(), format!("SHA-256 {rates_sha}")));
         if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             rows.push(("Remarques".into(), n.to_owned()));
         }
@@ -252,7 +373,7 @@ impl ReportData<'_> {
     }
 
     /// HTML autonome, prêt à imprimer.
-    pub fn html(&self, csv_sha: &str) -> String {
+    pub fn html(&self, csv_sha: &str, rates_sha: &str) -> String {
         let e = |s: &str| {
             s.replace('&', "&amp;")
                 .replace('<', "&lt;")
@@ -272,7 +393,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
             if self.ok() { "ok" } else { "ko" },
             e(&self.verdict())
         );
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             h += &format!("<tr><td>{}</td><td class=\"m\">{}</td></tr>", e(&k), e(&v));
         }
         h += "</table><table><tr><th>#</th><th>Fichier</th><th>Taille</th>";
@@ -303,7 +424,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
     }
 
     /// PDF A4, polices standard (aucune police à embarquer).
-    pub fn pdf(&self, csv_sha: &str) -> Vec<u8> {
+    pub fn pdf(&self, csv_sha: &str, rates_sha: &str) -> Vec<u8> {
         let mut doc = PdfDoc::new();
         if let Some(l) = self.info.logo.as_deref().and_then(pictures::logo) {
             // Logo en haut à droite, dans un cadre de 150 × 50 points.
@@ -318,7 +439,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
         doc.gap(8.0);
         doc.banner(&self.verdict(), self.ok());
         doc.gap(8.0);
-        for (k, v) in self.header_rows(csv_sha) {
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
             doc.key_value(&k, &v);
         }
         if self.info.thumbnails {
@@ -439,8 +560,10 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
 pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
     let csv = data.csv();
     let csv_sha = hash_data(HashAlgo::Sha256, csv.as_bytes());
-    let html = data.html(&csv_sha);
-    let pdf = data.pdf(&csv_sha);
+    let rates = throughput_csv(&data.summary.throughput);
+    let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+    let html = data.html(&csv_sha, &rates_sha);
+    let pdf = data.pdf(&csv_sha, &rates_sha);
     let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
     // Horodatage certifié du PDF (une seule demande pour toutes les
     // destinations : même fichier, même empreinte). Un échec n'empêche pas
@@ -460,9 +583,14 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
         if fs::create_dir_all(&dir).is_err() {
             continue; // destination inaccessible : rapport écrit sur les autres
         }
-        let p = |ext: &str| dir.join(format!("{base}.{ext}"));
+        let p = |ext: &str| {
+            // Extension précédée de « _ » : fichier annexe (`_debit.csv`), sinon « . ».
+            let sep = if ext.starts_with('_') { "" } else { "." };
+            dir.join(format!("{base}{sep}{ext}"))
+        };
         let write = || -> std::io::Result<()> {
             fs::write(p("csv"), &csv)?;
+            fs::write(p("_debit.csv"), &rates)?;
             fs::write(p("html"), &html)?;
             fs::write(p("pdf"), &pdf)?;
             fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
@@ -483,6 +611,7 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
             };
             out.push(ReportFiles {
                 csv: p("csv"),
+                rates_csv: Some(p("_debit.csv")),
                 html: p("html"),
                 pdf: p("pdf"),
                 pdf_sha256: pdf_sha.clone(),
@@ -493,6 +622,283 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
         }
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Rapport de vérification ASC MHL (revérification d'un disque sans la source).
+// ---------------------------------------------------------------------------
+
+/// Tout ce que le rapport de vérification affiche.
+pub struct VerifyData<'a> {
+    pub summary: &'a VerifySummary,
+    pub info: &'a ReportInfo,
+}
+
+fn verify_status_text(s: &VerifyStatus) -> &'static str {
+    match s {
+        VerifyStatus::Ok => "CONFORME",
+        VerifyStatus::Different => "DIFFÉRENT",
+        VerifyStatus::Missing => "MANQUANT",
+        VerifyStatus::New => "NOUVEAU",
+        VerifyStatus::Unreadable(_) => "ILLISIBLE",
+    }
+}
+
+impl VerifyData<'_> {
+    fn verdict(&self) -> String {
+        let s = self.summary;
+        let mut text = if s.cancelled {
+            "INTERROMPU : vérification annulée avant la fin".to_string()
+        } else if s.conform {
+            format!(
+                "CONFORME : {} fichier(s) relus et identiques à l'historique",
+                s.ok
+            )
+        } else {
+            let mut causes = Vec::new();
+            if s.empty_history {
+                causes.push("historique vide, rien à comparer".to_string());
+            }
+            if s.different > 0 {
+                causes.push(format!("{} différent(s)", s.different));
+            }
+            if s.missing > 0 {
+                causes.push(format!("{} manquant(s)", s.missing));
+            }
+            if s.unreadable > 0 {
+                causes.push(format!("{} illisible(s)", s.unreadable));
+            }
+            if !s.chain.issues.is_empty() {
+                causes.push(format!("{} anomalie(s) de chaîne", s.chain.issues.len()));
+            }
+            format!("ÉCART : {}", causes.join(", "))
+        };
+        if s.new > 0 && !s.cancelled {
+            text += &format!(" ({} nouveau(x) fichier(s) signalé(s))", s.new);
+        }
+        text
+    }
+
+    fn header_rows(&self, csv_sha: &str, rates_sha: &str) -> Vec<(String, String)> {
+        let s = self.summary;
+        let mut rows = vec![
+            (
+                "Projet".into(),
+                self.info.project.clone().unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "Opérateur".into(),
+                self.info.operator.clone().unwrap_or_else(|| "-".into()),
+            ),
+            (
+                "Poste".into(),
+                gethostname::gethostname().to_string_lossy().into_owned(),
+            ),
+            ("Logiciel".into(), format!("VERIFLOW {VERSION}")),
+            ("Début".into(), s.started_at.clone()),
+            ("Fin".into(), s.finished_at.clone()),
+            ("Durée".into(), duration_text(s.duration_s)),
+            ("Disque".into(), s.root.display().to_string()),
+            ("Volume relu".into(), human_size(s.total_bytes)),
+            (
+                "Vérification".into(),
+                "relecture intégrale depuis le support physique, comparée à l'empreinte la plus récente de l'historique ASC MHL"
+                    .into(),
+            ),
+            (
+                "Générations lues".into(),
+                s.chain.entries.len().to_string(),
+            ),
+            (
+                "Résultat".into(),
+                format!(
+                    "{} conforme(s), {} différent(s), {} manquant(s), {} nouveau(x), {} illisible(s)",
+                    s.ok, s.different, s.missing, s.new, s.unreadable
+                ),
+            ),
+        ];
+        rows.extend(verify_throughput_rows(s));
+        for issue in &s.chain.issues {
+            rows.push(match issue {
+                super::mhl_read::ChainIssue::Altered(n) => (
+                    "Chaîne ALTÉRÉE".into(),
+                    format!("{n} (C4 différent de la chaîne)"),
+                ),
+                super::mhl_read::ChainIssue::Missing(n) => {
+                    ("Chaîne : fichier ABSENT".into(), n.clone())
+                }
+            });
+        }
+        if let Some(m) = &s.mhl {
+            let sha = fs::read(m)
+                .map(|b| hash_data(HashAlgo::Sha256, &b))
+                .unwrap_or_default();
+            rows.push((
+                "Génération écrite".into(),
+                format!("{} (SHA-256 {sha})", m.display()),
+            ));
+        }
+        if let Some(e) = &s.write_error {
+            rows.push(("Écriture de la génération".into(), format!("ÉCHEC : {e}")));
+        }
+        rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
+        rows.push(("Débit (CSV)".into(), format!("SHA-256 {rates_sha}")));
+        if let Some(n) = self.info.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+            rows.push(("Remarques".into(), n.to_owned()));
+        }
+        rows
+    }
+
+    fn detail(f: &super::mhl_verify::VerifyFile) -> String {
+        match &f.status {
+            VerifyStatus::Unreadable(m) => m.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// CSV (séparateur « ; », UTF-8 avec BOM pour Excel).
+    pub fn csv(&self) -> String {
+        let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        let mut out = String::from("\u{feff}");
+        out +=
+            "fichier;taille_octets;statut;methode;empreinte_historique;empreinte_relue;detail\r\n";
+        for f in &self.summary.files {
+            let row = [
+                q(&f.rel),
+                f.size.to_string(),
+                verify_status_text(&f.status).into(),
+                f.algo.map(|a| a.id().to_string()).unwrap_or_default(),
+                f.expected.clone().unwrap_or_default(),
+                f.actual.clone().unwrap_or_default(),
+                q(&Self::detail(f)),
+            ];
+            out += &row.join(";");
+            out += "\r\n";
+        }
+        out
+    }
+
+    pub fn html(&self, csv_sha: &str, rates_sha: &str) -> String {
+        let e = |s: &str| {
+            s.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        };
+        let mut h = String::from(
+            "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>Vérification ASC MHL VERIFLOW</title><style>\
+body{font:13px/1.45 system-ui,Segoe UI,Helvetica,sans-serif;color:#111;margin:32px}h1{font-size:20px;margin:0 0 4px}\
+.v{padding:10px 14px;border-radius:6px;font-weight:700;margin:12px 0}.ok{background:#d8f5e3;color:#0b6b2f}.ko{background:#fde0e0;color:#a10e0e}\
+table{border-collapse:collapse;width:100%;margin-top:12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}\
+th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all}.r{text-align:right;white-space:nowrap}\
+.info td:first-child{width:220px;color:#555}.f{color:#a10e0e;font-weight:600}</style></head><body>",
+        );
+        h += &format!("<h1>VÉRIFICATION ASC MHL</h1><div>VERIFLOW {VERSION}</div>");
+        h += &format!(
+            "<div class=\"v {}\">{}</div><table class=\"info\">",
+            if self.summary.conform { "ok" } else { "ko" },
+            e(&self.verdict())
+        );
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
+            h += &format!("<tr><td>{}</td><td class=\"m\">{}</td></tr>", e(&k), e(&v));
+        }
+        h += "</table><table><tr><th>#</th><th>Fichier</th><th>Taille</th><th>Méthode</th><th>Empreinte relue</th><th>Statut</th></tr>";
+        for (n, f) in self.summary.files.iter().enumerate() {
+            let bad = !matches!(f.status, VerifyStatus::Ok | VerifyStatus::New);
+            let detail = Self::detail(f);
+            h += &format!(
+                "<tr><td class=\"r\">{}</td><td class=\"m\">{}</td><td class=\"r\">{}</td><td>{}</td><td class=\"m\">{}</td><td{}>{}{}</td></tr>",
+                n + 1,
+                e(&f.rel),
+                f.size,
+                f.algo.map(|a| a.label()).unwrap_or(""),
+                f.actual.as_deref().unwrap_or(""),
+                if bad { " class=\"f\"" } else { "" },
+                verify_status_text(&f.status),
+                if detail.is_empty() { String::new() } else { format!(" : {}", e(&detail)) }
+            );
+        }
+        h += "</table></body></html>\n";
+        h
+    }
+
+    pub fn pdf(&self, csv_sha: &str, rates_sha: &str) -> Vec<u8> {
+        let mut doc = PdfDoc::new();
+        doc.text(&Font::Bold, 18.0, "VÉRIFICATION ASC MHL");
+        doc.gap(4.0);
+        doc.text(&Font::Regular, 9.0, &format!("VERIFLOW {VERSION}"));
+        doc.gap(8.0);
+        doc.banner(&self.verdict(), self.summary.conform);
+        doc.gap(8.0);
+        for (k, v) in self.header_rows(csv_sha, rates_sha) {
+            doc.key_value(&k, &v);
+        }
+        doc.gap(10.0);
+        let cols = vec![
+            ("#", 24.0),
+            ("Fichier", 0.0),
+            ("Taille", 62.0),
+            ("Empreinte relue", 150.0),
+            ("Statut", 58.0),
+        ];
+        doc.table_header(&cols);
+        for (n, f) in self.summary.files.iter().enumerate() {
+            let cells = vec![
+                (n + 1).to_string(),
+                f.rel.clone(),
+                f.size.to_string(),
+                f.actual.clone().unwrap_or_default(),
+                verify_status_text(&f.status).into(),
+            ];
+            let bad = !matches!(f.status, VerifyStatus::Ok | VerifyStatus::New);
+            doc.table_row(&cols, &cells, bad);
+            if let VerifyStatus::Unreadable(m) = &f.status {
+                doc.note(m);
+            }
+        }
+        doc.finish(&format!(
+            "Vérification ASC MHL {} - {}",
+            super::scan::source_name(&self.summary.root),
+            self.summary.finished_at
+        ))
+    }
+}
+
+/// Écrit les rapports de vérification dans `<disque>/_VERIFLOW/`.
+pub fn write_verify_reports(data: &VerifyData) -> Result<ReportFiles> {
+    let csv = data.csv();
+    let csv_sha = hash_data(HashAlgo::Sha256, csv.as_bytes());
+    let rates = verify_throughput_csv(data.summary);
+    let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+    let html = data.html(&csv_sha, &rates_sha);
+    let pdf = data.pdf(&csv_sha, &rates_sha);
+    let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
+    let base = format!(
+        "{}_verification_{stamp}",
+        super::scan::source_name(&data.summary.root)
+    );
+    let dir = data.summary.root.join(REPORTS_DIR);
+    fs::create_dir_all(&dir)?;
+    let p = |ext: &str| {
+        // Extension précédée de « _ » : fichier annexe (`_debit.csv`), sinon « . ».
+        let sep = if ext.starts_with('_') { "" } else { "." };
+        dir.join(format!("{base}{sep}{ext}"))
+    };
+    fs::write(p("csv"), &csv)?;
+    fs::write(p("_debit.csv"), &rates)?;
+    fs::write(p("html"), &html)?;
+    fs::write(p("pdf"), &pdf)?;
+    fs::write(p("pdf.sha256"), format!("{pdf_sha}  {base}.pdf\n"))?;
+    Ok(ReportFiles {
+        csv: p("csv"),
+        rates_csv: Some(p("_debit.csv")),
+        html: p("html"),
+        pdf: p("pdf"),
+        pdf_sha256: pdf_sha,
+        tsr: None,
+        timestamp: None,
+        timestamp_error: None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -913,6 +1319,7 @@ mod tests {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
             known: None,
+            overlap: false,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo {
@@ -1009,6 +1416,7 @@ mod tests {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
+            overlap: false,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo {
@@ -1023,7 +1431,7 @@ mod tests {
             info: &info,
             mhl: &[None],
         };
-        let pdf = data.pdf("0");
+        let pdf = data.pdf("0", "0");
         let text = String::from_utf8_lossy(&pdf);
         // Logo + 7 vignettes (le WAV n'en a pas), en JPEG.
         assert_eq!(text.matches("/Subtype /Image").count(), 8);
@@ -1036,7 +1444,7 @@ mod tests {
             info: &plain,
             ..data
         };
-        assert!(!String::from_utf8_lossy(&data.pdf("0")).contains("/Subtype /Image"));
+        assert!(!String::from_utf8_lossy(&data.pdf("0", "0")).contains("/Subtype /Image"));
     }
 
     /// Petit offload d'un fichier, rapports écrits avec horodatage vers `url`.
@@ -1050,6 +1458,7 @@ mod tests {
             destinations: vec![dir.path().join("SSD1"), dir.path().join("SSD2")],
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
+            overlap: false,
         };
         let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         let info = ReportInfo {
@@ -1103,6 +1512,141 @@ mod tests {
             fs::read(files[0].tsr.as_ref().unwrap()).unwrap(),
             fs::read(files[1].tsr.as_ref().unwrap()).unwrap()
         );
+    }
+
+    #[test]
+    fn writes_verify_reports_conform_and_gap() {
+        use crate::offload::mhl_verify::verify_root;
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), b"abcde").unwrap();
+        fs::write(src.join("b.mov"), b"fghij").unwrap();
+        let dest = dir.path().join("SSD/A001");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dest.clone()],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        crate::offload::mhl::write_generation(
+            &inv,
+            &s,
+            0,
+            &dest,
+            &spec.algorithms,
+            &Default::default(),
+        )
+        .unwrap();
+        let info = ReportInfo::default();
+        let v = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap();
+        let f = write_verify_reports(&VerifyData {
+            summary: &v,
+            info: &info,
+        })
+        .unwrap();
+        let html = fs::read_to_string(&f.html).unwrap();
+        assert!(html.contains("VÉRIFICATION ASC MHL") && html.contains("CONFORME"));
+        let csv = fs::read_to_string(&f.csv).unwrap();
+        assert_eq!(csv.lines().count(), 3);
+        let rates = fs::read_to_string(f.rates_csv.as_ref().unwrap()).unwrap();
+        assert!(
+            rates.contains("\"Relecture du disque : octets\";10")
+                && html.contains("Relecture du disque")
+        );
+        assert!(fs::read(&f.pdf).unwrap().starts_with(b"%PDF-"));
+        assert!(f.csv.starts_with(dest.join(REPORTS_DIR)));
+
+        // Un fichier modifié, un manquant, un nouveau : écart, le nouveau seul n'échoue pas.
+        fs::write(dest.join("a.mov"), b"abcdX").unwrap();
+        fs::remove_file(dest.join("b.mov")).unwrap();
+        fs::write(dest.join("c.mov"), b"neuf").unwrap();
+        let v = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap();
+        let f = write_verify_reports(&VerifyData {
+            summary: &v,
+            info: &info,
+        })
+        .unwrap();
+        let html = fs::read_to_string(&f.html).unwrap();
+        assert!(html.contains("ÉCART") && html.contains("DIFFÉRENT") && html.contains("MANQUANT"));
+        assert!(html.contains("NOUVEAU"));
+        let csv = fs::read_to_string(&f.csv).unwrap();
+        assert!(csv.contains(";MANQUANT;") && csv.contains(";NOUVEAU;"));
+
+        // Annulée : pas de débit global dans le PDF et le HTML.
+        let mut cut = v.clone();
+        cut.cancelled = true;
+        assert!(verify_throughput_rows(&v)[0].1.ends_with("Mo/s"));
+        assert_eq!(verify_throughput_rows(&cut)[0].1, "-");
+
+        // Rapports impossibles à écrire : erreur rendue, résultat intact.
+        let blocked = tempfile::tempdir().unwrap();
+        let mut moved = v.clone();
+        moved.root = blocked.path().to_path_buf();
+        fs::write(blocked.path().join(REPORTS_DIR), b"fichier").unwrap();
+        assert!(write_verify_reports(&VerifyData {
+            summary: &moved,
+            info: &info
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn report_contains_throughput_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("A001");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), vec![7u8; 5000]).unwrap();
+        let dests = vec![dir.path().join("D1/A001"), dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: dests.clone(),
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let summary = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        let info = ReportInfo::default();
+        let data = ReportData {
+            inv: &inv,
+            summary: &summary,
+            spec: &spec,
+            info: &info,
+            mhl: &[None, None],
+        };
+        let files = write_reports(&data).unwrap();
+        let labels = [
+            "Débit global (taille / durée totale)",
+            "Lecture source",
+            "Écriture destination 1",
+            "Écriture destination 2",
+            "Relecture destination 1",
+            "Relecture destination 2",
+            "Limité par",
+        ];
+        let csv = fs::read_to_string(&files[0].csv).unwrap();
+        let html = fs::read_to_string(&files[0].html).unwrap();
+        // CSV de données pur, mesures dans le CSV de débit.
+        assert!(!csv.contains('#'));
+        let rates_path = files[0].rates_csv.clone().unwrap();
+        assert!(rates_path.to_string_lossy().ends_with("_debit.csv"));
+        let rates = fs::read_to_string(&rates_path).unwrap();
+        assert!(rates.starts_with("\u{feff}libelle;valeur\r\n"));
+        let rates_sha = hash_data(HashAlgo::Sha256, rates.as_bytes());
+        assert!(html.contains(&rates_sha));
+        for l in labels {
+            assert!(html.contains(l), "HTML sans « {l} »");
+        }
+        assert!(rates.contains("\"Écriture destination 2 : octets\";5000"));
+        assert!(rates.contains("\"Lecture source : octets\";5000"));
+        // PDF : les libellés passent par le même tableau d'en-tête.
+        assert!(data
+            .header_rows("x", "y")
+            .iter()
+            .any(|(k, _)| k == "Limité par"));
+        assert!(fs::read(&files[0].pdf).unwrap().starts_with(b"%PDF-"));
     }
 
     #[test]

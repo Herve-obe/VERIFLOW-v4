@@ -368,6 +368,7 @@ mod tests {
             destinations: roots.clone(),
             algorithms: algos.to_vec(),
             known: Some(known),
+            overlap: false,
         };
         let s = run(&inv, &spec, &cancel, |_| {}).unwrap();
         assert_eq!(s.failed_files, 0);

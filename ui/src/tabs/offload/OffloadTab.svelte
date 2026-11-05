@@ -7,6 +7,7 @@
   import { ask } from "../../stores/confirm.svelte";
   import JobCard from "./JobCard.svelte";
   import ExistingDialog from "./ExistingDialog.svelte";
+  import VerifyDialog from "./VerifyDialog.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
@@ -14,7 +15,7 @@
   import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, DEFAULT_TSA, volumes, preflight, start, batteryWarning, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, DEFAULT_TSA, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -80,6 +81,8 @@
   const effOperator = $derived(resuming && resumeReq ? (resumeReq.operator ?? "") : operator);
   // Demande en attente du choix « compléter / tout recopier ».
   let existingFor = $state<OffloadRequest | null>(null);
+  // Taille de la source au moment du préflight qui a rempli existingFor.
+  let existingBytes: number | null = null;
   // Dossiers finals imposés (reprise d'une copie trouvée dans un autre
   // dossier), valables tant que source, destinations et modèle ne changent pas.
   let rootsOverride = $state<{ key: string; roots: string[] } | null>(null);
@@ -313,6 +316,7 @@
     // Rushes déjà présents (copie interrompue) : vérification puis choix.
     if (pre.present.some((p) => p.files > 0 || p.partial > 0)) {
       existingFor = { ...request(), date: pre.date };
+      existingBytes = pre.total_bytes;
       return;
     }
     launching = true;
@@ -325,7 +329,7 @@
       if (battery) warnings.push(batteryText(battery));
       if (!(await confirm(warnings))) return;
       if (!pre) return;
-      await launchWith({ ...request(), date: pre.date }, "verify", null);
+      await launchWith({ ...request(), date: pre.date }, "verify", null, pre.total_bytes);
     } finally {
       launching = false;
     }
@@ -340,17 +344,17 @@
       if (!pre) return;
       if (!(await confirm(battery ? [batteryText(battery)] : []))) return;
       if (!pre) return;
-      await launchWith(r, mode, check);
+      await launchWith(r, mode, check, existingBytes);
     } finally {
       launching = false;
     }
   }
 
-  async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null) {
+  async function launchWith(r: OffloadRequest, existing: ExistingMode, check: number | null, totalBytes: number | null) {
     existingFor = null;
     const req = { ...r, existing };
     try {
-      const id = await start(req, eject && !isBeginner(), check);
+      const id = await start(req, eject && !isBeginner(), check, totalBytes);
       offload.requests[id] = req;
       source = "";
       notes = "";
@@ -360,6 +364,13 @@
     } catch (e) {
       error = String(e);
     }
+  }
+
+  // Dossier choisi pour une revérification ASC MHL.
+  let verifyRoot = $state<string | null>(null);
+  async function pickVerify() {
+    const r = await open({ directory: true, multiple: false, title: t("offload.verify.button") });
+    if (typeof r === "string") verifyRoot = r;
   }
 
   onMount(() => {
@@ -374,6 +385,10 @@
     onChoose={(mode, check) => existingFor && chooseExisting(existingFor, mode, check)}
     onClose={() => (existingFor = null)}
   />
+{/if}
+
+{#if verifyRoot}
+  <VerifyDialog root={verifyRoot} operator={operator || null} onClose={() => (verifyRoot = null)} />
 {/if}
 
 <div class="layout">
@@ -543,6 +558,9 @@
 
   <section class="queue">
     <h2>{t("offload.queue")}</h2>
+    <div class="verify-row">
+      <button class="ghost small" onclick={pickVerify}>{t("offload.verify.button")}</button>
+    </div>
     {#if offload.batteryAlert}
       <p class="warn alert">
         <span>{alertText(offload.batteryAlert)}</span>
@@ -554,6 +572,7 @@
     {:else}
       <p class="muted">{t("offload.queue.empty")}</p>
     {/each}
+    <p class="muted">{t("offload.job.parallel_hint").replace("{max}", String(MAX_PARALLEL_JOBS))}</p>
   </section>
 </div>
 </div>

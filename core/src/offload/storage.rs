@@ -124,24 +124,27 @@ fn read_volumes() -> Vec<Volume> {
     out
 }
 
-/// Retire le préfixe `\\?\` que `canonicalize` ajoute sous Windows
-/// (`\\?\E:\A001` devient `E:\A001`) : sinon le chemin ne commence pas par
-/// le point de montage `E:\` et son volume n'est pas trouvé.
-fn without_verbatim(path: &Path) -> PathBuf {
+/// Retire le préfixe étendu de Windows que `canonicalize` ajoute (`\\?\E:\x`
+/// devient `E:\x`, `\\?\UNC\srv\x` devient `\\srv\x`) : sans cela, `starts_with`
+/// ne reconnaît plus le point de montage `E:\`.
+fn strip_verbatim(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
-        _ => path.to_path_buf(),
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
     }
 }
 
 /// Volume contenant un chemin (point de montage le plus long qui le précède).
 pub fn volume_of(path: &Path) -> Option<Volume> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = without_verbatim(&path);
+    let path = strip_verbatim(&path);
     volumes()
         .into_iter()
-        .filter(|v| path.starts_with(&v.mount_point))
+        .filter(|v| path.starts_with(strip_verbatim(&v.mount_point)))
         .max_by_key(|v| v.mount_point.as_os_str().len())
 }
 
@@ -705,33 +708,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strips_windows_verbatim_prefix() {
-        assert_eq!(
-            without_verbatim(Path::new(r"\\?\E:\A001")),
-            PathBuf::from(r"E:\A001")
-        );
-        // Partage réseau en chemin étendu : laissé tel quel.
-        let unc = Path::new(r"\\?\UNC\serveur\rushes");
-        assert_eq!(without_verbatim(unc), unc.to_path_buf());
-        assert_eq!(
-            without_verbatim(Path::new("/Volumes/A001")),
-            PathBuf::from("/Volumes/A001")
-        );
-    }
-
-    #[test]
     fn lists_volumes_and_finds_the_one_of_a_path() {
         let dir = tempfile::tempdir().unwrap();
         // Dans un conteneur, la liste peut être vide : on vérifie seulement la cohérence.
         if let Some(v) = volume_of(dir.path()) {
-            assert!(dir
-                .path()
-                .canonicalize()
-                .unwrap()
-                .starts_with(&v.mount_point));
+            let canon = strip_verbatim(&dir.path().canonicalize().unwrap());
+            assert!(canon.starts_with(strip_verbatim(&v.mount_point)));
             assert!(v.total >= v.available);
         }
         let _ = is_hdd(dir.path());
+    }
+
+    #[test]
+    fn verbatim_prefix_is_removed_for_volume_matching() {
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\E:\Rushes\A001")),
+            PathBuf::from(r"E:\Rushes\A001")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\UNC\srv\partage\x")),
+            PathBuf::from(r"\\srv\partage\x")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new("/media/disque")),
+            PathBuf::from("/media/disque")
+        );
+        assert_eq!(strip_verbatim(Path::new(r"E:\")), PathBuf::from(r"E:\"));
     }
 
     #[cfg(unix)]

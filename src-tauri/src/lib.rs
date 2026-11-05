@@ -48,7 +48,7 @@ pub fn run() {
         .manage(quick::QuickState::default())
         .setup(|app| {
             use tauri::Manager;
-            app.manage(offload::OffloadState::new(app.handle().clone()));
+            app.manage(offload::OffloadState::new());
             app.manage(explorer::ExplorerState::new(app.handle().clone()));
             app.manage(transcode::TranscodeState::new(app.handle().clone()));
             menu::listen(app.handle());
@@ -122,6 +122,8 @@ pub fn run() {
             offload::offload_card_info,
             offload::offload_check_cancel,
             offload::offload_cancel,
+            offload::offload_mhl_info,
+            offload::offload_mhl_verify,
             offload::offload_eject,
             offload::reveal,
             explorer::explorer_list,
