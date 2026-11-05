@@ -919,5 +919,8 @@
   "offload.error.cascade_history": "The stage 1 ASC MHL history is unreadable or altered: the cascade is refused.",
   "offload.error.cascade_diverged": "The cascade destination holds a different history from stage 1: nothing was written.",
   "offload.error.cascade_no_source": "No stage 1 copy can be used as the cascade source.",
-  "offload.error.cascade_no_immediate": "No immediate destination: the cascade needs at least one stage 1 copy."
+  "offload.error.cascade_no_immediate": "No immediate destination: the cascade needs at least one stage 1 copy.",
+  "offload.cascade.stage1_missing": "Stage 1 copy not found.",
+  "offload.cascade.active": "Stage 2 is already queued or running.",
+  "offload.error.cascade_active": "This stage 2 is already queued or running: cancel it first."
 }

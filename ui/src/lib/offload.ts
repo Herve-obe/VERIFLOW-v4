@@ -161,6 +161,8 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
+  /** Par destination : échec de l'historique ASC MHL (codes cascade_history, cascade_diverged). */
+  mhl_errors?: ({ code: string | null; message: string } | null)[];
   reports: { csv: string; html: string; pdf: string; pdf_sha256: string; rates_csv?: string | null }[];
   source_name: string;
   fingerprint: string;
@@ -173,8 +175,17 @@ export interface PendingView {
   key: string;
   /** Nom de la carte d'origine. */
   card: string;
+  source: string;
+  date: string;
   stage1_roots: string[];
   stage2_roots: string[];
+  files: number;
+  total_bytes: number;
+  finished_at: string;
+  /** Une copie de l'étape 1 a encore un historique intact. */
+  stage1_available: boolean;
+  /** Numéro de la copie si l'étape 2 est déjà en file ou en cours. */
+  job: number | null;
 }
 
 export type JobKindName = "offload" | "verify";
@@ -253,7 +264,7 @@ export type ErrorCode =
   | "cascade_no_immediate";
 
 export type Notice =
-  | { kind: "queued"; job: number; source: string; cascade_of?: number | null }
+  | { kind: "queued"; job: number; source: string; stage?: 1 | 2; cascade_of?: number | null }
   | { kind: "waiting"; job: number; reason: WaitReason }
   | { kind: "dropped"; job: number }
   | { kind: "starting"; job: number }

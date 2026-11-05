@@ -213,7 +213,7 @@
       try {
         pre = await preflight(r);
       } catch (e) {
-        error = String(e);
+        error = cascadeText(e);
       } finally {
         checking = false;
       }
@@ -260,11 +260,18 @@
     stageChoice = { ...stageChoice, [d]: c };
   }
 
+  /** Erreurs du pont sous la forme « code : détail » : texte traduit si le code est connu. */
+  function cascadeText(e: unknown): string {
+    const msg = String(e);
+    const code = /^(cascade_[a-z_]+)\b/.exec(msg)?.[1];
+    return code && code !== "cascade_" ? t(`offload.error.${code}`) : msg;
+  }
+
   async function resumeCascade(key: string) {
     try {
       await cascadeResume(key);
     } catch (e) {
-      error = String(e);
+      error = cascadeText(e);
     }
     await refreshPending();
   }
@@ -279,7 +286,7 @@
     try {
       await cascadeDiscard(key);
     } catch (e) {
-      error = String(e);
+      error = cascadeText(e);
     }
     await refreshPending();
   }
@@ -367,7 +374,7 @@
       resumeDate = null;
       resumeSource = "";
     } catch (e) {
-      error = String(e);
+      error = cascadeText(e);
     }
   }
 
@@ -561,7 +568,10 @@
         {#each offload.pending as p (p.key)}
           <div class="row">
             <span class="path mono" title={p.stage2_roots.join("\n")}>{p.card} : {p.stage2_roots.join(", ")}</span>
-            <button onclick={() => resumeCascade(p.key)}>{t("offload.cascade.resume")}</button>
+            <span class="small muted">{p.files} {t("offload.files")}, {bytes(p.total_bytes)}, {p.finished_at}</span>
+            {#if !p.stage1_available}<span class="small error">{t("offload.cascade.stage1_missing")}</span>{/if}
+            {#if p.job !== null}<span class="small muted">{t("offload.cascade.active")}</span>{/if}
+            <button disabled={!p.stage1_available || p.job !== null} onclick={() => resumeCascade(p.key)}>{t("offload.cascade.resume")}</button>
             <button class="ghost" onclick={() => discardCascade(p.key, p.card)}>{t("offload.cascade.discard")}</button>
           </div>
         {/each}
@@ -831,5 +841,10 @@
   }
   .pending .row {
     justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .pending button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 </style>

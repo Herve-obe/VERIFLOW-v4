@@ -205,7 +205,7 @@ function applyNotice(n: Notice) {
       ejected: null,
       ejectCode: null,
       startedAt: 0,
-      stage: n.cascade_of != null ? 2 : 1,
+      stage: n.stage ?? (n.cascade_of != null ? 2 : 1),
       cascadeOf: n.cascade_of ?? null,
       cascadeJob: null,
       cardFree: null,

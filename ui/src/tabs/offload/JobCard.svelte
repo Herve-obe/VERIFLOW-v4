@@ -266,6 +266,11 @@
         <button class="link" onclick={() => goTo(stage2.id)}>{stage2.source}</button>
       </div>
     {/if}
+    {#each job.result.mhl_errors ?? [] as m, i (i)}
+      {#if m?.code === "cascade_history" || m?.code === "cascade_diverged"}
+        <div class="small err">{t("offload.destination")} {i + 1} : {t(`offload.error.${m.code}`)}</div>
+      {/if}
+    {/each}
     {#if job.ejected}
       <div class="small">{job.ejected === "ok" ? t("offload.ejected") : `${t("offload.eject.error")} : ${job.ejectCode ? t(`offload.eject.code.${job.ejectCode}`) : job.ejected}`}</div>
     {/if}
