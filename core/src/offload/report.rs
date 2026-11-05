@@ -6,11 +6,12 @@
 //! l'empreinte du PDF est écrite à côté, dans `<rapport>.pdf.sha256`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use serde::Serialize;
 
+use super::cascade::Stage1Summary;
 use super::engine::{DestStatus, OffloadSpec, OffloadSummary};
 use super::hash::{hash_data, HashAlgo};
 use super::meter::{PhaseStat, Throughput};
@@ -38,6 +39,25 @@ pub struct ReportFiles {
     pub pdf_sha256: String,
 }
 
+/// Contexte d'une copie en cascade, pour le rapport de l'étape 1 ou de l'étape 2.
+pub enum CascadeInfo<'a> {
+    /// Rapport de l'étape 1 : étape 2 prévue vers `planned`.
+    Stage1 {
+        planned: &'a [PathBuf],
+        card_free: bool,
+    },
+    /// Rapport de l'étape 2 : la source est la copie vérifiée de l'étape 1.
+    Stage2 {
+        stage1: &'a Stage1Summary,
+        /// Dossier de l'étape 1 lu comme source.
+        source: &'a Path,
+        /// MHL de l'étape 1 qui sert de référence, avec son SHA-256.
+        reference: Option<(PathBuf, String)>,
+        /// Par destination : rapports de l'étape 1 recopiés à l'identique, sur le total.
+        reports_copied: &'a [(usize, usize)],
+    },
+}
+
 /// Tout ce qu'un rapport affiche.
 pub struct ReportData<'a> {
     pub inv: &'a SourceInventory,
@@ -46,6 +66,8 @@ pub struct ReportData<'a> {
     pub info: &'a ReportInfo,
     /// Fichier MHL écrit dans chaque destination (None si échec d'écriture).
     pub mhl: &'a [Option<PathBuf>],
+    /// Copie en cascade (None pour un offload simple).
+    pub cascade: Option<&'a CascadeInfo<'a>>,
 }
 
 /// Octets en Go et Gio : « 1,50 Go (1,40 Gio) ».
@@ -227,6 +249,14 @@ impl ReportData<'_> {
         }
     }
 
+    /// Titre du rapport.
+    fn title(&self) -> &'static str {
+        match self.cascade {
+            Some(CascadeInfo::Stage2 { .. }) => "OFFLOAD EN CASCADE (étape 2)",
+            _ => "Rapport de transfert (OFFLOAD)",
+        }
+    }
+
     fn algos(&self) -> String {
         self.spec
             .algorithms
@@ -238,6 +268,129 @@ impl ReportData<'_> {
 
     fn primary(&self) -> HashAlgo {
         self.spec.algorithms[0]
+    }
+
+    fn source_row(&self) -> (String, String) {
+        match self.cascade {
+            Some(CascadeInfo::Stage2 { source, .. }) => (
+                "Source".into(),
+                format!(
+                    "copie vérifiée de l'étape 1 de {} ({})",
+                    self.inv.name,
+                    source.display()
+                ),
+            ),
+            _ => (
+                "Source".into(),
+                format!("{} ({})", self.inv.name, self.inv.root.display()),
+            ),
+        }
+    }
+
+    fn fingerprint_row(&self) -> (String, String) {
+        match self.cascade {
+            Some(CascadeInfo::Stage2 { reference, .. }) => (
+                "Référence".into(),
+                match reference {
+                    Some((mhl, sha)) => {
+                        format!("MHL de l'étape 1 {} (SHA-256 {sha})", mhl.display())
+                    }
+                    None => "MHL de l'étape 1".into(),
+                },
+            ),
+            _ => (
+                "Empreinte de la source".into(),
+                format!("XXH128 {} (inventaire)", self.inv.fingerprint),
+            ),
+        }
+    }
+
+    fn check_text(&self) -> String {
+        let base = "relecture intégrale de chaque destination depuis le support physique";
+        match self.cascade {
+            Some(CascadeInfo::Stage2 { .. }) => format!(
+                "{base}, comparée aux empreintes de la copie vérifiée de l'étape 1 (la carte n'est pas relue)"
+            ),
+            _ => base.into(),
+        }
+    }
+
+    /// Lignes propres à la cascade (étape 1 prévue ou étape 1 accomplie).
+    fn cascade_rows(&self) -> Vec<(String, String)> {
+        let list = |paths: &[PathBuf]| {
+            paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match self.cascade {
+            None => Vec::new(),
+            Some(CascadeInfo::Stage1 { planned, card_free }) => vec![
+                (
+                    "Cascade".into(),
+                    format!("étape 2 prévue vers {}", list(planned)),
+                ),
+                (
+                    "Carte libérable".into(),
+                    if *card_free { "oui" } else { "non" }.into(),
+                ),
+            ],
+            Some(CascadeInfo::Stage2 {
+                stage1,
+                reports_copied,
+                ..
+            }) => {
+                let mut rows = vec![
+                    ("Étape 1 : début".into(), stage1.started_at.clone()),
+                    ("Étape 1 : fin".into(), stage1.finished_at.clone()),
+                    ("Étape 1 : durée".into(), duration_text(stage1.duration_s)),
+                    (
+                        "Étape 1 : volume".into(),
+                        format!(
+                            "{} fichiers, {}",
+                            stage1.files,
+                            human_size(stage1.total_bytes)
+                        ),
+                    ),
+                    (
+                        "Étape 1 : débit global".into(),
+                        match stage1.effective_rate {
+                            Some(r) => format!("{:.1} Mo/s", r / 1e6).replace('.', ","),
+                            None => "-".into(),
+                        },
+                    ),
+                    (
+                        "Étape 1 : limité par".into(),
+                        bottleneck_text(&stage1.bottleneck),
+                    ),
+                    ("Étape 1 : destinations".into(), list(&stage1.destinations)),
+                ];
+                for (i, (ok, total)) in reports_copied.iter().enumerate() {
+                    rows.push((
+                        format!("Rapports de l'étape 1, destination {}", i + 1),
+                        format!("{ok}/{total} recopiés à l'identique (comparés octet par octet)"),
+                    ));
+                }
+                let unlisted: Vec<&str> = self
+                    .spec
+                    .algorithms
+                    .iter()
+                    .filter(|a| !a.in_mhl())
+                    .map(|a| a.label())
+                    .collect();
+                if !unlisted.is_empty() {
+                    rows.push((
+                        "Empreintes hors MHL".into(),
+                        format!(
+                            "{} calculée en étape 1, absente du MHL : non comparée en étape 2",
+                            unlisted.join(", ")
+                        ),
+                    ));
+                }
+                rows
+            }
+        }
     }
 
     /// Lignes d'en-tête communes (libellé, valeur).
@@ -259,14 +412,8 @@ impl ReportData<'_> {
             ("Début".into(), self.summary.started_at.clone()),
             ("Fin".into(), self.summary.finished_at.clone()),
             ("Durée".into(), duration_text(self.summary.duration_s)),
-            (
-                "Source".into(),
-                format!("{} ({})", self.inv.name, self.inv.root.display()),
-            ),
-            (
-                "Empreinte de la source".into(),
-                format!("XXH128 {} (inventaire)", self.inv.fingerprint),
-            ),
+            self.source_row(),
+            self.fingerprint_row(),
             (
                 "Volume".into(),
                 format!(
@@ -276,10 +423,7 @@ impl ReportData<'_> {
                 ),
             ),
             ("Empreintes".into(), self.algos()),
-            (
-                "Vérification".into(),
-                "relecture intégrale de chaque destination depuis le support physique".into(),
-            ),
+            ("Vérification".into(), self.check_text()),
         ];
         for (i, d) in self.spec.destinations.iter().enumerate() {
             let ok = self
@@ -306,6 +450,7 @@ impl ReportData<'_> {
                 ));
             }
         }
+        rows.extend(self.cascade_rows());
         rows.extend(throughput_rows(&self.summary.throughput));
         rows.push(("Données (CSV)".into(), format!("SHA-256 {csv_sha}")));
         rows.push(("Débit (CSV)".into(), format!("SHA-256 {rates_sha}")));
@@ -370,7 +515,14 @@ table{border-collapse:collapse;width:100%;margin-top:12px}td,th{border:1px solid
 th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all}.r{text-align:right;white-space:nowrap}\
 .info td:first-child{width:220px;color:#555}.f{color:#a10e0e;font-weight:600}</style></head><body>",
         );
-        h += &format!("<h1>Rapport de transfert (OFFLOAD)</h1><div>VERIFLOW {VERSION}</div>");
+        if matches!(self.cascade, Some(CascadeInfo::Stage2 { .. })) {
+            h = h.replacen(
+                "<title>Rapport de transfert VERIFLOW</title>",
+                &format!("<title>{}</title>", self.title()),
+                1,
+            );
+        }
+        h += &format!("<h1>{}</h1><div>VERIFLOW {VERSION}</div>", e(self.title()));
         h += &format!(
             "<div class=\"v {}\">{}</div><table class=\"info\">",
             if self.ok() { "ok" } else { "ko" },
@@ -409,7 +561,7 @@ th{background:#f0f0f0}.m{font-family:ui-monospace,Consolas,monospace;font-size:1
     /// PDF A4, polices standard (aucune police à embarquer).
     pub fn pdf(&self, csv_sha: &str, rates_sha: &str) -> Vec<u8> {
         let mut doc = PdfDoc::new();
-        doc.text(&Font::Bold, 18.0, "Rapport de transfert (OFFLOAD)");
+        doc.text(&Font::Bold, 18.0, self.title());
         doc.gap(4.0);
         doc.text(&Font::Regular, 9.0, &format!("VERIFLOW {VERSION}"));
         doc.gap(8.0);
@@ -470,7 +622,11 @@ pub fn write_reports(data: &ReportData) -> Result<Vec<ReportFiles>> {
     let pdf = data.pdf(&csv_sha, &rates_sha);
     let pdf_sha = hash_data(HashAlgo::Sha256, &pdf);
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ");
-    let base = format!("{}_offload_{stamp}", data.inv.name);
+    let kind = match data.cascade {
+        Some(CascadeInfo::Stage2 { .. }) => "cascade",
+        _ => "offload",
+    };
+    let base = format!("{}_{kind}_{stamp}", data.inv.name);
     let mut out = Vec::new();
     for dest in &data.spec.destinations {
         let dir = dest.join(REPORTS_DIR);
@@ -1157,6 +1313,7 @@ mod tests {
             spec: &spec,
             info: &info,
             mhl: &[None],
+            cascade: None,
         };
         let files = write_reports(&data).unwrap();
         assert_eq!(files.len(), 1);
@@ -1290,6 +1447,7 @@ mod tests {
             spec: &spec,
             info: &info,
             mhl: &[None, None],
+            cascade: None,
         };
         let files = write_reports(&data).unwrap();
         let labels = [

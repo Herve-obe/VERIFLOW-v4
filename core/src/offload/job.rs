@@ -6,13 +6,14 @@ use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
-use super::engine::{check_space, run, Event, OffloadSpec, OffloadSummary};
+use super::cascade::{self, PendingCascade, Stage1Summary};
+use super::engine::{check_space, run, DestStatus, Event, OffloadSpec, OffloadSummary};
 use super::existing::{self, Elsewhere, ExistingMode, Known, Present};
 use super::hash::HashAlgo;
 use super::mhl::{write_generation, MhlAuthor};
-use super::report::{write_reports, ReportData, ReportFiles, ReportInfo};
+use super::report::{write_reports, CascadeInfo, ReportData, ReportFiles, ReportInfo};
 use super::scan::{scan, source_name, SourceInventory};
-use crate::Result;
+use crate::{Error, Result};
 
 /// Modèle d'arborescence par défaut : un dossier par jour, puis la carte.
 pub const DEFAULT_TEMPLATE: &str = "{date}/{carte}";
@@ -55,6 +56,14 @@ pub struct OffloadRequest {
     /// le dossier du jour porte un autre nom.
     #[serde(default)]
     pub history: Vec<PathBuf>,
+    /// Destinations en cascade (étape 2), copiées plus tard depuis la copie
+    /// vérifiée de l'étape 1 sans relire la carte.
+    #[serde(default)]
+    pub cascade: Vec<PathBuf>,
+    /// Les destinations lentes de `destinations` (disque dur, réseau) passent
+    /// en étape 2, sauf si toutes sont lentes ou toutes rapides.
+    #[serde(default)]
+    pub cascade_auto: bool,
 }
 
 /// Remplace les caractères interdits dans un nom de dossier (Windows inclus).
@@ -133,6 +142,9 @@ pub struct Preflight {
     /// Par destination, si le dossier final ne contient encore rien : copies
     /// de cette carte trouvées dans d'autres dossiers (autre date...).
     pub elsewhere: Vec<Vec<Elsewhere>>,
+    /// Étape (1 ou 2) de chaque destination, dans l'ordre de `roots` (celui de
+    /// `destinations` puis de `cascade`). Seule l'étape 1 est copiée tout de suite.
+    pub stages: Vec<u8>,
     #[serde(skip)]
     pub inventory: Option<SourceInventory>,
 }
@@ -141,40 +153,111 @@ pub fn local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// Dossiers finals d'après le nom de source et la date (source de vérité
-/// commune à `preflight` et `planned_roots`).
-fn planned_roots_for(req: &OffloadRequest, card: &str, date: &str) -> Vec<PathBuf> {
-    match &req.roots {
-        Some(r) if r.len() == req.destinations.len() => {
-            r.iter().map(|p| crate::absolute_path(p)).collect()
-        }
-        _ => {
-            let rel = render_template(&req.template, card, &req.vars, date);
-            req.destinations
-                .iter()
-                .map(|d| crate::absolute_path(&d.join(&rel)))
-                .collect()
-        }
-    }
+/// Toutes les destinations de la demande : immédiates puis en cascade.
+fn all_destinations(req: &OffloadRequest) -> Vec<PathBuf> {
+    req.destinations
+        .iter()
+        .chain(&req.cascade)
+        .cloned()
+        .collect()
 }
 
-/// Dossiers finals de chaque destination, sans parcourir la source (le nom de
-/// la carte suffit) : sert à l'ordonnancement des copies simultanées.
+/// Étape (1 ou 2) de chaque destination de `destinations` puis de `cascade`.
+/// Avec `cascade_auto`, les destinations lentes de `destinations` passent en
+/// étape 2, sauf si toutes sont lentes ou toutes rapides. Les destinations de
+/// `cascade` sont toujours en étape 2. Sans destination immédiate, la demande
+/// est refusée (`cascade_no_immediate`) : la carte ne serait jamais copiée.
+pub fn split_cascade(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> Result<Vec<u8>> {
+    let mut stages = vec![1u8; req.destinations.len()];
+    if req.cascade_auto {
+        let slow: Vec<bool> = req.destinations.iter().map(|d| is_slow(d)).collect();
+        let n_slow = slow.iter().filter(|s| **s).count();
+        if n_slow > 0 && n_slow < slow.len() {
+            for (stage, slow) in stages.iter_mut().zip(&slow) {
+                if *slow {
+                    *stage = 2;
+                }
+            }
+        }
+    }
+    stages.extend(req.cascade.iter().map(|_| 2));
+    if !stages.is_empty() && !stages.contains(&1) {
+        return Err(Error::Unsupported(
+            "cascade_no_immediate : aucune destination immédiate (étape 1)".into(),
+        ));
+    }
+    Ok(stages)
+}
+
+/// Dossiers finals d'après le nom de source et la date (source de vérité
+/// commune à `preflight` et `planned_roots`), dans l'ordre de
+/// `all_destinations`. Les dossiers imposés (`roots`) ne concernent que les
+/// destinations immédiates.
+fn planned_roots_for(req: &OffloadRequest, card: &str, date: &str) -> Vec<PathBuf> {
+    let rel = render_template(&req.template, card, &req.vars, date);
+    let imposed = req
+        .roots
+        .as_ref()
+        .filter(|r| r.len() == req.destinations.len());
+    all_destinations(req)
+        .iter()
+        .enumerate()
+        .map(|(i, d)| match imposed.and_then(|r| r.get(i)) {
+            Some(r) => crate::absolute_path(r),
+            None => crate::absolute_path(&d.join(&rel)),
+        })
+        .collect()
+}
+
+/// Dossiers finals de chaque destination (immédiates puis en cascade), sans
+/// parcourir la source (le nom de la carte suffit).
 pub fn planned_roots(req: &OffloadRequest) -> Vec<PathBuf> {
     let date = req.date.clone().unwrap_or_else(local_date);
     let name = source_name(&crate::absolute_path(&req.source));
     planned_roots_for(req, &name, &date)
 }
 
+/// Dossiers finals de l'étape 1 et de l'étape 2, sans parcourir la source :
+/// sert à l'ordonnancement des copies simultanées.
+pub fn planned_split(req: &OffloadRequest) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    planned_split_with(req, super::storage::is_slow)
+}
+
+fn planned_split_with(
+    req: &OffloadRequest,
+    is_slow: impl Fn(&Path) -> bool,
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let stages = split_cascade(req, is_slow)?;
+    Ok(partition(planned_roots(req), &stages))
+}
+
+/// Sépare des éléments (un par destination) selon leur étape.
+fn partition<T>(items: Vec<T>, stages: &[u8]) -> (Vec<T>, Vec<T>) {
+    let (mut one, mut two) = (Vec::new(), Vec::new());
+    for (item, stage) in items.into_iter().zip(stages) {
+        if *stage == 1 {
+            one.push(item);
+        } else {
+            two.push(item);
+        }
+    }
+    (one, two)
+}
+
 /// Inventorie la source et contrôle les destinations, sans rien écrire.
 pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
+    preflight_with(req, super::storage::is_slow)
+}
+
+fn preflight_with(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> Result<Preflight> {
+    let stages = split_cascade(req, is_slow)?;
     let inv = scan(&crate::absolute_path(&req.source))?;
     let date = req.date.clone().unwrap_or_else(local_date);
     let roots = planned_roots_for(req, &inv.name, &date);
     let present: Vec<Present> = roots.iter().map(|r| existing::present(&inv, r)).collect();
     let elsewhere = roots
         .iter()
-        .zip(&req.destinations)
+        .zip(all_destinations(req))
         .zip(&present)
         .map(|((root, base), p)| {
             if p.files > 0 || p.partial > 0 {
@@ -182,7 +265,7 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
             } else {
                 existing::find_elsewhere_with_history(
                     &inv,
-                    &crate::absolute_path(base),
+                    &crate::absolute_path(&base),
                     root,
                     &req.history,
                 )
@@ -203,28 +286,58 @@ pub fn preflight(req: &OffloadRequest) -> Result<Preflight> {
         elsewhere,
         date,
         roots,
+        stages,
         inventory: Some(inv),
     })
 }
 
-/// Résultat complet d'un offload.
+/// Échec d'écriture de l'historique MHL d'une destination. `code` est le code
+/// stable d'une erreur de cascade (`cascade_history`, `cascade_diverged`).
+#[derive(Debug, Clone, Serialize)]
+pub struct MhlFailure {
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl MhlFailure {
+    pub(super) fn of(e: &Error) -> MhlFailure {
+        MhlFailure {
+            code: cascade::error_code(e).map(str::to_owned),
+            message: e.to_string(),
+        }
+    }
+}
+
+/// Résultat complet d'un offload (étape 1 s'il y a une cascade).
 #[derive(Debug, Clone, Serialize)]
 pub struct JobResult {
     pub summary: OffloadSummary,
+    /// Dossiers de l'étape copiée (étape 1 pour un offload, étape 2 pour une cascade).
     pub roots: Vec<PathBuf>,
     pub mhl: Vec<Option<PathBuf>>,
+    /// Raison de l'absence de MHL, par destination (même ordre que `mhl`).
+    pub mhl_errors: Vec<Option<MhlFailure>>,
     pub reports: Vec<ReportFiles>,
     pub source_name: String,
     pub fingerprint: String,
+    /// La carte peut être éjectée : copie terminée, aucun fichier en échec et
+    /// toutes les destinations de l'étape 1 vérifiées. Toujours faux pour une étape 2.
+    pub card_free: bool,
+    /// Étape 2 à faire plus tard (None sans cascade, ou si l'étape 1 n'a laissé
+    /// aucune copie vérifiée avec son historique).
+    pub cascade: Option<PendingCascade>,
 }
 
 /// Le recouvrement copie/vérification est exclu dès qu'une destination est un
 /// disque dur mécanique (deux accès simultanés s'y gênent).
-fn overlap_allowed(roots: &[PathBuf], is_hdd: impl Fn(&Path) -> bool) -> bool {
+pub(super) fn overlap_allowed(roots: &[PathBuf], is_hdd: impl Fn(&Path) -> bool) -> bool {
     !roots.iter().any(|r| is_hdd(r))
 }
 
-/// Exécute l'offload : copie et vérification, puis MHL et rapports.
+/// Exécute l'offload : copie et vérification de l'étape 1, puis MHL et
+/// rapports. Les destinations en cascade ne sont pas touchées : `cascade` du
+/// résultat décrit l'étape 2 à lancer. `known` est indexé comme `pre.roots`
+/// (ou seulement sur les destinations de l'étape 1).
 pub fn execute(
     req: &OffloadRequest,
     pre: Preflight,
@@ -239,8 +352,22 @@ pub fn execute(
         Some(inv) => inv,
         None => scan(&crate::absolute_path(&req.source))?,
     };
+    let all = pre.roots.len();
+    let stages = if pre.stages.len() == all {
+        pre.stages.clone()
+    } else {
+        vec![1; all]
+    };
+    let immediate: Vec<usize> = (0..all).filter(|&i| stages[i] == 1).collect();
+    let (roots1, roots2) = partition(pre.roots.clone(), &stages);
+    let known = known.map(|mut k| {
+        if k.identical.len() == all && immediate.len() != all {
+            k.identical = immediate.iter().map(|&i| k.identical[i].clone()).collect();
+        }
+        k
+    });
     let spec = OffloadSpec {
-        destinations: pre.roots.clone(),
+        destinations: roots1,
         algorithms: if req.algorithms.is_empty() {
             vec![HashAlgo::Xxh128]
         } else {
@@ -263,15 +390,30 @@ pub fn execute(
         comment: None,
         ..Default::default()
     };
-    let mhl: Vec<Option<PathBuf>> = if summary.cancelled {
-        vec![None; spec.destinations.len()]
+    let written: Vec<Result<PathBuf>> = if summary.cancelled {
+        Vec::new()
     } else {
         spec.destinations
             .iter()
             .enumerate()
-            .map(|(i, d)| write_generation(&inv, &summary, i, d, &spec.algorithms, &author).ok())
+            .map(|(i, d)| write_generation(&inv, &summary, i, d, &spec.algorithms, &author))
             .collect()
     };
+    let mhl_errors: Vec<Option<MhlFailure>> = if summary.cancelled {
+        vec![None; spec.destinations.len()]
+    } else {
+        written
+            .iter()
+            .map(|r| r.as_ref().err().map(MhlFailure::of))
+            .collect()
+    };
+    let mhl: Vec<Option<PathBuf>> = if summary.cancelled {
+        vec![None; spec.destinations.len()]
+    } else {
+        written.into_iter().map(|r| r.ok()).collect()
+    };
+    let card_free =
+        !summary.cancelled && summary.failed_files == 0 && !spec.destinations.is_empty();
     let info = ReportInfo {
         project: project
             .map(str::to_owned)
@@ -279,20 +421,54 @@ pub fn execute(
         operator: req.operator.clone(),
         notes: req.notes.clone(),
     };
+    let planned = CascadeInfo::Stage1 {
+        planned: &roots2,
+        card_free,
+    };
     let reports = write_reports(&ReportData {
         inv: &inv,
         summary: &summary,
         spec: &spec,
         info: &info,
         mhl: &mhl,
+        cascade: (!roots2.is_empty()).then_some(&planned),
     })?;
+    // Étape 2 : seules comptent les destinations dont tous les fichiers sont
+    // vérifiés et dont l'historique est écrit.
+    let sound: Vec<PathBuf> = spec
+        .destinations
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            mhl[*i].is_some()
+                && summary
+                    .files
+                    .iter()
+                    .all(|f| !matches!(f.destinations[*i], DestStatus::Failed(_)))
+        })
+        .map(|(_, d)| d.clone())
+        .collect();
+    let pending = (!summary.cancelled && !roots2.is_empty() && !sound.is_empty()).then(|| {
+        PendingCascade::new(
+            &inv,
+            sound,
+            roots2.clone(),
+            spec.algorithms.clone(),
+            &info,
+            pre.date.clone(),
+            Stage1Summary::of(&summary, &spec.destinations),
+        )
+    });
     Ok(JobResult {
         source_name: inv.name.clone(),
         fingerprint: inv.fingerprint.clone(),
         roots: spec.destinations,
         summary,
         mhl,
+        mhl_errors,
         reports,
+        card_free,
+        cascade: pending,
     })
 }
 
@@ -365,6 +541,8 @@ mod tests {
             date: None,
             roots: None,
             history: Vec::new(),
+            cascade: Vec::new(),
+            cascade_auto: false,
         };
         let pre = preflight(&req).unwrap();
         assert_eq!(pre.files, 1);
@@ -416,6 +594,8 @@ mod tests {
             date: None,
             roots: None,
             history,
+            cascade: Vec::new(),
+            cascade_auto: false,
         };
         let monday = request("J01", Vec::new());
         let pre = preflight(&monday).unwrap();
@@ -453,6 +633,8 @@ mod tests {
             date: None,
             roots: None,
             history: Vec::new(),
+            cascade: Vec::new(),
+            cascade_auto: false,
         }
     }
 

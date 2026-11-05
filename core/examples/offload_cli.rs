@@ -27,6 +27,7 @@ fn main() {
         algorithms: algos.clone(),
         known: None,
         overlap: false,
+        expected: None,
     };
     println!("{} fichiers, {} octets", inv.files.len(), inv.total_bytes);
     let summary = run(&inv, &spec, &AtomicBool::new(false), |e| {
@@ -56,6 +57,7 @@ fn main() {
         spec: &spec,
         info: &info,
         mhl: &mhl,
+        cascade: None,
     };
     for r in write_reports(&data).unwrap() {
         println!("Rapport : {}", r.pdf.display());

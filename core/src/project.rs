@@ -767,6 +767,8 @@ mod tests {
             date: None,
             roots: None,
             history: Vec::new(),
+            cascade: Vec::new(),
+            cascade_auto: false,
         };
         let p = Project::create(&dir.path().join("p.veriflow"), None).unwrap();
         let pre = preflight(&req).unwrap();
