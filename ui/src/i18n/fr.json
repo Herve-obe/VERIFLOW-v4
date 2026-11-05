@@ -830,5 +830,13 @@
   "window.maximize": "Agrandir",
   "window.restore": "Restaurer",
   "window.close": "Fermer",
-  "offload.resume.locked": "Réglages d'origine conservés pour cette reprise."
+  "offload.resume.locked": "Réglages d'origine conservés pour cette reprise.",
+  "player.panel.title": "Panneaux du PLAYER",
+  "player.panel.explorer": "Explorateur",
+  "player.panel.clips": "Clips",
+  "player.panel.banner": "Bandeau",
+  "player.panel.strip": "Bande",
+  "player.panel.inspector": "Inspecteur",
+  "player.panel.reset": "Disposition par défaut",
+  "player.resize": "Redimensionner le panneau"
 }

@@ -830,5 +830,13 @@
   "window.maximize": "Maximize",
   "window.restore": "Restore",
   "window.close": "Close",
-  "offload.resume.locked": "Original settings kept for this resume."
+  "offload.resume.locked": "Original settings kept for this resume.",
+  "player.panel.title": "PLAYER panels",
+  "player.panel.explorer": "Explorer",
+  "player.panel.clips": "Clips",
+  "player.panel.banner": "Banner",
+  "player.panel.strip": "Strip",
+  "player.panel.inspector": "Inspector",
+  "player.panel.reset": "Default layout",
+  "player.resize": "Resize panel"
 }
