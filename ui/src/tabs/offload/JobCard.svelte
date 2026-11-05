@@ -3,7 +3,7 @@
   import ProgressBar from "../../components/ProgressBar.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
-  import { MAX_PARALLEL_JOBS, cancel, remainingSecs, reveal, type DestStatus } from "../../lib/offload";
+  import { MAX_PARALLEL_JOBS, cancel, errorMessage, parseError, remainingSecs, reveal, type DestStatus } from "../../lib/offload";
   import { ask } from "../../stores/confirm.svelte";
   import { offload, interrupted, removeJob, type Job } from "../../stores/offload.svelte";
 
@@ -86,6 +86,7 @@
       if (c === "job_panic") return t("offload.verify.panic");
       if (c === "job_spawn") return t("offload.verify.spawn");
     }
+    if (parseError(job.error ?? "", c).code) return errorMessage(job.error ?? "", c);
     return t(`offload.error.${c}`);
   }
 
@@ -267,10 +268,13 @@
       </div>
     {/if}
     {#each job.result.mhl_errors ?? [] as m, i (i)}
-      {#if m?.code === "cascade_history" || m?.code === "cascade_diverged"}
-        <div class="small err">{t("offload.destination")} {i + 1} : {t(`offload.error.${m.code}`)}</div>
+      {#if m}
+        <div class="small err">{t("offload.destination")} {i + 1} : {m.code?.startsWith("cascade_") ? `${t(`offload.error.code.${m.code}`)} ` : ""}({m.message})</div>
       {/if}
     {/each}
+    {#if job.cascadeError}
+      <div class="small err">{t("offload.cascade.store_error").replace("{detail}", parseError(job.cascadeError).detail || job.cascadeError)}</div>
+    {/if}
     {#if job.ejected}
       <div class="small">{job.ejected === "ok" ? t("offload.ejected") : `${t("offload.eject.error")} : ${job.ejectCode ? t(`offload.eject.code.${job.ejectCode}`) : job.ejected}`}</div>
     {/if}

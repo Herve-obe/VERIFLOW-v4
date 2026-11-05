@@ -1,6 +1,7 @@
 // Accès aux commandes OFFLOAD (voir src-tauri/src/offload.rs).
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { t } from "../i18n/index.svelte";
 
 export type HashAlgo = "xxh128" | "xxh64" | "xxh3" | "md5" | "sha1" | "sha256" | "c4";
 
@@ -81,6 +82,8 @@ export interface PreflightView {
   /** Par destination : copies de cette carte trouvées dans d'autres dossiers. */
   elsewhere: (Present & { root: string })[][];
   hdd: boolean[];
+  /** Même ordre que `roots`, rempli aux positions d'étape 2 : espace manquant (avertissement non bloquant). */
+  cascade_space_warning?: (number | null)[];
   /** Étape (1 immédiate, 2 en cascade) de chaque dossier de `roots`, même ordre. */
   stages: number[];
   source_hdd: boolean;
@@ -270,8 +273,26 @@ export type Notice =
   | { kind: "starting"; job: number }
   | { kind: "running"; job: number; job_kind?: JobKindName; files: number; total_bytes: number; roots: string[] }
   | { kind: "engine"; job: number; event: EngineEvent }
-  | { kind: "done"; job: number; job_kind?: JobKindName; result?: JobResult; verify?: VerifySummary; reports?: ReportFiles; report_error?: string; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null; card_free?: boolean; cascade_job?: number | null }
+  | { kind: "done"; job: number; job_kind?: JobKindName; result?: JobResult; verify?: VerifySummary; reports?: ReportFiles; report_error?: string; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null; card_free?: boolean; cascade_job?: number | null; cascade_error?: string }
   | { kind: "failed"; job: number; error: string; error_code: ErrorCode | null };
+
+/** Codes d'erreur du pont qui arrivent aussi en texte nu « code : détail ». */
+const CODED = /^(cascade_[a-z_]+|no_space) : ([\s\S]*)$/;
+
+/** Code connu et détail d'une erreur : `code` si fourni, sinon lu dans le texte nu. */
+export function parseError(raw: string, code?: string | null): { code: string | null; detail: string } {
+  const m = CODED.exec(raw);
+  if (code && /^(cascade_|no_space)/.test(code)) return { code, detail: m ? m[2] : "" };
+  return m ? { code: m[1], detail: m[2] } : { code: null, detail: raw };
+}
+
+/** Message affiché : texte traduit du code puis détail ; texte brut si le code est inconnu. */
+export function errorMessage(raw: string, code?: string | null): string {
+  const p = parseError(raw, code);
+  if (!p.code) return raw;
+  const head = t(`offload.error.code.${p.code}`);
+  return p.detail ? `${head} (${p.detail})` : head;
+}
 
 export const volumes = () => invoke<Volume[]>("offload_volumes");
 export const preflight = (request: OffloadRequest) => invoke<PreflightView>("offload_preflight", { request });

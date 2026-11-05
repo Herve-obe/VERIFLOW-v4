@@ -45,6 +45,8 @@ export interface Job {
   cascadeJob: number | null;
   /** Étape 1 : la carte peut être libérée (null tant que la copie n'est pas finie). */
   cardFree: boolean | null;
+  /** Étape 1 : la cascade n'a pas pu être enregistrée pour reprise (texte « code : détail »). */
+  cascadeError: string | null;
 }
 
 /** Fenêtre de la moyenne glissante de la vitesse. */
@@ -61,14 +63,17 @@ export const offload = $state({
   batteryAlert: null as { key: string; vars: Record<string, string> } | null,
   /** Copies en cascade enregistrées dont l'étape 2 reste à faire. */
   pending: [] as PendingView[],
+  /** Échec de la lecture de ces copies (null si tout va bien). */
+  pendingError: null as string | null,
 });
 
 /** Relit la liste des copies en cascade à reprendre. */
 export async function refreshPending() {
   try {
     offload.pending = await cascadePending();
-  } catch {
-    offload.pending = []; // hors de Tauri
+    offload.pendingError = null;
+  } catch (e) {
+    offload.pendingError = String(e);
   }
 }
 
@@ -209,6 +214,7 @@ function applyNotice(n: Notice) {
       cascadeOf: n.cascade_of ?? null,
       cascadeJob: null,
       cardFree: null,
+      cascadeError: null,
     });
     return;
   }
@@ -220,6 +226,7 @@ function applyNotice(n: Notice) {
       break;
     case "dropped":
       if (j.state === "queued" || j.state === "waiting" || j.state === "starting") Object.assign(j, { state: "failed", waitReason: null, dropped: true });
+      void refreshPending();
       break;
     case "starting":
       if (j.state === "queued" || j.state === "waiting") Object.assign(j, { state: "starting", waitReason: null });
@@ -261,6 +268,7 @@ function applyNotice(n: Notice) {
       if (j.kind === "offload" && j.stage === 1) {
         j.cardFree = n.card_free ?? false;
         j.cascadeJob = n.cascade_job ?? null;
+        j.cascadeError = n.cascade_error ?? null;
       }
       void refreshPending();
       break;

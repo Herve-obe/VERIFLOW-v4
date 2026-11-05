@@ -13,7 +13,7 @@
   import { offload, listenOffload, dismissBatteryAlert, refreshPending } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, cascadeResume, cascadeDiscard, type StageChoice, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, cascadeResume, cascadeDiscard, errorMessage, type StageChoice, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -252,7 +252,9 @@
   }
 
   const noSpace = $derived(pre?.missing_space.some((m) => m !== null) ?? false);
-  const noImmediate = $derived(!!pre && pre.stages.length > 0 && !pre.stages.includes(1));
+  // Toutes les destinations sont en cascade : aucune copie immédiate possible.
+  const allCascade = $derived(destinations.length > 0 && destinations.every((d) => choiceOf(d) === "cascade"));
+  const noImmediate = $derived(allCascade || (!!pre && pre.stages.length > 0 && !pre.stages.includes(1)));
   const singleCopy = $derived(!!pre && pre.stages.includes(2) && pre.stages.filter((s) => s === 1).length === 1);
   const canStart = $derived(!!pre && !noSpace && !checking && !noImmediate);
 
@@ -262,9 +264,7 @@
 
   /** Erreurs du pont sous la forme « code : détail » : texte traduit si le code est connu. */
   function cascadeText(e: unknown): string {
-    const msg = String(e);
-    const code = /^(cascade_[a-z_]+)\b/.exec(msg)?.[1];
-    return code && code !== "cascade_" ? t(`offload.error.${code}`) : msg;
+    return errorMessage(String(e));
   }
 
   async function resumeCascade(key: string) {
@@ -475,6 +475,9 @@
           </select>
           <button class="ghost small" onclick={() => (destinations = destinations.filter((x) => x !== d))} aria-label={t("offload.remove")}>✕</button>
         </div>
+        {#if pre?.cascade_space_warning?.[preIndex(d)]}
+          <p class="warn">{t("offload.cascade.space_warning").replace("{size}", bytes(pre.cascade_space_warning[preIndex(d)] ?? 0))}</p>
+        {/if}
       {/each}
       <button class="add" onclick={addDestination}>+ {t("offload.dest.add")}</button>
       <p class="muted small">{t("offload.drop.dest")}</p>
@@ -506,6 +509,7 @@
     </div>
 
     <div class="block summary" bind:this={summaryEl}>
+      {#if noImmediate}<p class="error">{t("offload.cascade.need_immediate")}</p>{/if}
       {#if checking}
         <p class="muted">{t("offload.checking")}</p>
       {:else if error}
@@ -539,7 +543,6 @@
             <p class="note small">{t("offload.elsewhere.hint")}</p>
           </div>
         {/if}
-        {#if noImmediate}<p class="error">{t("offload.cascade.need_immediate")}</p>{/if}
         {#if singleCopy}<p class="warn">{t("offload.cascade.single_copy_warning")}</p>{/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}
         {#if pre.source_hdd || pre.hdd.some((h) => h)}<p class="warn">{t("offload.hdd")}</p>{/if}
@@ -561,6 +564,9 @@
         <span>{alertText(offload.batteryAlert)}</span>
         <button onclick={dismissBatteryAlert}>{t("offload.battery.dismiss")}</button>
       </p>
+    {/if}
+    {#if offload.pendingError}
+      <p class="error pending-error">{t("offload.cascade.pending_error").replace("{detail}", offload.pendingError)}</p>
     {/if}
     {#if offload.pending.length > 0}
       <div class="pending">

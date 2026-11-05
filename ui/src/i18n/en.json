@@ -916,11 +916,15 @@
   "offload.cascade.resume": "Resume",
   "offload.cascade.discard": "Discard",
   "offload.cascade.discard_confirm": "Discard stage 2 for card {card}? Stage 1 copies stay in place, but the cascade copy will not be made.",
-  "offload.error.cascade_history": "The stage 1 ASC MHL history is unreadable or altered: the cascade is refused.",
-  "offload.error.cascade_diverged": "The cascade destination holds a different history from stage 1: nothing was written.",
-  "offload.error.cascade_no_source": "No stage 1 copy can be used as the cascade source.",
-  "offload.error.cascade_no_immediate": "No immediate destination: the cascade needs at least one stage 1 copy.",
+  "offload.error.code.cascade_history": "The stage 1 ASC MHL history is unreadable or altered: the cascade is refused.",
+  "offload.error.code.cascade_diverged": "The cascade destination holds a different history from stage 1: nothing was written.",
+  "offload.error.code.cascade_no_source": "No stage 1 copy can be used as the cascade source.",
+  "offload.error.code.cascade_no_immediate": "No immediate destination: the cascade needs at least one stage 1 copy.",
   "offload.cascade.stage1_missing": "Stage 1 copy not found.",
   "offload.cascade.active": "Stage 2 is already queued or running.",
-  "offload.error.cascade_active": "This stage 2 is already queued or running: cancel it first."
+  "offload.error.code.cascade_active": "This stage 2 is already queued or running: cancel it first.",
+  "offload.cascade.store_error": "The cascade could not be saved for resuming: {detail}",
+  "offload.cascade.pending_error": "Cannot read the cascade copies to resume: {detail}",
+  "offload.cascade.space_warning": "Not enough space for stage 2 (missing {size}): it will be checked again at start",
+  "offload.error.code.no_space": "Not enough space"
 }

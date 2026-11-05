@@ -916,11 +916,15 @@
   "offload.cascade.resume": "Reprendre",
   "offload.cascade.discard": "Abandonner",
   "offload.cascade.discard_confirm": "Abandonner l'étape 2 de la carte {card} ? Les copies de l'étape 1 restent en place, mais la copie en cascade ne sera pas faite.",
-  "offload.error.cascade_history": "L'historique ASC MHL de l'étape 1 est illisible ou modifié : la cascade est refusée.",
-  "offload.error.cascade_diverged": "La destination en cascade contient un historique différent de celui de l'étape 1 : rien n'a été écrit.",
-  "offload.error.cascade_no_source": "Aucune copie de l'étape 1 n'est utilisable comme source de la cascade.",
-  "offload.error.cascade_no_immediate": "Aucune destination immédiate : la cascade a besoin d'au moins une copie d'étape 1.",
+  "offload.error.code.cascade_history": "L'historique ASC MHL de l'étape 1 est illisible ou modifié : la cascade est refusée.",
+  "offload.error.code.cascade_diverged": "La destination en cascade contient un historique différent de celui de l'étape 1 : rien n'a été écrit.",
+  "offload.error.code.cascade_no_source": "Aucune copie de l'étape 1 n'est utilisable comme source de la cascade.",
+  "offload.error.code.cascade_no_immediate": "Aucune destination immédiate : la cascade a besoin d'au moins une copie d'étape 1.",
   "offload.cascade.stage1_missing": "Copie de l'étape 1 introuvable.",
   "offload.cascade.active": "Étape 2 déjà en file ou en cours.",
-  "offload.error.cascade_active": "Cette étape 2 est déjà en file ou en cours : annule-la d'abord."
+  "offload.error.code.cascade_active": "Cette étape 2 est déjà en file ou en cours : annule-la d'abord.",
+  "offload.cascade.store_error": "La cascade n'a pas pu être enregistrée pour reprise : {detail}",
+  "offload.cascade.pending_error": "Impossible de lire les copies en cascade à reprendre : {detail}",
+  "offload.cascade.space_warning": "Espace insuffisant pour l'étape 2 (il manque {size}) : elle sera recontrôlée au démarrage",
+  "offload.error.code.no_space": "Espace insuffisant"
 }
