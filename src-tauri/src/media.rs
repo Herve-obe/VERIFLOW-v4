@@ -47,7 +47,7 @@ fn cache_dir(app: &AppHandle) -> PathBuf {
         .join("previews")
 }
 
-fn edits_of(app: &AppHandle, path: &Path) -> BTreeMap<String, String> {
+pub(crate) fn edits_of(app: &AppHandle, path: &Path) -> BTreeMap<String, String> {
     let state = app.state::<AppState>();
     let Ok(guard) = state.project.lock() else {
         return BTreeMap::new();

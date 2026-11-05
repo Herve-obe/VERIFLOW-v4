@@ -15,7 +15,7 @@ pub(crate) mod testutil;
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub use model::{EditClip, EditFormat, EditOptions, FcpxmlVersion, PathMode, SyncedSound};
 
@@ -23,11 +23,29 @@ use crate::media::export::ale_files;
 use crate::player::logs::{fps_text, to_edl, LogClip};
 use crate::Result;
 
+/// Avertissement structuré : `code` permet à l'interface de le traduire
+/// (`ale_mixed_rates`, `edl_mixed_rates`, `xmeml_rounding`), `detail` garde le
+/// texte français complet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Warning {
+    pub code: String,
+    pub detail: String,
+}
+
+impl Warning {
+    pub fn new(code: &str, detail: impl Into<String>) -> Self {
+        Self {
+            code: code.to_owned(),
+            detail: detail.into(),
+        }
+    }
+}
+
 /// Résultat d'un export : fichiers écrits et avertissements à montrer.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct EditResult {
     pub written: Vec<PathBuf>,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Warning>,
 }
 
 /// Nom de fichier sûr (Windows compris) tiré du titre.
@@ -89,9 +107,10 @@ pub fn export(
         }
         EditFormat::Edl => {
             if mixed_rates(&clips) {
-                res.warnings.push(
-                    "EDL : les cadences diffèrent, tout est ramené à celle du premier clip".into(),
-                );
+                res.warnings.push(Warning::new(
+                    "edl_mixed_rates",
+                    "EDL : les cadences diffèrent, tout est ramené à celle du premier clip",
+                ));
             }
             let logs: Vec<LogClip> = clips.iter().map(|c| c.log.clone()).collect();
             files.push((stem, to_edl(&opts.title, &logs)));
@@ -99,9 +118,12 @@ pub fn export(
         EditFormat::Ale => {
             let ales = ale_files(&clips, opts.ale_ascii);
             if ales.len() > 1 {
-                res.warnings.push(format!(
-                    "ALE : {} cadences différentes, un fichier par cadence",
-                    ales.len()
+                res.warnings.push(Warning::new(
+                    "ale_mixed_rates",
+                    format!(
+                        "ALE : {} cadences différentes, un fichier par cadence",
+                        ales.len()
+                    ),
                 ));
             }
             let split = ales.len() > 1;
@@ -166,6 +188,9 @@ mod tests {
         let r = export(EditFormat::Ale, &mixed, &opts, &out).unwrap();
         assert_eq!(r.written.len(), 2);
         assert_eq!(r.warnings.len(), 1);
+        assert_eq!(r.warnings[0].code, "ale_mixed_rates");
+        let j = serde_json::to_value(&r.warnings[0]).unwrap();
+        assert!(j["detail"].as_str().unwrap().starts_with("ALE"));
         assert!(r.written[1].ends_with("Jour 1_ A_B_23.976.ale"));
     }
 

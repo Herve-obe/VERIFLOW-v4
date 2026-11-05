@@ -13,6 +13,7 @@ use crate::player::timecode::{FrameRate, Timecode};
 
 use super::model::{EditClip, EditOptions, SyncedSound};
 use super::paths::{url_xmeml, xml_attr};
+use super::Warning;
 
 /// Écart toléré entre le décalage exact et son arrondi, en image : au-delà
 /// l'arrondi est signalé.
@@ -34,17 +35,20 @@ fn offset_frames(c: &LogClip, s: &SyncedSound) -> (i64, f64) {
 
 /// Avertissements d'arrondi : un par clip dont le son synchronisé n'est pas
 /// calé sur une image exacte.
-pub fn rounding_warnings(clips: &[EditClip]) -> Vec<String> {
+pub fn rounding_warnings(clips: &[EditClip]) -> Vec<Warning> {
     clips
         .iter()
         .filter_map(|c| {
             let s = c.sound.as_ref()?;
             let (_, gap) = offset_frames(&c.log, s);
             (gap > ROUNDING_TOLERANCE).then(|| {
-                format!(
-                    "{} : le son synchronisé est arrondi à l'image (écart de {:.1} ms)",
-                    c.log.name,
-                    gap * 1000.0 / c.log.rate.as_f64()
+                Warning::new(
+                    "xmeml_rounding",
+                    format!(
+                        "{} : le son synchronisé est arrondi à l'image (écart de {:.1} ms)",
+                        c.log.name,
+                        gap * 1000.0 / c.log.rate.as_f64()
+                    ),
                 )
             })
         })
@@ -547,7 +551,8 @@ mod tests {
         assert!(xml.contains("<start>13</start>"));
         let w = rounding_warnings(&[c.clone()]);
         assert_eq!(w.len(), 1);
-        assert!(w[0].contains("A"));
+        assert_eq!(w[0].code, "xmeml_rounding");
+        assert!(w[0].detail.starts_with("A "));
         c.sound = Some(sound(0.48));
         assert!(rounding_warnings(&[c]).is_empty());
     }

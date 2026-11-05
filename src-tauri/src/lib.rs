@@ -2,6 +2,7 @@
 //! Ce fichier ne contient aucune logique métier : il traduit les appels.
 
 mod commands;
+mod editorial;
 mod explorer;
 mod logs;
 #[cfg(target_os = "macos")]
@@ -108,6 +109,7 @@ pub fn run() {
             media::media_waveform,
             media::media_set,
             media::media_export,
+            editorial::editorial_export,
             logs::markers_list,
             logs::marker_save,
             logs::marker_delete,
