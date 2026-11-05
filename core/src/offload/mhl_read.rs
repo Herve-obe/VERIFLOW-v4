@@ -75,6 +75,10 @@ pub struct GenFile {
     pub hashes: Hashes,
     /// Action de la première empreinte (`original`, `verified`, `failed`...).
     pub action: String,
+    /// Méthodes d'empreinte non reconnues (éléments portant un `action`).
+    pub unsupported: Vec<String>,
+    /// Raison du refus du chemin (`..`, racine, lecteur), None s'il est sûr.
+    pub invalid: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -95,6 +99,25 @@ pub struct History {
     pub files: HashMap<String, (Option<u64>, Hashes)>,
     /// Motifs d'exclusion de toutes les générations.
     pub ignore: Vec<String>,
+    /// Fichiers dont la dernière entrée n'a que des méthodes non reconnues
+    /// (clé NFC, noms des méthodes) : leurs empreintes sont vides dans `files`.
+    pub unsupported: HashMap<String, Vec<String>>,
+    /// Chemins refusés (chemin brut, raison) : signalés en écart.
+    pub invalid: Vec<(String, String)>,
+}
+
+/// Raison de refus d'un chemin venu d'un MHL : jamais de sortie du disque.
+fn unsafe_path(rel: &str) -> Option<&'static str> {
+    let b = rel.as_bytes();
+    if rel.starts_with('/') || rel.starts_with('\\') {
+        Some("chemin absolu")
+    } else if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        Some("lecteur dans le chemin")
+    } else if rel.split(['/', '\\']).any(|c| c == "..") {
+        Some("chemin sortant du disque (..)")
+    } else {
+        None
+    }
 }
 
 /// Forme NFC d'un chemin, pour comparer des noms écrits en NFC ou en NFD.
@@ -186,7 +209,15 @@ fn walk_xml(
                 path.pop();
                 text.clear();
             }
-            Xml::Eof => return Ok(()),
+            Xml::Eof => {
+                if path.is_empty() {
+                    return Ok(());
+                }
+                return Err(bad(&format!(
+                    "fichier tronqué (élément « {} » non fermé)",
+                    path.join("/")
+                )));
+            }
             _ => {}
         }
     }
@@ -204,7 +235,7 @@ fn names(path: &[String]) -> Vec<&str> {
 }
 
 /// Lit `ascmhl_chain.xml` (sans contrôle des fichiers).
-fn parse_chain_file(xml: &str) -> Result<Vec<ChainEntry>> {
+pub(super) fn parse_chain_file(xml: &str) -> Result<Vec<ChainEntry>> {
     let mut out = Vec::new();
     let (mut seq, mut file, mut c4) = (0u32, String::new(), String::new());
     let mut root_ok = false;
@@ -212,9 +243,10 @@ fn parse_chain_file(xml: &str) -> Result<Vec<ChainEntry>> {
         match (ev, names(path).as_slice()) {
             (Ev::Start, ["ascmhldirectory"]) => root_ok = true,
             (Ev::Start, ["ascmhldirectory", "hashlist"]) => {
+                // Numéro absent : position dans la chaîne.
                 seq = attr(attrs, "sequencenr")
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+                    .unwrap_or(out.len() as u32 + 1);
                 file.clear();
                 c4.clear();
             }
@@ -254,6 +286,15 @@ fn mhl_dir(root: &Path) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Désécape les cinq entités XML prédéfinies (`&amp;` en dernier).
+fn unescape_once(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 /// Lit la chaîne et contrôle chaque génération (présence, puis C4).
 pub fn read_chain(root: &Path) -> Result<Chain> {
     let dir = mhl_dir(root)?;
@@ -264,9 +305,17 @@ pub fn read_chain(root: &Path) -> Result<Chain> {
             chain_path.display()
         ))
     })?;
-    let entries = parse_chain_file(&xml)?;
+    let mut entries = parse_chain_file(&xml)?;
     let mut issues = Vec::new();
-    for e in &entries {
+    for e in &mut entries {
+        // Chaîne écrite par une ancienne version qui échappait deux fois les
+        // noms (« A&amp;B ») : un seul essai avec le nom désécapé.
+        if !to_path(&dir, &e.file).is_file() {
+            let plain = unescape_once(&e.file);
+            if plain != e.file && to_path(&dir, &plain).is_file() {
+                e.file = plain;
+            }
+        }
         match fs::read(to_path(&dir, &e.file)) {
             Err(_) => issues.push(ChainIssue::Missing(e.file.clone())),
             Ok(bytes) => {
@@ -287,9 +336,11 @@ pub fn read_generation(path: &Path) -> Result<Generation> {
     let name = name.unwrap_or_default();
     let mut gen = Generation::default();
     let mut cur: Option<GenFile> = None;
+    let mut root_seen = false;
     walk_xml(&xml, |ev, path, attrs, text| {
         match (ev, names(path).as_slice()) {
             (Ev::Start, ["hashlist"]) => {
+                root_seen = true;
                 let version = attr(attrs, "version").unwrap_or("");
                 if !version.starts_with('2') {
                     return Err(Error::Unsupported(format!(
@@ -315,12 +366,24 @@ pub fn read_generation(path: &Path) -> Result<Generation> {
                     size: None,
                     hashes: Vec::new(),
                     action: String::new(),
+                    unsupported: Vec::new(),
+                    invalid: None,
                 });
             }
             (Ev::End, ["hashlist", "hashes", "hash", "path"]) => {
                 if let Some(c) = cur.as_mut() {
                     c.rel = text.trim_start_matches("./").to_owned();
+                    c.invalid = unsafe_path(&c.rel).map(str::to_owned);
                     c.size = attr(attrs, "size").and_then(|s| s.parse().ok());
+                }
+            }
+            (Ev::End, ["hashlist", "hashes", "hash", method])
+                if method.parse::<HashAlgo>().is_err() =>
+            {
+                // Une empreinte porte toujours un `action` : sans lui, c'est un
+                // élément étranger (métadonnées...), ignoré.
+                if let (Some(c), Some(_)) = (cur.as_mut(), attr(attrs, "action")) {
+                    c.unsupported.push((*method).to_owned());
                 }
             }
             (Ev::End, ["hashlist", "hashes", "hash", method]) => {
@@ -347,17 +410,28 @@ pub fn read_generation(path: &Path) -> Result<Generation> {
             _ => {}
         }
         Ok(())
+    })
+    .map_err(|e| match e {
+        Error::Report(m) => Error::Report(format!("{name} : {m}")),
+        autre => autre,
     })?;
+    if !root_seen {
+        return Err(Error::Report(format!("{name} : fichier MHL vide")));
+    }
     Ok(gen)
 }
 
 /// Chaîne, empreintes les plus récentes et motifs d'exclusion d'un disque.
 /// Les empreintes `failed` ne remplacent jamais une empreinte connue : elles
-/// décrivent un fichier déjà altéré, pas la référence.
+/// décrivent un fichier déjà altéré, pas la référence. Une entrée plus récente
+/// remplace le jeu d'empreintes entier du fichier (jamais de fusion avec une
+/// génération plus ancienne).
 pub fn load_history(root: &Path) -> Result<History> {
     let chain = read_chain(root)?;
     let dir = root.join(MHL_DIR);
     let mut files: HashMap<String, (Option<u64>, Hashes)> = HashMap::new();
+    let mut unsupported: HashMap<String, Vec<String>> = HashMap::new();
+    let mut invalid: Vec<(String, String)> = Vec::new();
     let mut ignore: Vec<String> = Vec::new();
     for e in &chain.entries {
         let path = to_path(&dir, &e.file);
@@ -371,26 +445,31 @@ pub fn load_history(root: &Path) -> Result<History> {
             }
         }
         for f in gen.files {
-            if f.action == "failed" {
+            if let Some(why) = f.invalid {
+                let item = (f.rel, why);
+                if !invalid.contains(&item) {
+                    invalid.push(item);
+                }
                 continue;
             }
-            let entry = files.entry(nfc(&f.rel)).or_default();
-            if f.size.is_some() {
-                entry.0 = f.size;
+            if f.action == "failed" || (f.hashes.is_empty() && f.unsupported.is_empty()) {
+                continue;
             }
-            for (algo, value) in f.hashes {
-                match entry.1.iter_mut().find(|(a, _)| *a == algo) {
-                    Some(slot) => slot.1 = value,
-                    None => entry.1.push((algo, value)),
-                }
+            let key = nfc(&f.rel);
+            if f.hashes.is_empty() {
+                unsupported.insert(key.clone(), f.unsupported);
+            } else {
+                unsupported.remove(&key);
             }
+            files.insert(key, (f.size, f.hashes));
         }
     }
-    files.retain(|_, (_, h)| !h.is_empty());
     Ok(History {
         chain,
         files,
         ignore,
+        unsupported,
+        invalid,
     })
 }
 
@@ -418,6 +497,42 @@ pub fn find_histories(dir: &Path, depth: usize) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Refuse un disque dont un sous-dossier a son propre `ascmhl/` : sa
+/// vérification serait fausse (historiques imbriqués non pris en charge).
+pub fn check_not_nested(root: &Path) -> Result<()> {
+    let mut it = WalkDir::new(root)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter();
+    while let Some(entry) = it.next() {
+        // Un dossier illisible n'arrête pas la recherche.
+        let Ok(e) = entry else { continue };
+        if !e.file_type().is_dir() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy();
+        if name == MHL_DIR {
+            if e.depth() > 1 {
+                return Err(nested_error(root, e.path()));
+            }
+            it.skip_current_dir();
+        } else if (e.depth() == 1 && name == super::mhl::REPORTS_DIR)
+            || super::scan::IGNORED.contains(&name.as_ref())
+        {
+            it.skip_current_dir();
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn nested_error(root: &Path, found: &Path) -> Error {
+    let rel = found.strip_prefix(root).unwrap_or(found);
+    Error::Unsupported(format!(
+        "historique ASC MHL imbriqué ({}) : vérifie ce sous-dossier à part",
+        rel.display()
+    ))
 }
 
 /// Résumé d'un historique pour l'affichage avant vérification.
@@ -459,6 +574,7 @@ pub fn info(root: &Path) -> Result<MhlInfo> {
             });
         }
     }
+    check_not_nested(root)?;
     let h = load_history(root)?;
     let dir = root.join(MHL_DIR);
     let last_date = h
@@ -638,6 +754,49 @@ mod tests {
         fs::create_dir_all(&empty).unwrap();
         let err = info(&empty).unwrap_err();
         assert_eq!(error_code(&err), Some("no_history"));
+    }
+
+    #[test]
+    fn truncated_xml_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let chain = read_chain(&dest).unwrap();
+        let mhl = dest.join("ascmhl").join(&chain.entries[0].file);
+        let xml = fs::read_to_string(&mhl).unwrap();
+        // Coupé juste après un élément fermé : aucun faux « complet ».
+        let cut = xml.find("</hashes>").unwrap();
+        fs::write(&mhl, &xml[..cut]).unwrap();
+        let err = read_generation(&mhl).unwrap_err().to_string();
+        assert!(err.contains("tronqué"), "{err}");
+        fs::write(&mhl, "").unwrap();
+        assert!(read_generation(&mhl).is_err());
+    }
+
+    #[test]
+    fn info_refuses_nested_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        fs::create_dir_all(dest.join("CLIP/ascmhl")).unwrap();
+        let err = info(&dest).unwrap_err();
+        assert_eq!(error_code(&err), Some("nested_history"));
+    }
+
+    #[test]
+    fn double_escaped_chain_name_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        fs::create_dir_all(root.join("ascmhl")).unwrap();
+        // Ancienne version : « & » du nom de fichier écrit deux fois échappé.
+        let real = "0001_A&B_x.mhl";
+        fs::write(root.join("ascmhl").join(real), "x").unwrap();
+        fs::write(
+            root.join("ascmhl/ascmhl_chain.xml"),
+            "<ascmhldirectory><hashlist sequencenr=\"1\"><path>0001_A&amp;amp;B_x.mhl</path></hashlist></ascmhldirectory>",
+        )
+        .unwrap();
+        let chain = read_chain(&root).unwrap();
+        assert_eq!(chain.entries[0].file, real);
+        assert!(chain.issues.is_empty());
     }
 
     #[test]

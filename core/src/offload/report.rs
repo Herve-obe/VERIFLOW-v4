@@ -532,6 +532,9 @@ impl VerifyData<'_> {
             )
         } else {
             let mut causes = Vec::new();
+            if s.empty_history {
+                causes.push("historique vide, rien à comparer".to_string());
+            }
             if s.different > 0 {
                 causes.push(format!("{} différent(s)", s.different));
             }

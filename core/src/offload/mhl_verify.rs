@@ -18,8 +18,9 @@ use super::engine::{hash_from_disk_progress, DestStatus, Event, FileResult, Hash
 use super::hash::HashAlgo;
 use super::meter::{Meter, PhaseStat, Probe};
 use super::mhl::{write_entries, Action, GenEntry, MhlAuthor, REPORTS_DIR};
-use super::mhl_read::{best_algo, load_history, nfc, to_path, Chain, MHL_DIR};
-use crate::{Error, Result};
+use super::mhl_read::{best_algo, load_history, nested_error, nfc, to_path, Chain, MHL_DIR};
+use super::scan::IGNORED;
+use crate::Result;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", content = "detail", rename_all = "snake_case")]
@@ -32,7 +33,8 @@ pub enum VerifyStatus {
     Missing,
     /// Fichier du disque absent de l'historique (n'est pas un échec).
     New,
-    /// Lecture impossible (message du système).
+    /// Lecture ou comparaison impossible : message du système, méthode
+    /// d'empreinte non prise en charge ou chemin refusé de l'historique.
     Unreadable(String),
 }
 
@@ -76,21 +78,61 @@ pub struct VerifySummary {
     pub mhl: Option<PathBuf>,
     /// Raison de l'échec d'écriture de la génération (disque protégé en écriture...).
     pub write_error: Option<String>,
+    /// L'historique ne référence aucune génération, ou aucun fichier alors que
+    /// le disque en contient : rien à comparer, jamais conforme.
+    pub empty_history: bool,
+    /// Fichiers retirés de `files` par `for_ui` (conformes, nouveaux en excès).
+    pub omitted: usize,
+}
+
+/// Nombre maximal de nouveaux fichiers listés dans la version pour l'interface.
+const UI_NEW_LIMIT: usize = 200;
+
+impl VerifySummary {
+    /// Version envoyée à l'interface : compteurs, chaîne et écarts seulement.
+    /// Les fichiers conformes (et les nouveaux au-delà de 200) sont retirés ;
+    /// le détail complet reste dans le CSV. `omitted` en donne le nombre.
+    pub fn for_ui(mut self) -> VerifySummary {
+        let total = self.files.len();
+        let mut new_seen = 0;
+        self.files.retain(|f| match f.status {
+            VerifyStatus::Ok => false,
+            VerifyStatus::New => {
+                new_seen += 1;
+                new_seen <= UI_NEW_LIMIT
+            }
+            _ => true,
+        });
+        self.omitted = total - self.files.len();
+        self
+    }
 }
 
 fn rfc3339(t: SystemTime) -> String {
     chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-/// Filtre simple `*` et `?` (motifs `<ignore>` de la norme).
+/// Filtre `*` et `?` (motifs `<ignore>` de la norme), à deux pointeurs avec
+/// retour sur la dernière étoile : temps borné par le produit des longueurs.
 fn glob(pat: &[char], s: &[char]) -> bool {
-    match pat.split_first() {
-        None => s.is_empty(),
-        Some(('*', rest)) => (0..=s.len()).any(|i| glob(rest, &s[i..])),
-        Some((c, rest)) => s
-            .split_first()
-            .is_some_and(|(x, tail)| (*c == '?' || c == x) && glob(rest, tail)),
+    let (mut p, mut i) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while i < s.len() {
+        if p < pat.len() && pat[p] == '*' {
+            star = Some((p, i));
+            p += 1;
+        } else if p < pat.len() && (pat[p] == '?' || pat[p] == s[i]) {
+            p += 1;
+            i += 1;
+        } else if let Some((sp, si)) = star {
+            p = sp + 1;
+            i = si + 1;
+            star = Some((sp, si + 1));
+        } else {
+            return false;
+        }
     }
+    pat[p..].iter().all(|c| *c == '*')
 }
 
 /// Un élément est exclu s'il correspond à un motif `<ignore>`. Un motif
@@ -122,8 +164,12 @@ struct DiskFile {
     error: Option<String>,
 }
 
-/// Parcours du disque sans `ascmhl/`, `_VERIFLOW/` ni motifs `<ignore>`.
-fn walk(root: &Path, patterns: &[String]) -> Result<(Vec<DiskFile>, Vec<String>)> {
+/// Parcours du disque sans `ascmhl/`, `_VERIFLOW/` (racine seulement), éléments
+/// système de la copie (`scan::IGNORED`) ni motifs `<ignore>`. Le dernier
+/// élément du résultat est vrai si l'annulation a interrompu le parcours.
+type Walked = (Vec<DiskFile>, Vec<String>, bool);
+
+fn walk(root: &Path, patterns: &[String], cancel: &AtomicBool) -> Result<Walked> {
     let mut files = Vec::new();
     let mut dirs = Vec::new();
     let mut it = WalkDir::new(root)
@@ -131,6 +177,9 @@ fn walk(root: &Path, patterns: &[String]) -> Result<(Vec<DiskFile>, Vec<String>)
         .sort_by_file_name()
         .into_iter();
     while let Some(entry) = it.next() {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok((files, dirs, true));
+        }
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
@@ -154,17 +203,18 @@ fn walk(root: &Path, patterns: &[String]) -> Result<(Vec<DiskFile>, Vec<String>)
         let is_dir = entry.file_type().is_dir();
         if is_dir && name == MHL_DIR {
             if entry.depth() > 1 {
-                return Err(Error::Unsupported(format!(
-                    "historique ASC MHL imbriqué ({}) : vérifie ce sous-dossier à part",
-                    rel_path(root, entry.path())
-                )));
+                return Err(nested_error(root, entry.path()));
             }
             it.skip_current_dir();
             continue;
         }
         let rel = rel_path(root, entry.path());
         let reports = entry.depth() == 1 && name == REPORTS_DIR;
-        if reports || name.ends_with(".vfpart") || excluded(&rel, &name, is_dir, patterns) {
+        if reports
+            || IGNORED.contains(&name.as_str())
+            || name.ends_with(".vfpart")
+            || excluded(&rel, &name, is_dir, patterns)
+        {
             if is_dir {
                 it.skip_current_dir();
             }
@@ -190,7 +240,7 @@ fn walk(root: &Path, patterns: &[String]) -> Result<(Vec<DiskFile>, Vec<String>)
             });
         }
     }
-    Ok((files, dirs))
+    Ok((files, dirs, false))
 }
 
 fn rel_path(root: &Path, path: &Path) -> String {
@@ -213,7 +263,14 @@ pub fn verify_root(
     let started = Instant::now();
     let started_at = rfc3339(SystemTime::now());
     let history = load_history(root)?;
-    let (disk, dirs) = walk(root, &history.ignore)?;
+    // `_VERIFLOW` n'est exclu qu'à la racine (traité par le parcours).
+    let patterns: Vec<String> = history
+        .ignore
+        .iter()
+        .filter(|p| p.trim_matches('/') != REPORTS_DIR)
+        .cloned()
+        .collect();
+    let (disk, dirs, walk_cancelled) = walk(root, &patterns, cancel)?;
 
     // Méthode des nouveaux fichiers : la plus fréquente parmi les meilleures de l'historique.
     let mut votes: HashMap<HashAlgo, usize> = HashMap::new();
@@ -238,7 +295,7 @@ pub fn verify_root(
     let cpu = Meter::new(started);
     let mut files: Vec<VerifyFile> = Vec::new();
     let mut entries: Vec<GenEntry> = Vec::new();
-    let mut cancelled = false;
+    let mut cancelled = walk_cancelled;
     let progress = |done: u64, emit: &mut dyn FnMut(Event)| {
         emit(Event::Progress {
             done,
@@ -250,7 +307,7 @@ pub fn verify_root(
     let mut last_emit = Instant::now();
 
     for (index, f) in disk.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
+        if cancelled || cancel.load(Ordering::Relaxed) {
             cancelled = true;
             break;
         }
@@ -259,7 +316,40 @@ pub fn verify_root(
             rel: f.rel.clone(),
             size: f.size,
         });
-        let known = history.files.get(&nfc(&f.rel));
+        let key = nfc(&f.rel);
+        let known = history.files.get(&key);
+        // Entrée connue sans aucune méthode reconnue : écart, jamais « nouveau ».
+        if known.is_some_and(|(_, h)| best_algo(h).is_none()) {
+            let methods = history
+                .unsupported
+                .get(&key)
+                .map(|m| m.join(", "))
+                .unwrap_or_default();
+            let status = VerifyStatus::Unreadable(format!(
+                "méthode d'empreinte non prise en charge ({methods})"
+            ));
+            emit(Event::FileDone {
+                index,
+                result: FileResult {
+                    rel: f.rel.clone(),
+                    size: f.size,
+                    modified: rfc3339(f.modified),
+                    hashes: Vec::new(),
+                    destinations: vec![DestStatus::Failed("méthode non prise en charge".into())],
+                },
+            });
+            done += f.size;
+            progress(done, &mut emit);
+            files.push(VerifyFile {
+                rel: f.rel.clone(),
+                size: f.size,
+                status,
+                algo: None,
+                expected: None,
+                actual: None,
+            });
+            continue;
+        }
         let algo = known.and_then(|(_, h)| best_algo(h)).unwrap_or(new_algo);
         let expected =
             known.and_then(|(_, h)| h.iter().find(|(a, _)| *a == algo).map(|(_, v)| v.clone()));
@@ -347,7 +437,20 @@ pub fn verify_root(
             .files
             .iter()
             .filter(|(rel, _)| !on_disk.contains(rel.as_str()))
+            // Élément système hashé par un autre outil (.DS_Store...) : ignoré comme à la copie.
+            .filter(|(rel, _)| !rel.split('/').any(|c| IGNORED.contains(&c)))
             .collect();
+        // Chemins refusés de l'historique : écarts, sans toucher au disque.
+        for (rel, why) in &history.invalid {
+            files.push(VerifyFile {
+                rel: rel.clone(),
+                size: 0,
+                status: VerifyStatus::Unreadable(format!("chemin refusé : {why}")),
+                algo: None,
+                expected: None,
+                actual: None,
+            });
+        }
         gone.sort_by(|a, b| a.0.cmp(b.0));
         for (rel, (size, h)) in gone {
             let algo = best_algo(h);
@@ -394,8 +497,12 @@ pub fn verify_root(
         .filter(|f| f.actual.is_some() || matches!(f.status, VerifyStatus::Unreadable(_)))
         .map(|f| f.size)
         .sum();
-    let conform =
-        !cancelled && different + missing + unreadable == 0 && history.chain.issues.is_empty();
+    let empty_history =
+        history.chain.entries.is_empty() || (history.files.is_empty() && !disk.is_empty());
+    let conform = !cancelled
+        && !empty_history
+        && different + missing + unreadable == 0
+        && history.chain.issues.is_empty();
     Ok(VerifySummary {
         root: root.to_path_buf(),
         files,
@@ -414,6 +521,8 @@ pub fn verify_root(
         conform,
         mhl,
         write_error,
+        empty_history,
+        omitted: 0,
     })
 }
 
@@ -699,6 +808,248 @@ mod tests {
         .unwrap();
         assert!(dones.windows(2).all(|w| w[0] <= w[1]));
         assert_eq!(*dones.last().unwrap(), data.len() as u64);
+    }
+
+    #[test]
+    fn verify_names_with_quote_and_ampersand_keep_chain_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("J1_L'USINE & A&B");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("a.mov"), b"abcde").unwrap();
+        let dest = dir.path().join("SSD/J1_L'USINE & A&B");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![dest.clone()],
+            algorithms: vec![HashAlgo::Xxh128],
+            known: None,
+            overlap: false,
+        };
+        let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        write_generation(&inv, &s, 0, &dest, &spec.algorithms, &MhlAuthor::default()).unwrap();
+        for _ in 0..2 {
+            let v = run_verify(&dest);
+            assert!(v.conform && v.chain.issues.is_empty(), "{:?}", v.chain);
+        }
+        let chain = read_chain(&dest).unwrap();
+        assert_eq!(chain.entries.len(), 3);
+        for e in &chain.entries {
+            assert!(dest.join("ascmhl").join(&e.file).is_file(), "{}", e.file);
+            assert!(e.file.contains("J1_L'USINE & A&B"));
+        }
+    }
+
+    #[test]
+    fn verify_truncated_mhl_or_chain_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let mhl = first_mhl(&dest);
+        let xml = fs::read_to_string(&mhl).unwrap();
+        fs::write(&mhl, &xml[..xml.len() / 2]).unwrap();
+        let err = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap_err();
+        let m = err.to_string();
+        assert!(m.contains("tronqué") || m.contains("XML illisible"), "{m}");
+        fs::write(&mhl, &xml).unwrap();
+        let chain = dest.join("ascmhl/ascmhl_chain.xml");
+        let cx = fs::read_to_string(&chain).unwrap();
+        fs::write(&chain, &cx[..cx.len() - 20]).unwrap();
+        let err = verify_root(&dest, &AtomicBool::new(false), |_| {}).unwrap_err();
+        assert!(err.to_string().contains("XML illisible"), "{err}");
+        // Rien n'a été écrit : la chaîne tronquée n'est pas réécrite.
+        assert_eq!(fs::read_to_string(&chain).unwrap().len(), cx.len() - 20);
+        assert_eq!(fs::read_dir(dest.join("ascmhl")).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn verify_empty_history_is_never_conform() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        fs::create_dir_all(root.join("ascmhl")).unwrap();
+        fs::write(root.join("a.mov"), b"x").unwrap();
+        fs::write(
+            root.join("ascmhl/ascmhl_chain.xml"),
+            "<?xml version=\"1.0\"?><ascmhldirectory></ascmhldirectory>",
+        )
+        .unwrap();
+        let s = run_verify(&root);
+        assert!(s.empty_history && !s.conform);
+        // Génération sans aucun fichier alors que le disque en contient.
+        let dest = offloaded(dir.path());
+        let dir2 = tempfile::tempdir().unwrap();
+        let root2 = dir2.path().join("E");
+        fs::create_dir_all(&root2).unwrap();
+        write_entries(&root2, &[], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        fs::write(root2.join("a.mov"), b"x").unwrap();
+        let s = run_verify(&root2);
+        assert!(s.empty_history && !s.conform && s.new == 1);
+        assert!(run_verify(&dest).conform);
+    }
+
+    #[test]
+    fn verify_flags_unsupported_method_and_unsafe_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        let mhl_dir = root.join("ascmhl");
+        fs::create_dir_all(&mhl_dir).unwrap();
+        fs::write(root.join("a.mov"), b"abc").unwrap();
+        fs::write(root.join("b.mov"), b"abc").unwrap();
+        let mhl = r#"<?xml version="1.0"?><hashlist version="2.0">
+<creatorinfo><creationdate>2024-01-01T00:00:00+00:00</creationdate></creatorinfo>
+<processinfo><process>transfer</process></processinfo><hashes>
+<hash><path size="3">a.mov</path><xxh3-128 action="original">00</xxh3-128></hash>
+<hash><path size="3">b.mov</path><md5 action="original">900150983cd24fb0d6963f7d28e17f72</md5></hash>
+<hash><path>../secret.mov</path><md5 action="original">00</md5></hash>
+<hash><path>/etc/passwd</path><md5 action="original">00</md5></hash>
+</hashes></hashlist>"#;
+        let name = "0001_D_x.mhl";
+        fs::write(mhl_dir.join(name), mhl).unwrap();
+        fs::write(
+            mhl_dir.join("ascmhl_chain.xml"),
+            format!("<ascmhldirectory><hashlist sequencenr=\"1\"><path>{name}</path></hashlist></ascmhldirectory>"),
+        )
+        .unwrap();
+        let s = run_verify(&root);
+        match status(&s, "a.mov") {
+            VerifyStatus::Unreadable(m) => assert!(m.contains("xxh3-128"), "{m}"),
+            autre => panic!("{autre:?}"),
+        }
+        assert_eq!(status(&s, "b.mov"), VerifyStatus::Ok);
+        assert_eq!(s.new, 0);
+        assert!(matches!(
+            status(&s, "../secret.mov"),
+            VerifyStatus::Unreadable(_)
+        ));
+        assert!(matches!(
+            status(&s, "/etc/passwd"),
+            VerifyStatus::Unreadable(_)
+        ));
+        assert_eq!((s.unreadable, s.ok), (3, 1));
+        assert!(!s.conform);
+    }
+
+    #[test]
+    fn verify_latest_generation_replaces_hash_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        // Génération 2 : le fichier change et n'est décrit qu'en MD5. L'ancien
+        // xxh128 ne doit plus servir de référence.
+        fs::write(dest.join("CLIP/a.mov"), b"abcdX").unwrap();
+        let entry = GenEntry {
+            rel: "CLIP/a.mov".into(),
+            size: 5,
+            hashes: vec![(HashAlgo::Md5, hash_data(HashAlgo::Md5, b"abcdX"))],
+            action: Action::Original,
+        };
+        write_entries(&dest, &[entry], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let s = run_verify(&dest);
+        assert_eq!(status(&s, "CLIP/a.mov"), VerifyStatus::Ok);
+        assert!(s.conform);
+    }
+
+    #[test]
+    fn verify_cancel_inside_a_file_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let before = fs::read_dir(dest.join("ascmhl")).unwrap().count();
+        let cancel = AtomicBool::new(false);
+        let s = verify_root(&dest, &cancel, |e| {
+            if let Event::FileStarted { .. } = e {
+                cancel.store(true, Ordering::Relaxed); // demandée pendant la relecture
+            }
+        })
+        .unwrap();
+        assert!(s.cancelled && !s.conform && s.mhl.is_none() && s.write_error.is_none());
+        assert_eq!(fs::read_dir(dest.join("ascmhl")).unwrap().count(), before);
+        assert!(s.files.iter().all(|f| f.status != VerifyStatus::Missing));
+    }
+
+    #[test]
+    fn verify_cancel_during_walk_reads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let mut started = 0;
+        let s = verify_root(&dest, &AtomicBool::new(true), |e| {
+            if let Event::FileStarted { .. } = e {
+                started += 1;
+            }
+        })
+        .unwrap();
+        assert!(s.cancelled && s.files.is_empty() && started == 0 && s.mhl.is_none());
+    }
+
+    #[test]
+    fn verify_write_error_still_returns_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let chain = dest.join("ascmhl/ascmhl_chain.xml");
+        let s = verify_root(&dest, &AtomicBool::new(false), |e| {
+            // La chaîne devient illisible entre la lecture et l'écriture.
+            if let Event::FileDone { .. } = e {
+                if chain.is_file() {
+                    fs::remove_file(&chain).unwrap();
+                    fs::create_dir(&chain).unwrap();
+                }
+            }
+        })
+        .unwrap();
+        assert!(s.mhl.is_none() && s.write_error.is_some());
+        assert_eq!(s.ok, 2);
+        assert!(s.conform, "le verdict ne dépend pas de l'écriture");
+    }
+
+    #[test]
+    fn verify_skips_system_items_and_limits_reports_dir_to_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        fs::create_dir_all(dest.join(".Spotlight-V100")).unwrap();
+        fs::write(dest.join(".Spotlight-V100/db"), b"x").unwrap();
+        fs::create_dir_all(dest.join("System Volume Information")).unwrap();
+        fs::write(dest.join("System Volume Information/x"), b"x").unwrap();
+        fs::create_dir_all(dest.join("CLIP/_VERIFLOW")).unwrap();
+        fs::write(dest.join("CLIP/_VERIFLOW/vrai.mov"), b"x").unwrap();
+        let s = run_verify(&dest);
+        assert_eq!(s.new, 1);
+        assert_eq!(status(&s, "CLIP/_VERIFLOW/vrai.mov"), VerifyStatus::New);
+    }
+
+    #[test]
+    fn glob_is_not_exponential() {
+        let text: Vec<char> = "a".repeat(200).chars().collect();
+        let pat: Vec<char> = "a*a*a*a*a*a*a*a*a*b".chars().collect();
+        assert!(!glob(&pat, &text));
+        assert!(glob(
+            &"*a?c*".chars().collect::<Vec<_>>(),
+            &"xxabcxx".chars().collect::<Vec<_>>()
+        ));
+    }
+
+    #[test]
+    fn for_ui_keeps_counters_and_gaps_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        fs::write(dest.join("CLIP/a.mov"), b"abcdX").unwrap();
+        let s = run_verify(&dest);
+        let ui = s.clone().for_ui();
+        assert_eq!((ui.ok, ui.different), (1, 1));
+        assert_eq!(ui.files.len(), 1);
+        assert_eq!(ui.files[0].rel, "CLIP/a.mov");
+        assert_eq!(ui.omitted, 1);
+        assert_eq!(s.omitted, 0);
+    }
+
+    #[test]
+    fn verify_ignores_system_files_hashed_by_another_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let entry = GenEntry {
+            rel: "CLIP/.DS_Store".into(),
+            size: 1,
+            hashes: vec![(HashAlgo::Xxh128, hash_data(HashAlgo::Xxh128, b"x"))],
+            action: Action::Original,
+        };
+        write_entries(&dest, &[entry], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let s = run_verify(&dest);
+        assert_eq!(s.missing, 0);
+        assert!(s.conform);
     }
 
     #[test]
