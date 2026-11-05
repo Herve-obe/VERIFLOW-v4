@@ -183,6 +183,24 @@ pub(super) fn temp_path(final_path: &Path) -> PathBuf {
     final_path.with_file_name(format!(".{name}.vfpart"))
 }
 
+/// Écrit les blocs reçus et mesure chaque écriture. Renvoie les octets écrits.
+fn write_chunks(
+    f: &mut impl Write,
+    rx: std::sync::mpsc::Receiver<Arc<Vec<u8>>>,
+    meter: &super::meter::Meter,
+) -> std::io::Result<u64> {
+    let mut written = 0u64;
+    for chunk in rx {
+        let t = Instant::now();
+        let r = f.write_all(&chunk);
+        // Le temps d'un appel en échec compte aussi, avant de propager l'erreur.
+        meter.record(if r.is_ok() { chunk.len() as u64 } else { 0 }, t);
+        r?;
+        written += chunk.len() as u64;
+    }
+    Ok(written)
+}
+
 /// Écrit les blocs reçus dans un fichier temporaire, puis le finalise.
 fn writer(
     rx: std::sync::mpsc::Receiver<Arc<Vec<u8>>>,
@@ -203,15 +221,7 @@ fn writer(
             .create(true)
             .truncate(true)
             .open(&tmp)?;
-        let mut written = 0u64;
-        for chunk in rx {
-            let t = Instant::now();
-            let r = f.write_all(&chunk);
-            // Le temps d'un appel en échec compte aussi, avant de propager l'erreur.
-            meter.record(if r.is_ok() { chunk.len() as u64 } else { 0 }, t);
-            r?;
-            written += chunk.len() as u64;
-        }
+        let written = write_chunks(&mut f, rx, meter)?;
         // Le canal se ferme aussi quand la lecture est interrompue (annulation,
         // source illisible) : seul le compte complet d'octets autorise le renommage.
         if written != expected {
@@ -1884,6 +1894,37 @@ mod tests {
         .unwrap();
         assert!(s.cancelled);
         assert_eq!(s.throughput.effective_rate, None);
+    }
+
+    #[test]
+    fn failing_write_is_timed_but_not_counted() {
+        /// Accepte `ok` écritures, puis échoue après une courte attente.
+        struct Failing(usize);
+        impl Write for Failing {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if self.0 == 0 {
+                    thread::sleep(Duration::from_millis(20));
+                    return Err(std::io::Error::other("disque plein"));
+                }
+                self.0 -= 1;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let meters = Meters::new(1);
+        let (tx, rx) = sync_channel::<Arc<Vec<u8>>>(4);
+        for _ in 0..3 {
+            tx.send(Arc::new(vec![1u8; 100])).unwrap();
+        }
+        drop(tx);
+        let r = write_chunks(&mut Failing(2), rx, &meters.writes[0]);
+        assert!(r.is_err());
+        let st = meters.writes[0].stat();
+        // Deux blocs écrits ; le troisième, en échec, n'ajoute que du temps.
+        assert_eq!(st.bytes, 200);
+        assert!(st.busy_s >= 0.02, "{}", st.busy_s);
     }
 
     #[test]

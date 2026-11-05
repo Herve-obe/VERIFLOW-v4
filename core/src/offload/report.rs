@@ -118,11 +118,14 @@ fn throughput_rows(t: &Throughput) -> Vec<(String, String)> {
 
 /// Lignes de débit du rapport de vérification MHL.
 fn verify_throughput_rows(s: &VerifySummary) -> Vec<(String, String)> {
+    // Annulée : pas de débit global (comme dans le CSV de débit).
+    let global = if s.cancelled || s.read.bytes == 0 {
+        "-".into()
+    } else {
+        rate_text(s.read.bytes, s.duration_s)
+    };
     vec![
-        (
-            "Débit global (taille / durée totale)".into(),
-            rate_text(s.read.bytes, s.duration_s),
-        ),
+        ("Débit global (taille / durée totale)".into(), global),
         ("Relecture du disque".into(), phase_text(&s.read)),
     ]
 }
@@ -1243,6 +1246,12 @@ mod tests {
         assert!(html.contains("NOUVEAU"));
         let csv = fs::read_to_string(&f.csv).unwrap();
         assert!(csv.contains(";MANQUANT;") && csv.contains(";NOUVEAU;"));
+
+        // Annulée : pas de débit global dans le PDF et le HTML.
+        let mut cut = v.clone();
+        cut.cancelled = true;
+        assert!(verify_throughput_rows(&v)[0].1.ends_with("Mo/s"));
+        assert_eq!(verify_throughput_rows(&cut)[0].1, "-");
 
         // Rapports impossibles à écrire : erreur rendue, résultat intact.
         let blocked = tempfile::tempdir().unwrap();
