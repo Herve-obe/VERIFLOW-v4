@@ -286,6 +286,15 @@ fn mhl_dir(root: &Path) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Désécape les cinq entités XML prédéfinies (`&amp;` en dernier).
+fn unescape_once(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 /// Lit la chaîne et contrôle chaque génération (présence, puis C4).
 pub fn read_chain(root: &Path) -> Result<Chain> {
     let dir = mhl_dir(root)?;
@@ -296,9 +305,17 @@ pub fn read_chain(root: &Path) -> Result<Chain> {
             chain_path.display()
         ))
     })?;
-    let entries = parse_chain_file(&xml)?;
+    let mut entries = parse_chain_file(&xml)?;
     let mut issues = Vec::new();
-    for e in &entries {
+    for e in &mut entries {
+        // Chaîne écrite par une ancienne version qui échappait deux fois les
+        // noms (« A&amp;B ») : un seul essai avec le nom désécapé.
+        if !to_path(&dir, &e.file).is_file() {
+            let plain = unescape_once(&e.file);
+            if plain != e.file && to_path(&dir, &plain).is_file() {
+                e.file = plain;
+            }
+        }
         match fs::read(to_path(&dir, &e.file)) {
             Err(_) => issues.push(ChainIssue::Missing(e.file.clone())),
             Ok(bytes) => {
@@ -489,7 +506,9 @@ pub fn check_not_nested(root: &Path) -> Result<()> {
         .min_depth(1)
         .follow_links(false)
         .into_iter();
-    while let Some(Ok(e)) = it.next() {
+    while let Some(entry) = it.next() {
+        // Un dossier illisible n'arrête pas la recherche.
+        let Ok(e) = entry else { continue };
         if !e.file_type().is_dir() {
             continue;
         }
@@ -760,6 +779,24 @@ mod tests {
         fs::create_dir_all(dest.join("CLIP/ascmhl")).unwrap();
         let err = info(&dest).unwrap_err();
         assert_eq!(error_code(&err), Some("nested_history"));
+    }
+
+    #[test]
+    fn double_escaped_chain_name_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("D");
+        fs::create_dir_all(root.join("ascmhl")).unwrap();
+        // Ancienne version : « & » du nom de fichier écrit deux fois échappé.
+        let real = "0001_A&B_x.mhl";
+        fs::write(root.join("ascmhl").join(real), "x").unwrap();
+        fs::write(
+            root.join("ascmhl/ascmhl_chain.xml"),
+            "<ascmhldirectory><hashlist sequencenr=\"1\"><path>0001_A&amp;amp;B_x.mhl</path></hashlist></ascmhldirectory>",
+        )
+        .unwrap();
+        let chain = read_chain(&root).unwrap();
+        assert_eq!(chain.entries[0].file, real);
+        assert!(chain.issues.is_empty());
     }
 
     #[test]

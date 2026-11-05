@@ -881,6 +881,7 @@
   "offload.verify.report.csv": "CSV report",
   "offload.verify.cancelled": "Verification interrupted",
   "offload.verify.panic": "Verification stopped unexpectedly",
+  "offload.verify.spawn": "The verification could not start",
   "offload.verify.mhl_altered": "MHL altered",
   "offload.verify.mhl_missing": "MHL missing",
   "offload.verify.empty_history": "Empty history: nothing to compare",

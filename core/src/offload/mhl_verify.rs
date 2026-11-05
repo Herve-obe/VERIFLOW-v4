@@ -89,26 +89,19 @@ impl VerifySummary {
     /// Version envoyée à l'interface : compteurs, chaîne et écarts seulement.
     /// Les fichiers conformes (et les nouveaux au-delà de 200) sont retirés ;
     /// le détail complet reste dans le CSV. `omitted` en donne le nombre.
-    pub fn for_ui(&self) -> VerifySummary {
+    pub fn for_ui(mut self) -> VerifySummary {
+        let total = self.files.len();
         let mut new_seen = 0;
-        let files: Vec<VerifyFile> = self
-            .files
-            .iter()
-            .filter(|f| match f.status {
-                VerifyStatus::Ok => false,
-                VerifyStatus::New => {
-                    new_seen += 1;
-                    new_seen <= UI_NEW_LIMIT
-                }
-                _ => true,
-            })
-            .cloned()
-            .collect();
-        VerifySummary {
-            omitted: self.files.len() - files.len(),
-            files,
-            ..self.clone()
-        }
+        self.files.retain(|f| match f.status {
+            VerifyStatus::Ok => false,
+            VerifyStatus::New => {
+                new_seen += 1;
+                new_seen <= UI_NEW_LIMIT
+            }
+            _ => true,
+        });
+        self.omitted = total - self.files.len();
+        self
     }
 }
 
@@ -341,6 +334,7 @@ pub fn verify_root(
                 },
             });
             done += f.size;
+            progress(done, &mut emit);
             files.push(VerifyFile {
                 rel: f.rel.clone(),
                 size: f.size,
@@ -432,6 +426,8 @@ pub fn verify_root(
             .files
             .iter()
             .filter(|(rel, _)| !on_disk.contains(rel.as_str()))
+            // Élément système hashé par un autre outil (.DS_Store...) : ignoré comme à la copie.
+            .filter(|(rel, _)| !rel.split('/').any(|c| IGNORED.contains(&c)))
             .collect();
         // Chemins refusés de l'historique : écarts, sans toucher au disque.
         for (rel, why) in &history.invalid {
@@ -1020,12 +1016,28 @@ mod tests {
         let dest = offloaded(dir.path());
         fs::write(dest.join("CLIP/a.mov"), b"abcdX").unwrap();
         let s = run_verify(&dest);
-        let ui = s.for_ui();
+        let ui = s.clone().for_ui();
         assert_eq!((ui.ok, ui.different), (1, 1));
         assert_eq!(ui.files.len(), 1);
         assert_eq!(ui.files[0].rel, "CLIP/a.mov");
         assert_eq!(ui.omitted, 1);
         assert_eq!(s.omitted, 0);
+    }
+
+    #[test]
+    fn verify_ignores_system_files_hashed_by_another_tool() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = offloaded(dir.path());
+        let entry = GenEntry {
+            rel: "CLIP/.DS_Store".into(),
+            size: 1,
+            hashes: vec![(HashAlgo::Xxh128, hash_data(HashAlgo::Xxh128, b"x"))],
+            action: Action::Original,
+        };
+        write_entries(&dest, &[entry], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let s = run_verify(&dest);
+        assert_eq!(s.missing, 0);
+        assert!(s.conform);
     }
 
     #[test]

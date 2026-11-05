@@ -54,6 +54,7 @@
     if (job.kind === "verify") {
       if (c === "no_history" || c === "mhl_v1" || c === "nested_history") return t(`offload.verify.${c}`);
       if (c === "job_panic") return t("offload.verify.panic");
+      if (c === "job_spawn") return t("offload.verify.spawn");
     }
     return t(`offload.error.${c}`);
   }
