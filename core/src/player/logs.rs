@@ -292,7 +292,7 @@ fn one_line(s: &str) -> String {
 }
 
 /// Texte d'un marqueur : commentaire, puis scène et prise.
-fn label(m: &Marker) -> String {
+pub(crate) fn label(m: &Marker) -> String {
     let mut parts = Vec::new();
     if !m.comment.trim().is_empty() {
         parts.push(one_line(&m.comment));
@@ -307,7 +307,7 @@ fn label(m: &Marker) -> String {
 }
 
 /// Nom de bobine EDL : 8 caractères alphanumériques au plus (norme CMX3600).
-fn edl_reel(clip: &LogClip) -> String {
+pub(crate) fn edl_reel(clip: &LogClip) -> String {
     let src = clip.reel.as_deref().unwrap_or(&clip.name);
     let r: String = src
         .chars()
@@ -328,7 +328,7 @@ fn edl_reel(clip: &LogClip) -> String {
 }
 
 /// Texte EDL en ASCII (norme CMX3600) : accents retirés, autres signes remplacés.
-fn ascii(s: &str) -> String {
+pub(crate) fn ascii(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             'à' | 'â' | 'ä' | 'á' => 'a',
@@ -402,7 +402,7 @@ pub fn to_edl(title: &str, clips: &[LogClip]) -> String {
     out
 }
 
-fn fps_text(rate: FrameRate) -> String {
+pub(crate) fn fps_text(rate: FrameRate) -> String {
     if rate.den == 1 {
         rate.num.to_string()
     } else {
@@ -568,7 +568,7 @@ pub(crate) fn fcp_time(frames: i64, rate: FrameRate) -> String {
 }
 
 /// Chemin local en URL `file://` (espaces et caractères spéciaux encodés).
-pub fn file_url(path: &str) -> String {
+pub(crate) fn file_url(path: &str) -> String {
     let p = path.replace('\\', "/");
     let p = if p.starts_with('/') {
         p
@@ -680,11 +680,11 @@ pub fn to_fcpxml(title: &str, clips: &[LogClip]) -> String {
     )
 }
 
-fn rt(value: i64, rate: FrameRate) -> Value {
+pub(crate) fn rt(value: i64, rate: FrameRate) -> Value {
     json!({ "OTIO_SCHEMA": "RationalTime.1", "rate": rate.as_f64(), "value": value as f64 })
 }
 
-fn range_json(start: i64, dur: i64, rate: FrameRate) -> Value {
+pub(crate) fn range_json(start: i64, dur: i64, rate: FrameRate) -> Value {
     json!({ "OTIO_SCHEMA": "TimeRange.1", "start_time": rt(start, rate), "duration": rt(dur, rate) })
 }
 
