@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use serde::Serialize;
 use walkdir::WalkDir;
 
-use super::camera::camera_meta;
+use super::camera::{camera_meta, CameraMeta};
 use super::probe::{probe, MediaInfo};
 use super::wav::{read_info, WavInfo};
 use crate::offload::scan::IGNORED;
@@ -119,6 +119,17 @@ pub struct MediaDetails {
     pub error: Option<String>,
 }
 
+/// Ajoute les champs caméra sans écraser les valeurs déjà lues ; rend les valeurs brutes.
+fn merge_camera(
+    embedded: &mut BTreeMap<String, String>,
+    meta: CameraMeta,
+) -> BTreeMap<String, String> {
+    for (k, v) in meta.fields {
+        embedded.entry(k).or_insert(v);
+    }
+    meta.raw
+}
+
 /// Lit les informations techniques et les métadonnées intégrées d'un fichier.
 pub fn describe(path: &Path) -> MediaDetails {
     let kind = kind_of(path);
@@ -194,10 +205,7 @@ pub fn describe(path: &Path) -> MediaDetails {
     if kind == Some(MediaKind::Video) {
         let none = BTreeMap::new();
         let meta = camera_meta(path, probe.as_ref().map_or(&none, |p| &p.tags));
-        for (k, v) in meta.fields {
-            embedded.entry(k).or_insert(v);
-        }
-        camera = meta.raw;
+        camera = merge_camera(&mut embedded, meta);
     }
     MediaDetails {
         kind,
@@ -236,13 +244,20 @@ mod tests {
             d.camera.get("Device.modelName").map(String::as_str),
             Some("ILME-FX6")
         );
-        // Un champ déjà présent (iXML, étiquette) n'est pas écrasé : même règle `or_insert`.
+    }
+
+    #[test]
+    fn merge_camera_keeps_existing_values() {
         let mut embedded = BTreeMap::new();
         embedded.insert("camera".to_owned(), "A".to_owned());
-        for (k, v) in camera_meta(&clip, &BTreeMap::new()).fields {
-            embedded.entry(k).or_insert(v);
-        }
+        let mut meta = CameraMeta::default();
+        meta.fields.insert("camera".to_owned(), "B".to_owned());
+        meta.fields.insert("iso".to_owned(), "800".to_owned());
+        meta.raw.insert("k".to_owned(), "v".to_owned());
+        let raw = merge_camera(&mut embedded, meta);
         assert_eq!(embedded.get("camera").map(String::as_str), Some("A"));
+        assert_eq!(embedded.get("iso").map(String::as_str), Some("800"));
+        assert_eq!(raw.get("k").map(String::as_str), Some("v"));
     }
 
     #[test]

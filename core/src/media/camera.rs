@@ -40,6 +40,8 @@ pub fn camera_meta(path: &Path, tags: &BTreeMap<String, String>) -> CameraMeta {
             }
         }
     }
+    // Les étiquettes alimentent les champs normalisés, mais pas `raw` (réservé aux sidecars).
+    let mut all = raw.clone();
     for (k, v) in tags {
         let key = k.to_lowercase();
         let v = v.trim();
@@ -50,10 +52,10 @@ pub fn camera_meta(path: &Path, tags: &BTreeMap<String, String>) -> CameraMeta {
             || key == "com.apple.quicktime.make"
             || key == "com.apple.quicktime.model"
         {
-            raw.entry(key).or_insert_with(|| clip(v));
+            all.entry(key).or_insert_with(|| clip(v));
         }
     }
-    let fields = map_fields(&raw);
+    let fields = map_fields(&all);
     CameraMeta { fields, raw }
 }
 
@@ -244,6 +246,10 @@ fn map_fields(raw: &BTreeMap<String, String>) -> BTreeMap<String, String> {
             "Device.modelName",
             "Device.ModelName",
             "com.apple.quicktime.model",
+            // Noms Blackmagic supposés, à confirmer sur un fichier réel.
+            "com.blackmagic-design.camera.model",
+            "com.blackmagic-design.camera.camera_type",
+            "com.blackmagic-design.camera.camera_id",
         ],
     );
     let make = first(raw, &["com.apple.quicktime.make"]);
@@ -441,7 +447,27 @@ mod tests {
         assert_eq!(get(&m, "iso"), Some("400"));
         assert_eq!(get(&m, "white_balance"), Some("5600K"));
         assert_eq!(get(&m, "camera"), Some("Apple iPhone 15 Pro"));
-        assert!(!m.raw.contains_key("encoder"));
+        // Les étiquettes ne sont pas recopiées dans raw.
+        assert!(m.raw.is_empty());
+        tags.insert(
+            "com.blackmagic-design.camera.model".to_owned(),
+            "Pocket 6K".to_owned(),
+        );
+        tags.remove("com.apple.quicktime.make");
+        tags.remove("com.apple.quicktime.model");
+        let m = camera_meta(Path::new("/nulle/part/A.mov"), &tags);
+        assert_eq!(get(&m, "camera"), Some("Pocket 6K"));
+    }
+
+    #[test]
+    fn oversized_sidecar_is_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut xml = String::from("<NonRealTimeMeta><!--");
+        xml.push_str(&"x".repeat(MAX_XML as usize));
+        xml.push_str("--><Device modelName=\"ILME-FX6\"/></NonRealTimeMeta>");
+        std::fs::write(dir.path().join("C0005M01.XML"), xml).unwrap();
+        let m = camera_meta(&dir.path().join("C0005.MP4"), &BTreeMap::new());
+        assert_eq!(m, CameraMeta::default());
     }
 
     #[test]
