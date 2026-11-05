@@ -384,9 +384,7 @@ mod tests {
         // Fenêtre : même règle pour le ratio d'attente.
         let mut w = RateWindow::new(t0, Meters::new(3).snapshot());
         let mut later = Meters::new(3).snapshot();
-        for c in &mut later.cpu_ns {
-            *c = 300_000_000;
-        }
+        later.cpu_ns.fill(300_000_000);
         let r = w.tick(at(1000), later).unwrap();
         assert!((r.hash_wait_ratio - 0.3).abs() < 1e-9);
     }
