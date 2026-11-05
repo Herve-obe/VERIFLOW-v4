@@ -869,5 +869,20 @@
   "player.inspector.row.frames": "Images",
   "player.inspector.row.sample_rate": "Fréquence",
   "player.inspector.row.bits": "Profondeur",
-  "player.inspector.row.channels": "Canaux"
+  "player.inspector.row.channels": "Canaux",
+  "player.list.folder": "Dossier",
+  "player.list.playlist": "Playlist",
+  "player.list.filter": "Filtrer (nom, scène, prise, bobine)",
+  "player.list.count": "clips",
+  "player.list.sort": "Tri de la liste",
+  "player.list.sort.name": "Tri par nom",
+  "player.list.sort.tc": "Tri par TC",
+  "player.list.pick": "Choisis un dossier dans l'explorateur.",
+  "player.list.empty": "Aucun clip.",
+  "player.playlist.add": "Ajouter",
+  "player.playlist.remove": "Retirer",
+  "player.playlist.clear": "Vider",
+  "player.playlist.up": "Monter",
+  "player.playlist.down": "Descendre",
+  "player.playlist.missing": "Fichier introuvable"
 }

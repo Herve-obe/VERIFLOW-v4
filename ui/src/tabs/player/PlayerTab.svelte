@@ -23,6 +23,7 @@
   import ClipStrip from "./ClipStrip.svelte";
   import ClipBanner from "./ClipBanner.svelte";
   import MetaInspector from "./MetaInspector.svelte";
+  import { loadFolder, next, playerSources, prev } from "../../stores/player.svelte";
 
   const mode = $derived(app.mode);
   const lay = $derived(playerLayout[mode]);
@@ -50,6 +51,21 @@
     saveLayout("audio");
   });
 
+  // Le bandeau ou l'inspecteur affichent déjà codec, cadence, TC et iXML : les vues les masquent alors.
+  const infoPanels = $derived(vis.banner || vis.inspector);
+
+  // Flèches haut/bas : clip précédent/suivant, sauf pendant une saisie, sur un curseur ou une poignée.
+  function onArrows(e: KeyboardEvent) {
+    if (app.tab !== "player" || e.defaultPrevented) return;
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const el = e.target instanceof HTMLElement ? e.target : null;
+    if (el?.closest('input, textarea, select, [contenteditable="true"], [role="slider"], [role="separator"], [role="tree"], [role="menu"]')) return;
+    e.preventDefault();
+    if (e.key === "ArrowUp") prev();
+    else next();
+  }
+
   const showLeft = $derived(vis.explorer || vis.clips);
   const HANDLE = 5;
   const leftFloor = L.left.min;
@@ -69,6 +85,8 @@
   const rightMax = $derived(Math.min(L.right.max, Math.max(rightFloor, width - (showLeft ? leftW + HANDLE : 0) - CENTER_MIN - HANDLE)));
 </script>
 
+<svelte:window onkeydown={onArrows} />
+
 <div class="root">
   <PlayerToolbar {mode} />
   <div class="body" bind:this={body}>
@@ -78,11 +96,9 @@
           <div class="explorer" style:height={vis.clips ? `${lay.sizes.leftSplit}px` : undefined} style:flex={vis.clips ? "none" : "1"}>
             <Explorer
               owner="player"
-              selected={null}
-              onSelect={(p) => {
-                /* Lot 3 : charge le dossier choisi dans la liste. */
-                void p;
-              }}
+              docked
+              selected={playerSources[mode].dir || null}
+              onSelect={(p) => void loadFolder(mode, p)}
             />
           </div>
         {/if}
@@ -107,8 +123,8 @@
         <div class="banner"><ClipBanner {mode} /></div>
       {/if}
       <div class="views">
-        <div class="view" class:hidden={mode !== "video"}><VideoView path={app.playerVideo} logs={!isBeginner()} /></div>
-        <div class="view" class:hidden={mode !== "audio"}><AudioView paths={app.playerAudio} logs={!isBeginner()} /></div>
+        <div class="view" class:hidden={mode !== "video"}><VideoView path={app.playerVideo} logs={!isBeginner()} details={!infoPanels} tracksBelow /></div>
+        <div class="view" class:hidden={mode !== "audio"}><AudioView paths={app.playerAudio} logs={!isBeginner()} details={!infoPanels} /></div>
       </div>
       {#if vis.strip}
         <Resizer

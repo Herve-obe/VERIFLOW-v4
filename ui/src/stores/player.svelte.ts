@@ -11,11 +11,17 @@
 //   cacheDetails(list)  : range des Described dans le cache.
 //   select(i)       : fixe current et charge le clip (app.playerVideo = path, ou app.playerAudio = [path] pour un audio).
 //   next() / prev() : select(current ± 1), sans effet aux bornes.
+//   playerSources[mode] : état de source par mode (dir, entries du dossier, playlist, missing, loading).
+//   loadFolder(mode, dir) : liste le dossier (récursif, filtré par mode) puis décrit par lots de 24 ;
+//     un changement de dossier annule les lots en cours (compteur de génération).
+//   playlist : addToPlaylist / removeFromPlaylist / moveInPlaylist / clearPlaylist (mémorisée par mode,
+//     veriflow.player.playlist.video / .audio), checkPlaylist(mode) repère les fichiers disparus.
 // Les lots ne touchent jamais app.playerVideo / playerAudio autrement que par select()
 // ou par le clic de liste décrit au lot 3.
 import { SvelteMap } from "svelte/reactivity";
 import { app } from "./app.svelte";
-import type { Described, MediaEntry } from "../lib/media";
+import { describe, list, type Described, type MediaEntry } from "../lib/media";
+import type { Mode } from "./app.svelte";
 
 export type ClipSource = "folder" | "playlist";
 export const DETAILS_MAX = 5000;
@@ -62,3 +68,133 @@ export function select(i: number) {
 
 export const next = () => select(player.current + 1);
 export const prev = () => select(player.current - 1);
+
+// ---------------------------------------------------------------------------
+// Sources par mode : dossier choisi dans l'explorateur et playlist.
+
+export interface ModeSource {
+  dir: string;
+  entries: MediaEntry[];
+  loading: boolean;
+  /** Source affichée dans la liste. */
+  source: ClipSource;
+  playlist: MediaEntry[];
+  /** Chemins de la playlist introuvables (grisés, jamais retirés en silence). */
+  missing: string[];
+  /** Dernier message d'erreur de chargement, vide sinon. */
+  error: string;
+}
+
+const plKey = (mode: Mode) => `veriflow.player.playlist.${mode}`;
+
+function loadPlaylist(mode: Mode): MediaEntry[] {
+  try {
+    const j = JSON.parse(localStorage.getItem(plKey(mode)) ?? "[]");
+    if (!Array.isArray(j)) return [];
+    return j.filter((e): e is MediaEntry => !!e && typeof e.path === "string" && typeof e.name === "string");
+  } catch {
+    return [];
+  }
+}
+
+const blank = (mode: Mode): ModeSource => ({
+  dir: "",
+  entries: [],
+  loading: false,
+  source: "folder",
+  playlist: loadPlaylist(mode),
+  missing: [],
+  error: "",
+});
+
+export const playerSources = $state({ video: blank("video"), audio: blank("audio") });
+
+const generation: Record<Mode, number> = { video: 0, audio: 0 };
+const BATCH = 24;
+
+export async function loadFolder(mode: Mode, dir: string) {
+  const m = playerSources[mode];
+  const gen = ++generation[mode];
+  m.dir = dir;
+  m.source = "folder";
+  m.entries = [];
+  m.error = "";
+  m.loading = true;
+  try {
+    const all = await list(dir, true);
+    if (gen !== generation[mode]) return;
+    const entries = all.filter((e) => e.kind === mode);
+    m.entries = entries;
+    for (let i = 0; i < entries.length; i += BATCH) {
+      const batch = await describe(entries.slice(i, i + BATCH).map((e) => e.path));
+      if (gen !== generation[mode]) return;
+      cacheDetails(batch);
+    }
+  } catch (e) {
+    if (gen === generation[mode]) m.error = String(e);
+  } finally {
+    if (gen === generation[mode]) m.loading = false;
+  }
+}
+
+function savePlaylist(mode: Mode) {
+  try {
+    localStorage.setItem(plKey(mode), JSON.stringify($state.snapshot(playerSources[mode].playlist)));
+  } catch {
+    /* stockage indisponible : la playlist vaut pour la session */
+  }
+}
+
+export function addToPlaylist(mode: Mode, items: MediaEntry[]) {
+  const m = playerSources[mode];
+  const have = new Set(m.playlist.map((e) => e.path));
+  const add = items.filter((e) => e.kind === mode && !have.has(e.path));
+  if (add.length === 0) return;
+  m.playlist = [...m.playlist, ...add];
+  savePlaylist(mode);
+}
+
+export function removeFromPlaylist(mode: Mode, paths: string[]) {
+  const m = playerSources[mode];
+  const gone = new Set(paths);
+  m.playlist = m.playlist.filter((e) => !gone.has(e.path));
+  m.missing = m.missing.filter((p) => !gone.has(p));
+  savePlaylist(mode);
+}
+
+export function moveInPlaylist(mode: Mode, path: string, delta: -1 | 1) {
+  const m = playerSources[mode];
+  const i = m.playlist.findIndex((e) => e.path === path);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= m.playlist.length) return;
+  const next = [...m.playlist];
+  [next[i], next[j]] = [next[j], next[i]];
+  m.playlist = next;
+  savePlaylist(mode);
+}
+
+export function clearPlaylist(mode: Mode) {
+  const m = playerSources[mode];
+  m.playlist = [];
+  m.missing = [];
+  savePlaylist(mode);
+}
+
+/** Décrit la playlist (par lots) : range les détails et repère les fichiers introuvables. */
+export async function checkPlaylist(mode: Mode) {
+  const m = playerSources[mode];
+  const paths = m.playlist.map((e) => e.path);
+  const missing: string[] = [];
+  try {
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const batch = await describe(paths.slice(i, i + BATCH));
+      cacheDetails(batch.filter((d) => !d.details.error));
+      for (const d of batch) {
+        if (d.details.error && !d.details.probe && !d.details.wav) missing.push(d.path);
+      }
+    }
+    m.missing = missing;
+  } catch {
+    /* cœur indisponible : l'état précédent est conservé */
+  }
+}

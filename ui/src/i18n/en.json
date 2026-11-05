@@ -869,5 +869,20 @@
   "player.inspector.row.frames": "Frames",
   "player.inspector.row.sample_rate": "Sample rate",
   "player.inspector.row.bits": "Bit depth",
-  "player.inspector.row.channels": "Channels"
+  "player.inspector.row.channels": "Channels",
+  "player.list.folder": "Folder",
+  "player.list.playlist": "Playlist",
+  "player.list.filter": "Filter (name, scene, take, reel)",
+  "player.list.count": "clips",
+  "player.list.sort": "List order",
+  "player.list.sort.name": "By name",
+  "player.list.sort.tc": "By TC",
+  "player.list.pick": "Pick a folder in the explorer.",
+  "player.list.empty": "No clips.",
+  "player.playlist.add": "Add",
+  "player.playlist.remove": "Remove",
+  "player.playlist.clear": "Clear",
+  "player.playlist.up": "Move up",
+  "player.playlist.down": "Move down",
+  "player.playlist.missing": "File not found"
 }
