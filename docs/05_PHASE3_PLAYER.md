@@ -39,6 +39,18 @@ Objectif (charte §7.3) : finaliser le lecteur posé en phase 0 bis. Cette phase
 
 En niveau DÉBUTANT, la lecture se fait sans marqueurs : les commandes d'entrée, de sortie, de marqueur et d'ajout au rapport sont retirées du menu Lecture et de l'aide des raccourcis. Leurs touches n'ont pas d'effet. Aucun repère n'apparaît sur la barre de lecture et le panneau des marqueurs ne s'affiche pas. La lecture et le saut d'image restent disponibles. Détail dans la charte, §3.2.
 
+## Disposition en panneaux, explorateur et playlist (05/11/2026)
+
+Le PLAYER se découpe en trois panneaux autour de la zone de lecture. Non testé sur poste réel (voir `docs/TESTS_EN_ATTENTE.md`).
+
+- **Panneaux** : chaque panneau se redimensionne par sa poignée et se masque par la barre de boutons du PLAYER. Un double-clic sur une poignée remet le panneau à sa taille par défaut. La disposition est mémorisée séparément pour VIDEO et AUDIO. Le bouton de réinitialisation rétablit la disposition d'origine.
+- **Gauche, explorateur et liste de clips** : explorateur ancré, liste de clips en colonnes (nom, TC de début, durée, scène, prise), filtre, tri par nom ou par TC, compteur. Bascule Dossier / Playlist ; la playlist est mémorisée pour chaque mode. Un fichier disparu est grisé dans la playlist, jamais retiré en silence.
+- **Centre** : bandeau d'infos (scène, plan, prise, caméra, cadence, TC entrée-sortie, ISO, balance, obturateur, codec, résolution ; en AUDIO : TC BWF, fréquence, bits, pistes), puis la vue VIDEO ou AUDIO, puis la bande de clips.
+- **Droite, inspecteur** : métadonnées en lecture seule, sections repliables, filtre. La section « Étiquettes du fichier » n'apparaît qu'en niveau EXPERT.
+- **Navigation** : les flèches haut et bas passent au clip précédent ou suivant, sauf pendant une saisie ou sur un curseur.
+- **Réglages caméra** : lus dans les fichiers sans jamais modifier les originaux. Sidecar Sony (`<clip>M01.XML`), P2 Panasonic (`CONTENTS/CLIP/<clip>.XML`), étiquettes Blackmagic et Apple. Un sidecar absent ou illisible est ignoré sans erreur.
+- **Inspiration** : organisation de Silverstack. Le visuel est propre à VERIFLOW.
+
 ## Vérifications réalisées
 
 ### Tests automatiques (cœur)

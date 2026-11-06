@@ -2,7 +2,7 @@
 <script lang="ts">
   import { thumbnailUrl, filmstripUrl } from "../../lib/media";
 
-  let { path, width = 96 }: { path: string; width?: number } = $props();
+  let { path, width = 96, hover = true }: { path: string; width?: number; hover?: boolean } = $props();
   let src = $state<string | null>(null);
   let hoverSrc = $state<string | null>(null);
   let failed = $state(false);
@@ -22,6 +22,7 @@
   });
 
   function onMove(e: MouseEvent) {
+    if (!hover) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const i = Math.min(7, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * 8)));
     filmstripUrl(path, i).then((u) => (hoverSrc = u)).catch(() => {});

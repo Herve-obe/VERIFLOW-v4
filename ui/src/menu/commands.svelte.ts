@@ -8,6 +8,7 @@ import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { app, toggleMode, type Tab } from "../stores/app.svelte";
 import { isBeginner, tabVisible } from "../stores/level.svelte";
 import { explorer, setExplorerCollapsed } from "../stores/explorer.svelte";
+import { playerLayout } from "../stores/playerLayout.svelte";
 import { t } from "../i18n/index.svelte";
 import { inTauri } from "../lib/api";
 import {
@@ -178,9 +179,18 @@ const list: Command[] = [
   { id: "view.mode", label: () => t("menu.view.mode"), shortcut: { key: "Tab" }, bind: false, run: toggleMode },
   {
     id: "view.explorer",
-    label: () => (explorer.collapsed ? t("menu.view.explorer.show") : t("menu.view.explorer.hide")),
+    // Dans le PLAYER, l'explorateur est un panneau de la disposition : on bascule celui du mode.
+    label: () => {
+      const hidden = app.tab === "player" ? !playerLayout[app.mode].visible.explorer : explorer.collapsed;
+      return hidden ? t("menu.view.explorer.show") : t("menu.view.explorer.hide");
+    },
     shortcut: { key: "b", ctrl: true },
-    run: () => setExplorerCollapsed(!explorer.collapsed),
+    run: () => {
+      if (app.tab === "player") {
+        const v = playerLayout[app.mode].visible;
+        v.explorer = !v.explorer;
+      } else setExplorerCollapsed(!explorer.collapsed);
+    },
   },
   { id: "view.fullscreen", label: () => t("menu.view.fullscreen"), shortcut: { key: "F11" }, native: "fullscreen", run: toggleFullscreen },
 

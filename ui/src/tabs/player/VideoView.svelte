@@ -38,13 +38,23 @@
 
   // `slot` : emplacement du lecteur ; `path` : clip à ouvrir directement ;
   // `active` : vrai quand les raccourcis clavier doivent agir sur cette vue ;
-  // `logs` : affiche le panneau des marqueurs.
+  // `logs` : affiche le panneau des marqueurs ; `details` : codec, résolution, cadence et TC début ;
+  // `tracksBelow` : pistes son sous l'image (au lieu de la colonne de droite).
   let {
     slot = "player",
     path = null,
     active = () => app.tab === "player" && app.mode === "video",
     logs = true,
-  }: { slot?: Slot; path?: string | null; active?: () => boolean; logs?: boolean } = $props();
+    details = true,
+    tracksBelow = false,
+  }: {
+    slot?: Slot;
+    path?: string | null;
+    active?: () => boolean;
+    logs?: boolean;
+    details?: boolean;
+    tracksBelow?: boolean;
+  } = $props();
 
   const avSlot = $derived(`${slot}-av` as AudioSlot);
   const PREF_SCOPES = "veriflow.player.scopes";
@@ -626,10 +636,12 @@
       <div class="side">
         <div class="about">
           <dl class="info">
+            {#if details}
             <dt>{t("player.codec")}</dt><dd>{clip.info.video?.codec} ({clip.info.video?.pix_fmt})</dd>
             <dt>{t("player.resolution")}</dt><dd>{clip.info.video?.width} x {clip.info.video?.height}</dd>
             <dt>{t("player.rate")}</dt><dd>{fps(rate).toFixed(3)} i/s{dropFrame ? " DF" : ""}</dd>
             <dt>{t("player.tc.start")}</dt><dd class="mono">{clip.info.start_timecode ?? tc(0)}</dd>
+            {/if}
             <dt>{t("player.display.fps")}</dt>
             <dd class="mono" title="transfert / décodage et dessin">
               {speed !== 0 ? displayFps.toFixed(1) : "-"} i/s ({ipcMs.toFixed(0)} + {drawMs.toFixed(0)} ms)
@@ -646,7 +658,7 @@
             </div>
           {/if}
         </div>
-        {#if avReady}
+        {#if avReady && !tracksBelow}
           <SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} />
         {/if}
       </div>
@@ -654,6 +666,9 @@
         <Scopes source={canvas} tick={shown} />
       {/if}
     </div>
+    {#if avReady && tracksBelow}
+      <div class="below"><SoundTracks slot={avSlot} names={avTracks} ltc={avLtc} peaks={trackPeaks} /></div>
+    {/if}
 
     <div class="bar">
       <span class="tc mono">{tc(shown)}</span>
@@ -810,6 +825,12 @@
     display: flex;
     gap: var(--vf-space-2);
     min-height: 0;
+  }
+  .below {
+    display: flex;
+    justify-content: center;
+    overflow: auto hidden;
+    min-width: 0;
   }
   .screen {
     position: relative;

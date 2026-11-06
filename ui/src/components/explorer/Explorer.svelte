@@ -1,5 +1,7 @@
 <!-- Explorateur de dossiers (OFFLOAD, MEDIA) : volumes, favoris et dossiers du projet,
-     mis à jour en direct. Panneau redimensionnable et repliable (Ctrl+B). -->
+     mis à jour en direct. Panneau redimensionnable et repliable (Ctrl+B).
+     `docked` : ancré dans un panneau qui gère sa taille (PLAYER) : pleine largeur, sans poignée ni
+     bouton de repli, et indifférent à l'état replié des autres onglets. -->
 <script lang="ts">
   import { onMount } from "svelte";
   import TreeNode from "./TreeNode.svelte";
@@ -32,11 +34,13 @@
     selected = null,
     onSelect,
     actions = [],
+    docked = false,
   }: {
     owner: string;
     selected?: string | null;
     onSelect: (path: string) => void;
     actions?: ExplorerAction[];
+    docked?: boolean;
   } = $props();
 
   const WIDTH_KEY = "veriflow.explorer.width";
@@ -48,7 +52,7 @@
     }
   };
   let width = $state(Number(read(WIDTH_KEY, "250")));
-  const collapsed = $derived(explorer.collapsed);
+  const collapsed = $derived(!docked && explorer.collapsed);
   // État déplié partagé entre les onglets (voir stores/explorer.svelte.ts).
   const expanded = $derived(explorer.expanded);
   let roots = $state<string[]>([]);
@@ -104,12 +108,14 @@
     <svg viewBox="0 0 10 10"><path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
   </button>
 {:else}
-  <aside class="explorer" style:width={`${width}px`} aria-label={t("explorer.title")}>
+  <aside class="explorer" class:docked style:width={docked ? undefined : `${width}px`} aria-label={t("explorer.title")}>
     <header>
       <span>{t("explorer.title")}</span>
-      <button onclick={() => setExplorerCollapsed(true)} title={t("explorer.hide")} aria-label={t("explorer.hide")}>
-        <svg viewBox="0 0 10 10"><path d="M7 1.5 L3 5 L7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
-      </button>
+      {#if !docked}
+        <button onclick={() => setExplorerCollapsed(true)} title={t("explorer.hide")} aria-label={t("explorer.hide")}>
+          <svg viewBox="0 0 10 10"><path d="M7 1.5 L3 5 L7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+        </button>
+      {/if}
     </header>
     <div class="scroll" role="tree">
       <h4>{t("explorer.volumes")}</h4>
@@ -144,7 +150,9 @@
         {/each}
       {/if}
     </div>
-    <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={resize}></div>
+    {#if !docked}
+      <div class="handle" role="separator" aria-orientation="vertical" onpointerdown={resize}></div>
+    {/if}
   </aside>
 {/if}
 
@@ -169,6 +177,10 @@
     background: var(--vf-surface);
     border-right: 1px solid var(--vf-border);
     flex: none;
+  }
+  .explorer.docked {
+    width: 100%;
+    border-right: 0;
   }
   header {
     display: flex;
