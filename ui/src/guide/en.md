@@ -221,6 +221,17 @@ If a card has already been copied, fully or partly, VERIFLOW reads back the rush
 
 If the previous copy is in another folder (copy interrupted on another day), **Resume in this folder** continues it in the same place; **Back to the template** keeps the folder given by the template.
 
+## Cascade copy
+
+To free the card quickly, the copy is done in two stages:
+
+- **Stage 1**: verified copy of the card to the fast destinations (SSD). As soon as it is conform, the **Card can be freed** badge appears: the card can be removed.
+- **Stage 2**: copy to the slow destinations (hard drive, NAS) from the verified stage 1 copy, without reading the card again. It is verified like the first one and each destination has its report.
+
+Each destination carries a **Stage 1** or **Stage 2** badge. In EXPERT, the destination selector chooses **Auto** (VERIFLOW puts hard drives and network shares in stage 2), **Immediate** or **Cascade**. In BEGINNER, everything stays on Auto, and the announced stages are shown. At least one immediate destination is needed; with only one, the card is freed after that single verified copy.
+
+A stage 2 that is not finished (software closed, drive unplugged) is offered in the **Cascade copies to resume** banner: **Resume** restarts it, **Discard** removes it (the stage 1 copies stay). Automatic ejection only happens when the card can be freed, and never in BEGINNER.
+
 ## Ejecting
 
 - With the option ticked, the source is ejected after a verified copy: the **Source ejected.** message appears.
@@ -281,11 +292,32 @@ Select one or more media: the right panel shows their information.
 
 Other buttons: **Add to report** (REPORT), **Send to TRANSCODE**, **Open in PLAYER**.
 
+## Exports to editing
+
+In EXPERT, the **To editing…** button in MEDIA exports the clips (the selection, or the displayed clips, filters included) to an editing application. Formats depend on the chosen application:
+
+- **Final Cut Pro**: FCPXML;
+- **Premiere Pro**: XMEML;
+- **DaVinci Resolve**: FCPXML 1.10 and Resolve CSV;
+- **Avid Media Composer**: ALE and EDL;
+- **Other**: OTIO and EDL.
+
+Good to know:
+
+- clips arrive as a bin, without a sequence, except the EDL which is a sequence;
+- media paths are absolute; only OTIO can write them as relative;
+- the **Include player markers** option adds the markers set in the PLAYER;
+- an existing file is never overwritten: the new one gets the `_2` suffix (then `_3`...).
+
 # PLAYER: playing and logging
 
 ## Opening a media
 
 **Open in PLAYER** from MEDIA or the quick player, or the file picker of the tab. The PLAYER switches to the media mode (VIDEO or AUDIO).
+
+## Panels
+
+The PLAYER is organized in panels around the playback: on the left the explorer and the clip list (**Folder** / **Playlist** switch, filter, sort by name or TC), in the middle the info banner, playback and the clip strip, on the right the metadata inspector. Each panel is resized by its handle (double-click: default size) and hidden from the button bar; **Default layout** restores the original. The layout is remembered separately for VIDEO and AUDIO. Up and down arrows go to the previous or next clip.
 
 ## Playback
 

@@ -151,7 +151,7 @@ enum Notice {
         #[serde(skip_serializing_if = "Option::is_none")]
         verify: Option<Box<VerifySummary>>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        reports: Option<ReportFiles>,
+        reports: Option<Box<ReportFiles>>,
         /// Vérification : raison de l'échec d'écriture des rapports.
         #[serde(skip_serializing_if = "Option::is_none")]
         report_error: Option<String>,
@@ -429,7 +429,7 @@ fn run_verify(
         result: None,
         // Compteurs, chaîne et écarts seulement : le détail est dans le CSV.
         verify: Some(Box::new(summary.for_ui())),
-        reports,
+        reports: reports.map(Box::new),
         report_error,
         ejected: None,
         card_free: false,

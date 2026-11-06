@@ -221,6 +221,17 @@ Si une carte a déjà été copiée, en tout ou en partie, VERIFLOW relit les ru
 
 Si la copie précédente est dans un autre dossier (copie interrompue un autre jour), **Reprendre dans ce dossier** la continue au même endroit ; **Revenir au modèle** garde le dossier prévu par l'arborescence.
 
+## Copie en cascade
+
+Pour libérer la carte vite, la copie se fait en deux étapes :
+
+- **Étape 1** : copie vérifiée de la carte vers les destinations rapides (SSD). Dès qu'elle est conforme, le badge **Carte libérable** s'affiche : la carte peut être retirée.
+- **Étape 2** : copie vers les destinations lentes (disque dur, NAS) depuis la copie vérifiée de l'étape 1, sans relire la carte. Elle est vérifiée comme la première et chaque destination a son rapport.
+
+Chaque destination porte un badge **Étape 1** ou **Étape 2**. En EXPERT, le sélecteur de la destination choisit **Auto** (VERIFLOW met les disques durs et les partages réseau en étape 2), **Immédiate** ou **En cascade**. En DÉBUTANT, tout reste en Auto, et les étapes annoncées sont affichées. Il faut au moins une destination immédiate ; avec une seule, la carte est libérée après cette seule copie vérifiée.
+
+Une étape 2 non terminée (fermeture du logiciel, disque débranché) est proposée dans le bandeau **Copies en cascade à reprendre** : **Reprendre** la relance, **Abandonner** la supprime (les copies de l'étape 1 restent). L'éjection automatique n'a lieu que si la carte est libérable, et jamais en DÉBUTANT.
+
 ## Éjection
 
 - Avec l'option cochée, la source est éjectée après une copie conforme : le message **Source éjectée** s'affiche.
@@ -281,11 +292,32 @@ Bouton **Exporter** :
 
 Autres boutons : **Ajouter au rapport** (REPORT), **Envoyer vers TRANSCODE**, **Ouvrir dans le PLAYER**.
 
+## Exports vers le montage
+
+En EXPERT, le bouton **Montage…** de MEDIA exporte les clips (la sélection, ou les clips affichés, filtres compris) vers un logiciel de montage. Formats selon le logiciel choisi :
+
+- **Final Cut Pro** : FCPXML ;
+- **Premiere Pro** : XMEML ;
+- **DaVinci Resolve** : FCPXML 1.10 et CSV Resolve ;
+- **Avid Media Composer** : ALE et EDL ;
+- **Autre** : OTIO et EDL.
+
+À savoir :
+
+- les clips arrivent en chutier, sans séquence, sauf l'EDL qui est une séquence ;
+- les chemins des médias sont absolus ; seul l'OTIO peut les écrire en relatifs ;
+- l'option **Inclure les marqueurs du lecteur** ajoute les marqueurs posés dans le PLAYER ;
+- un fichier existant n'est jamais écrasé : le nouveau prend le suffixe `_2` (puis `_3`...).
+
 # PLAYER : lire et marquer
 
 ## Ouvrir un média
 
 **Ouvrir dans le PLAYER** depuis MEDIA ou le lecteur rapide, ou le sélecteur de fichiers de l'onglet. Le PLAYER passe dans le mode du média (VIDEO ou AUDIO).
+
+## Panneaux
+
+Le PLAYER s'organise en panneaux autour de la lecture : à gauche l'explorateur et la liste de clips (bascule **Dossier** / **Playlist**, filtre, tri par nom ou TC), au centre le bandeau d'infos, la lecture et la bande de clips, à droite l'inspecteur des métadonnées. Chaque panneau se redimensionne par sa poignée (double-clic : taille par défaut) et se masque depuis la barre de boutons ; **Disposition par défaut** rétablit l'origine. La disposition est mémorisée séparément pour VIDEO et AUDIO. Les flèches haut et bas passent au clip précédent ou suivant.
 
 ## Lecture
 
