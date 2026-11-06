@@ -83,6 +83,8 @@ export interface PreflightView {
   elsewhere: (Present & { root: string })[][];
   hdd: boolean[];
   /** Même ordre que `roots`, rempli aux positions d'étape 2 : espace manquant (avertissement non bloquant). */
+  /** Algorithmes ajoutés d'office (étape 2 sans algorithme présent dans l'historique ASC MHL). */
+  added_algorithms?: string[];
   cascade_space_warning?: (number | null)[];
   /** Étape (1 immédiate, 2 en cascade) de chaque dossier de `roots`, même ordre. */
   stages: number[];

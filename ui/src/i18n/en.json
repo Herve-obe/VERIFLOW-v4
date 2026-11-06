@@ -926,5 +926,7 @@
   "offload.cascade.store_error": "The cascade could not be saved for resuming: {detail}",
   "offload.cascade.pending_error": "Cannot read the cascade copies to resume: {detail}",
   "offload.cascade.space_warning": "Not enough space for stage 2 (missing {size}): it will be checked again at start",
-  "offload.error.code.no_space": "Not enough space"
+  "offload.error.code.no_space": "Not enough space",
+  "offload.cascade.added_algo": "{algos} added automatically: SHA-256 is not in the ASC MHL history and stage 2 needs one to verify.",
+  "offload.error.code.cascade_store_unreadable": "The list of cascade copies to resume is unreadable"
 }

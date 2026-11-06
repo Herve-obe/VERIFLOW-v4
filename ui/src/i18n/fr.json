@@ -926,5 +926,7 @@
   "offload.cascade.store_error": "La cascade n'a pas pu être enregistrée pour reprise : {detail}",
   "offload.cascade.pending_error": "Impossible de lire les copies en cascade à reprendre : {detail}",
   "offload.cascade.space_warning": "Espace insuffisant pour l'étape 2 (il manque {size}) : elle sera recontrôlée au démarrage",
-  "offload.error.code.no_space": "Espace insuffisant"
+  "offload.error.code.no_space": "Espace insuffisant",
+  "offload.cascade.added_algo": "{algos} ajouté d'office : le SHA-256 ne figure pas dans l'historique ASC MHL et l'étape 2 en a besoin pour vérifier.",
+  "offload.error.code.cascade_store_unreadable": "Liste des copies en cascade à reprendre illisible"
 }

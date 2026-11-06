@@ -116,7 +116,9 @@
         if (key !== JSON.stringify(destinations)) return;
         autoRes = { key, stages: Object.fromEntries(dests.map((d, i) => [d, p.stages[i] ?? 1])) };
       })
-      .catch(() => {});
+      .catch((e) => {
+        if (key === JSON.stringify(destinations)) error = cascadeText(e);
+      });
   });
 
   const request = (): OffloadRequest => ({
@@ -542,6 +544,9 @@
             <button onclick={useElsewhere}>{t("offload.elsewhere.use")}</button>
             <p class="note small">{t("offload.elsewhere.hint")}</p>
           </div>
+        {/if}
+        {#if pre.added_algorithms?.length}
+          <p class="note small">{t("offload.cascade.added_algo").replace("{algos}", pre.added_algorithms.map((a) => ALGORITHMS.find((x) => x.id === a)?.label ?? a.toUpperCase()).join(", "))}</p>
         {/if}
         {#if singleCopy}<p class="warn">{t("offload.cascade.single_copy_warning")}</p>{/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}

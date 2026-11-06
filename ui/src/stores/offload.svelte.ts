@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest, type PendingView, cascadePending } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest, type PendingView, cascadePending, errorMessage } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
@@ -73,7 +73,7 @@ export async function refreshPending() {
     offload.pending = await cascadePending();
     offload.pendingError = null;
   } catch (e) {
-    offload.pendingError = String(e);
+    offload.pendingError = errorMessage(String(e));
   }
 }
 

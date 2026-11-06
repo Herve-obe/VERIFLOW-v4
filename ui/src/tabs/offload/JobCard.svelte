@@ -86,7 +86,8 @@
       if (c === "job_panic") return t("offload.verify.panic");
       if (c === "job_spawn") return t("offload.verify.spawn");
     }
-    if (parseError(job.error ?? "", c).code) return errorMessage(job.error ?? "", c);
+    // Texte « code : détail » ou code de cascade : message traduit avec détail ; sinon le message du code seul.
+    if (c.startsWith("cascade_") || /^(cascade_[a-z_]+|no_space) : /.test(job.error ?? "")) return errorMessage(job.error ?? "", c);
     return t(`offload.error.${c}`);
   }
 
