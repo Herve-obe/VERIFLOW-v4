@@ -74,13 +74,19 @@ Le bouton **Montage…** de l'onglet MEDIA ouvre la boîte « Exporter vers le m
 
 Formats cochables : FCPXML (version 1.9, 1.10 ou 1.11 au choix), XMEML (v5), EDL (CMX3600), ALE, OTIO, CSV Resolve. Plusieurs formats s'écrivent en un seul clic.
 
-**Portée.** Les clips sélectionnés, ou tous les clips du dossier affiché.
+**Portée.** Les clips sélectionnés, ou les clips affichés du dossier, filtres compris.
+
+**Pas d'écrasement.** Un fichier existant n'est jamais remplacé. Le nouveau fichier prend le suffixe `_2`, `_3`, etc. (un nouvel export dans le même dossier donne `..._2`).
 
 **Clips sans séquence.** Les clips sont exportés comme des clips de chutier, sans séquence à vider ni à construire. FCPXML écrit un événement sans projet, XMEML un bin, OTIO une collection. Seule l'EDL est une séquence.
 
 **Métadonnées et marqueurs.** Scène, plan, prise, caméra, bobine, notes, mots-clés et prise cerclée sont écrits dans chaque format qui les accepte. Les marqueurs du PLAYER (point ou plage, avec leur couleur) sont inclus si l'option est cochée.
 
-**Chemins.** Chemins absolus par défaut. Les chemins relatifs sont proposés pour OTIO et ALE seulement : FCPXML et XMEML ne les acceptent pas, l'option est grisée avec une explication. Les lecteurs réseau (UNC) et les noms avec espaces, accents ou caractères Unicode sont encodés.
+**FCPXML (1.9 à 1.11).** Le chemin des médias est dans `media-rep`. Correspondances : Scène = « scène/plan », Take = prise, Camera Name = caméra, Camera Angle = champ angle, à défaut la caméra si elle n'a qu'une lettre. Ces correspondances sont à confirmer sur un vrai Final Cut.
+
+**EDL.** Un événement par clip entier. Les marqueurs du PLAYER (points et plages) sont en commentaires `* LOC` à leur entrée.
+
+**Chemins.** Chemins absolus par défaut. Les chemins relatifs ne sont proposés que pour OTIO : ALE ne garde que le nom du fichier (colonne Source File), EDL, FCPXML et XMEML restent en absolu. Les lecteurs réseau (UNC) et les noms avec espaces, accents ou caractères Unicode sont encodés.
 
 **ALE.** Cadence écrite `23.976` (et non 23.98). Si les clips ont des cadences mêlées, un fichier ALE est écrit par cadence. Option « ALE en ASCII (sans accents) » pour les logiciels qui n'acceptent pas les accents.
 
@@ -90,11 +96,12 @@ Formats cochables : FCPXML (version 1.9, 1.10 ou 1.11 au choix), XMEML (v5), EDL
 - Cadences mêlées : un ALE par cadence ; l'EDL suit la cadence du premier clip, les durées sont à vérifier.
 - Son synchronisé en XMEML : le décalage est arrondi à l'image entière.
 
+**Son synchronisé (SYNC).** Le cœur sait l'écrire en FCPXML, XMEML, OTIO et ALE, mais la boîte Montage… ne l'envoie pas encore. Il viendra dans une PR suivante, avec l'accord d'Hervé. La piste LTC est retirée du son exporté, sauf en OTIO où elle n'est exclue qu'en métadonnées (pas de sélection de canaux standard).
+
 **Limites.**
 - AAF non pris en charge.
-- Les clips synchronisés (SYNC) ne sont pas proposés dans cette boîte. Le cœur sait les écrire en FCPXML, mais leur export depuis SYNC est prévu dans une PR suivante, avec l'accord d'Hervé.
 
-**Contrôle externe.** `scripts/validate-exports.py` relit les fichiers avec OpenTimelineIO (adaptateurs cmx_3600, fcpx_xml, ale et otio_json). Le XMEML n'a pas d'adaptateur publié : il est seulement vérifié comme XML bien formé.
+**Contrôle externe.** `scripts/validate-exports.py` relit les fichiers avec OpenTimelineIO (adaptateurs cmx_3600, ale et otio_json). Le FCPXML est contrôlé par ElementTree, car l'adaptateur OTIO fcpx_xml ne lit pas les clips d'un événement. Le XMEML n'a pas d'adaptateur publié : il est seulement vérifié comme XML bien formé.
 
 ## Essais
 - Tests automatiques : catalogue et lecture iXML, champs, édition par lot dans le projet, forme d'onde WAV et FFmpeg (avec découpage de lecture), vignettes et bande d'images, CSV/ALE/XMP, copie de travail WAV (audio identique octet pour octet, original intact, aucun écrasement), copie de travail vidéo (timecode conservé).

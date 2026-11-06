@@ -142,7 +142,7 @@ Tauri 2 utilise la WebView du système au lieu d'embarquer Chromium, d'où sa l�
 | Mesures | `ebur128` (LUFS) + crête maison | MIT | Vumètres |
 | Base de données | SQLite via `rusqlite` | Domaine public / MIT | Projets, logs, métadonnées |
 | Rapports PDF | Typst (moteur embarqué) | Apache 2.0 | REPORT, rapports d'offload |
-| Formats d'échange | Écrits par VERIFLOW : MHL v2 (XML), CSV, ALE, EDL CMX3600, FCPXML 1.9 à 1.11, XMEML v5 (Premiere), OTIO (JSON), CSV Resolve. Ajout du 05/11/2026 pour les exports vers le montage : FCPXML 1.9 à 1.11, XMEML v5, EDL CMX3600, ALE, OTIO, CSV Resolve | Propriétaire | Exports |
+| Formats d'échange | Écrits par VERIFLOW : MHL v2 (XML), CSV, ALE, EDL CMX3600, FCPXML 1.9 à 1.11, XMEML v5 (Premiere), OTIO (JSON), CSV Resolve (exports vers le montage ajoutés le 05/11/2026) | Propriétaire | Exports |
 
 Risque technique principal : **la lecture vidéo fluide et précise à l'image dans Tauri**. **Levé en phase 0 bis** (voir `docs/02_PHASE0BIS_PROTOTYPE.md`) : FFmpeg tourne en processus séparé (un rush corrompu ne peut pas faire planter VERIFLOW, aucune compilation de bibliothèque par plateforme), le saut est exact à l'image y compris en GOP long, et l'aperçu JPEG 4:4:4 permet la lecture à pleine cadence. Solution de repli si un besoin d'affichage étalonné apparaît : rendu GPU natif ou libmpv.
 
