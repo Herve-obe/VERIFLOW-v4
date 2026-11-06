@@ -1,6 +1,7 @@
 // Accès aux commandes OFFLOAD (voir src-tauri/src/offload.rs).
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { t } from "../i18n/index.svelte";
 
 export type HashAlgo = "xxh128" | "xxh64" | "xxh3" | "md5" | "sha1" | "sha256" | "c4";
 
@@ -38,7 +39,14 @@ export interface OffloadRequest {
   date?: string | null;
   /** Dossiers finals imposés (reprise d'une copie trouvée dans un autre dossier). */
   roots?: string[] | null;
+  /** Étape 2 (copie en cascade) : destinations lentes recopiées plus tard depuis la copie vérifiée. */
+  cascade?: string[];
+  /** Vrai : le cœur répartit les destinations entre les deux étapes (lentes en étape 2). */
+  cascade_auto?: boolean;
 }
+
+/** Étape voulue pour une destination (sélecteur de l'interface). */
+export type StageChoice = "auto" | "immediate" | "cascade";
 
 export type ExistingMode = "verify" | "complete" | "replace";
 
@@ -74,6 +82,12 @@ export interface PreflightView {
   /** Par destination : copies de cette carte trouvées dans d'autres dossiers. */
   elsewhere: (Present & { root: string })[][];
   hdd: boolean[];
+  /** Même ordre que `roots`, rempli aux positions d'étape 2 : espace manquant (avertissement non bloquant). */
+  /** Algorithmes ajoutés d'office (étape 2 sans algorithme présent dans l'historique ASC MHL). */
+  added_algorithms?: string[];
+  cascade_space_warning?: (number | null)[];
+  /** Étape (1 immédiate, 2 en cascade) de chaque dossier de `roots`, même ordre. */
+  stages: number[];
   source_hdd: boolean;
   previous: { finished_at: string; source_name: string; destinations: string[] }[];
   /** Durée estimée de la copie (secondes). */
@@ -152,9 +166,31 @@ export interface JobResult {
   };
   roots: string[];
   mhl: (string | null)[];
+  /** Par destination : échec de l'historique ASC MHL (codes cascade_history, cascade_diverged). */
+  mhl_errors?: ({ code: string | null; message: string } | null)[];
   reports: { csv: string; html: string; pdf: string; pdf_sha256: string; rates_csv?: string | null }[];
   source_name: string;
   fingerprint: string;
+  /** Étape 1 seulement : la carte peut être libérée (tout est vérifié sur les destinations immédiates). */
+  card_free?: boolean;
+}
+
+/** Copie en cascade enregistrée, à reprendre (étape 2 non terminée). */
+export interface PendingView {
+  key: string;
+  /** Nom de la carte d'origine. */
+  card: string;
+  source: string;
+  date: string;
+  stage1_roots: string[];
+  stage2_roots: string[];
+  files: number;
+  total_bytes: number;
+  finished_at: string;
+  /** Une copie de l'étape 1 a encore un historique intact. */
+  stage1_available: boolean;
+  /** Numéro de la copie si l'étape 2 est déjà en file ou en cours. */
+  job: number | null;
 }
 
 export type JobKindName = "offload" | "verify";
@@ -220,17 +256,45 @@ export type WaitReason = "limit" | "source_busy" | "root_busy" | "source_in_use"
 export const MAX_PARALLEL_JOBS = 3;
 
 export type EjectCode = "source_in_use_eject" | "eject_not_removable";
-export type ErrorCode = "no_space" | "job_panic" | "job_spawn" | "no_history" | "mhl_v1" | "nested_history";
+export type ErrorCode =
+  | "no_space"
+  | "job_panic"
+  | "job_spawn"
+  | "no_history"
+  | "mhl_v1"
+  | "nested_history"
+  | "cascade_history"
+  | "cascade_diverged"
+  | "cascade_no_source"
+  | "cascade_no_immediate";
 
 export type Notice =
-  | { kind: "queued"; job: number; source: string }
+  | { kind: "queued"; job: number; source: string; stage?: 1 | 2; cascade_of?: number | null }
   | { kind: "waiting"; job: number; reason: WaitReason }
   | { kind: "dropped"; job: number }
   | { kind: "starting"; job: number }
   | { kind: "running"; job: number; job_kind?: JobKindName; files: number; total_bytes: number; roots: string[] }
   | { kind: "engine"; job: number; event: EngineEvent }
-  | { kind: "done"; job: number; job_kind?: JobKindName; result?: JobResult; verify?: VerifySummary; reports?: ReportFiles; report_error?: string; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null }
+  | { kind: "done"; job: number; job_kind?: JobKindName; result?: JobResult; verify?: VerifySummary; reports?: ReportFiles; report_error?: string; ejected: { Ok: null } | { Err: string } | null; eject_code: EjectCode | null; card_free?: boolean; cascade_job?: number | null; cascade_error?: string }
   | { kind: "failed"; job: number; error: string; error_code: ErrorCode | null };
+
+/** Codes d'erreur du pont qui arrivent aussi en texte nu « code : détail ». */
+const CODED = /^(cascade_[a-z_]+|no_space) : ([\s\S]*)$/;
+
+/** Code connu et détail d'une erreur : `code` si fourni, sinon lu dans le texte nu. */
+export function parseError(raw: string, code?: string | null): { code: string | null; detail: string } {
+  const m = CODED.exec(raw);
+  if (code && /^(cascade_|no_space)/.test(code)) return { code, detail: m ? m[2] : "" };
+  return m ? { code: m[1], detail: m[2] } : { code: null, detail: raw };
+}
+
+/** Message affiché : texte traduit du code puis détail ; texte brut si le code est inconnu. */
+export function errorMessage(raw: string, code?: string | null): string {
+  const p = parseError(raw, code);
+  if (!p.code) return raw;
+  const head = t(`offload.error.code.${p.code}`);
+  return p.detail ? `${head} (${p.detail})` : head;
+}
 
 export const volumes = () => invoke<Volume[]>("offload_volumes");
 export const preflight = (request: OffloadRequest) => invoke<PreflightView>("offload_preflight", { request });
@@ -246,6 +310,9 @@ export const mhlInfo = (root: string) => invoke<MhlInfo>("offload_mhl_info", { r
 export const mhlVerify = (root: string, operator: string | null = null) => invoke<number>("offload_mhl_verify", { root, operator });
 export const cancel = (job: number) => invoke<void>("offload_cancel", { job });
 export const eject = (mountPoint: string) => invoke<void>("offload_eject", { mountPoint });
+export const cascadePending = () => invoke<PendingView[]>("offload_cascade_pending");
+export const cascadeResume = (key: string) => invoke<number>("offload_cascade_resume", { key });
+export const cascadeDiscard = (key: string) => invoke<void>("offload_cascade_discard", { key });
 export const reveal = (path: string) => invoke<void>("reveal", { path });
 export const onNotice = (cb: (n: Notice) => void): Promise<UnlistenFn> => listen<Notice>("offload", (e) => cb(e.payload));
 export const powerStatus = () => invoke<PowerStatus | null>("power_status");

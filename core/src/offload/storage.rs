@@ -119,6 +119,13 @@ pub fn is_hdd(path: &Path) -> bool {
     volume_of(path).is_some_and(|v| v.kind == "hdd")
 }
 
+/// Vrai si le chemin est sur un support lent : disque dur mécanique, ou volume
+/// introuvable (partage réseau, NAS). Sert au choix automatique de l'étape
+/// d'une destination en cascade.
+pub fn is_slow(path: &Path) -> bool {
+    is_hdd(path) || volume_of(path).is_none()
+}
+
 /// Éjecte proprement un volume amovible (après la copie).
 pub fn eject(mount_point: &Path) -> Result<()> {
     let mp = mount_point.display().to_string();
@@ -170,6 +177,11 @@ mod tests {
             assert!(v.total >= v.available);
         }
         let _ = is_hdd(dir.path());
+        // Lent = disque dur, ou volume inconnu.
+        assert_eq!(
+            is_slow(dir.path()),
+            is_hdd(dir.path()) || volume_of(dir.path()).is_none()
+        );
     }
 
     #[test]

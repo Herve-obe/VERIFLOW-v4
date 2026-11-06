@@ -22,6 +22,8 @@ pub struct Claim {
     pub roots: Vec<PathBuf>,
     /// Par destination : volume, disque dur mécanique, octets à y écrire.
     pub dest_volumes: Vec<(PathBuf, bool, u64)>,
+    /// Copie en cascade (étape 2) : examinée après les copies immédiates.
+    pub deferred: bool,
 }
 
 impl Claim {
@@ -36,6 +38,7 @@ impl Claim {
             source_hdd: hdd,
             source_volume: volume,
             dest_volumes: Vec::new(),
+            deferred: false,
         }
     }
 }
@@ -227,7 +230,9 @@ fn can_start_with(
 /// travail bloqué ne bloque pas les suivants, et les travaux lancés dans ce
 /// passage comptent comme en cours pour les suivants. Pour ne pas affamer un
 /// travail qui attend de la place ou un disque dur, les suivants qui écrivent
-/// sur le même volume attendent aussi, pour la même raison.
+/// sur le même volume attendent aussi, pour la même raison. Les travaux
+/// immédiats sont examinés avant les différés (cascade), ordre d'arrivée dans
+/// chaque groupe ; un travail en cours n'est jamais interrompu.
 pub fn select(
     pending: &[Claim],
     running: &[Claim],
@@ -237,7 +242,10 @@ pub fn select(
     let mut launch = Vec::new();
     let mut waits = Vec::new();
     let mut held: Vec<(PathBuf, Wait)> = Vec::new();
-    for (i, c) in pending.iter().enumerate() {
+    let mut order: Vec<usize> = (0..pending.len()).collect();
+    order.sort_by_key(|&i| pending[i].deferred);
+    for i in order {
+        let c = &pending[i];
         let verdict = can_start(c, &current, free).and_then(|()| {
             match c
                 .dest_volumes
@@ -289,6 +297,7 @@ mod tests {
                 .iter()
                 .map(|(v, h, b)| ((*v).into(), *h, *b))
                 .collect(),
+            deferred: false,
         }
     }
 
@@ -626,6 +635,44 @@ mod tests {
         ];
         let (go, waits) = select(&pending, &run, &no_limit);
         assert_eq!(go, [1]);
+        assert_eq!(waits, [(0, Wait::HddBusy)]);
+    }
+
+    #[test]
+    fn select_prefers_immediate_over_deferred() {
+        // Deux places prises sur trois : la dernière va à la copie immédiate
+        // arrivée après la copie différée.
+        let run = [
+            claim("/A", &["/ssd/a"], &[("/ssd", false, 10)]),
+            claim("/B", &["/ssd2/b"], &[("/ssd2", false, 10)]),
+        ];
+        let mut later = claim("/ssd3", &["/hdd/x"], &[("/hdd", true, 10)]);
+        later.deferred = true;
+        let pending = [later, claim("/C", &["/ssd3/c"], &[("/ssd3", false, 10)])];
+        let (go, waits) = select(&pending, &run, &no_limit);
+        assert_eq!(go, [1]);
+        assert_eq!(waits, [(0, Wait::Limit)]);
+        // Même sans contrainte, l'ordre d'arrivée reste celui de chaque groupe.
+        let mut d1 = claim("/D", &["/hdd/d"], &[("/hdd", true, 10)]);
+        d1.deferred = true;
+        let mut d2 = claim("/E", &["/hdd2/e"], &[("/hdd2", true, 10)]);
+        d2.deferred = true;
+        let pending = [d1, claim("/F", &["/ssd/f"], &[("/ssd", false, 10)]), d2];
+        let (go, waits) = select(&pending, &[], &no_limit);
+        assert_eq!(go, [1, 0, 2]);
+        assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn deferred_claim_waits_on_busy_hdd() {
+        // Une copie différée vers un disque dur attend la fin de la copie en cours
+        // qui l'utilise, sans l'interrompre.
+        let run = [claim("/A", &["/hdd/a"], &[("/hdd", true, 10)])];
+        let mut c = claim("/ssd", &["/hdd/b"], &[("/hdd", true, 10)]);
+        c.deferred = true;
+        assert_eq!(can_start(&c, &run, &no_limit), Err(Wait::HddBusy));
+        let (go, waits) = select(&[c], &run, &no_limit);
+        assert!(go.is_empty());
         assert_eq!(waits, [(0, Wait::HddBusy)]);
     }
 }

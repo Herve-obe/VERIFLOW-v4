@@ -1,5 +1,5 @@
 // État des copies (file d'attente et progression), alimenté par les événements du cœur.
-import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest } from "../lib/offload";
+import { decidePower, onNotice, powerStatus, remainingSecs, type PowerReason, type Rates, progressSpeed, type WaitReason, type EjectCode, type ErrorCode, type FileResult, type JobKindName, type VerifySummary, type ReportFiles, type JobResult, type Notice, type OffloadRequest, type PendingView, cascadePending, errorMessage } from "../lib/offload";
 
 export type JobState = "queued" | "waiting" | "starting" | "running" | "done" | "failed";
 
@@ -37,6 +37,16 @@ export interface Job {
   ejected: string | null;
   ejectCode: EjectCode | null;
   startedAt: number;
+  /** Étape de la copie : 1 (immédiate) ou 2 (en cascade). */
+  stage: 1 | 2;
+  /** Étape 2 : numéro de la copie d'étape 1 d'origine. */
+  cascadeOf: number | null;
+  /** Étape 1 : numéro de la copie d'étape 2 mise en file. */
+  cascadeJob: number | null;
+  /** Étape 1 : la carte peut être libérée (null tant que la copie n'est pas finie). */
+  cardFree: boolean | null;
+  /** Étape 1 : la cascade n'a pas pu être enregistrée pour reprise (texte « code : détail »). */
+  cascadeError: string | null;
 }
 
 /** Fenêtre de la moyenne glissante de la vitesse. */
@@ -51,7 +61,21 @@ export const offload = $state({
   resume: null as OffloadRequest | null,
   /** Alerte batterie pendant une copie (clé i18n et variables, traduites à l'affichage). */
   batteryAlert: null as { key: string; vars: Record<string, string> } | null,
+  /** Copies en cascade enregistrées dont l'étape 2 reste à faire. */
+  pending: [] as PendingView[],
+  /** Échec de la lecture de ces copies (null si tout va bien). */
+  pendingError: null as string | null,
 });
+
+/** Relit la liste des copies en cascade à reprendre. */
+export async function refreshPending() {
+  try {
+    offload.pending = await cascadePending();
+    offload.pendingError = null;
+  } catch (e) {
+    offload.pendingError = errorMessage(String(e));
+  }
+}
 
 export function dismissBatteryAlert() {
   offload.batteryAlert = null;
@@ -186,6 +210,11 @@ function applyNotice(n: Notice) {
       ejected: null,
       ejectCode: null,
       startedAt: 0,
+      stage: n.stage ?? (n.cascade_of != null ? 2 : 1),
+      cascadeOf: n.cascade_of ?? null,
+      cascadeJob: null,
+      cardFree: null,
+      cascadeError: null,
     });
     return;
   }
@@ -197,6 +226,7 @@ function applyNotice(n: Notice) {
       break;
     case "dropped":
       if (j.state === "queued" || j.state === "waiting" || j.state === "starting") Object.assign(j, { state: "failed", waitReason: null, dropped: true });
+      void refreshPending();
       break;
     case "starting":
       if (j.state === "queued" || j.state === "waiting") Object.assign(j, { state: "starting", waitReason: null });
@@ -235,11 +265,18 @@ function applyNotice(n: Notice) {
       if (n.ejected && "Ok" in n.ejected) j.ejected = "ok";
       else if (n.ejected && "Err" in n.ejected) j.ejected = n.ejected.Err;
       j.ejectCode = n.eject_code ?? null;
+      if (j.kind === "offload" && j.stage === 1) {
+        j.cardFree = n.card_free ?? false;
+        j.cascadeJob = n.cascade_job ?? null;
+        j.cascadeError = n.cascade_error ?? null;
+      }
+      void refreshPending();
       break;
     case "failed":
       j.state = "failed";
       j.error = n.error;
       j.errorCode = n.error_code ?? null;
+      void refreshPending();
       break;
   }
 }

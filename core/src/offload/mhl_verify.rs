@@ -555,6 +555,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
             known: None,
             overlap: false,
+            expected: None,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         write_generation(&inv, &s, 0, &dest, &spec.algorithms, &MhlAuthor::default()).unwrap();
@@ -823,6 +824,7 @@ mod tests {
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
             overlap: false,
+            expected: None,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
         write_generation(&inv, &s, 0, &dest, &spec.algorithms, &MhlAuthor::default()).unwrap();
