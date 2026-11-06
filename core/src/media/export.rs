@@ -184,14 +184,18 @@ fn ale_frames(c: &EditClip, rate: FrameRate) -> (i64, i64) {
         }
         _ => (l.start_frame as f64 * k).round() as i64,
     };
-    (start, (l.frame_count as f64 * k).round() as i64)
+    // Durée d'un son seul : depuis le nombre d'échantillons, un seul arrondi.
+    let count = match c.sample_count {
+        Some(n) if !l.has_video && l.audio_rate > 0 => {
+            (n as f64 / l.audio_rate as f64 * rate.as_f64()).round() as i64
+        }
+        _ => (l.frame_count as f64 * k).round() as i64,
+    };
+    (start, count)
 }
 
 /// Texte d'un fichier ALE pour des clips ramenés à la cadence `rate`.
 fn ale_text(clips: &[&EditClip], rate: FrameRate, ascii: bool) -> String {
-    let drop = clips
-        .iter()
-        .any(|c| c.log.has_video && c.log.rate == rate && c.log.drop_frame);
     let video_format = clips
         .iter()
         .find(|c| c.log.has_video)
@@ -222,7 +226,7 @@ fn ale_text(clips: &[&EditClip], rate: FrameRate, ascii: bool) -> String {
             s
         }
     };
-    let tc = |frames: i64| Timecode::from_frames(frames, rate, drop).to_string();
+    let tc = |frames: i64, drop: bool| Timecode::from_frames(frames, rate, drop).to_string();
     let mut out = String::new();
     out += "Heading\nFIELD_DELIM\tTABS\n";
     out += &format!(
@@ -253,10 +257,10 @@ fn ale_text(clips: &[&EditClip], rate: FrameRate, ascii: bool) -> String {
     for c in clips {
         let l = &c.log;
         let (start, count) = ale_frames(c, rate);
+        // Mode drop frame propre à chaque clip (un fichier peut mêler DF et NDF).
+        let drop = l.has_video && l.rate == rate && l.drop_frame && rate.supports_drop_frame();
         let channels = match &c.sound {
-            Some(s) => {
-                (s.file.channels as usize).saturating_sub(usize::from(s.file.ltc_channel.is_some()))
-            }
+            Some(s) => s.channels().len(),
             None => l.audio_channels as usize,
         };
         let tracks = format!(
@@ -274,13 +278,13 @@ fn ale_text(clips: &[&EditClip], rate: FrameRate, ascii: bool) -> String {
         let mut row = vec![
             clean(clip_name),
             tracks,
-            tc(start),
-            tc(start + count),
+            tc(start, drop),
+            tc(start + count, drop),
             clean(&file),
             Timecode::from_frames(count, rate, drop).to_string(),
             clean(l.reel.as_deref().unwrap_or(&l.name)),
-            tc(start),
-            tc(start + count),
+            tc(start, drop),
+            tc(start + count, drop),
         ];
         if with_sound {
             match &c.sound {
@@ -295,7 +299,7 @@ fn ale_text(clips: &[&EditClip], rate: FrameRate, ascii: bool) -> String {
                     row.push(
                         s.file
                             .start
-                            .map(|t| tc((t * rate.as_f64()).round() as i64))
+                            .map(|t| tc((t * rate.as_f64()).round() as i64, drop))
                             .unwrap_or_default(),
                     );
                 }
@@ -874,5 +878,46 @@ mod tests {
             rows[1][start],
             Timecode::from_frames(86_314, rate, false).to_string()
         );
+    }
+
+    #[test]
+    fn ale_drop_frame_per_clip() {
+        let rate = FrameRate::new(30000, 1001);
+        let clips = [ale_clip("DF", rate, true), ale_clip("NDF", rate, false)];
+        let f = ale_files(&clips, false);
+        let (cols, rows) = ale_rows(&f[0].1);
+        let at = |r: usize, n: &str| rows[r][cols.iter().position(|c| *c == n).unwrap()];
+        assert_eq!(at(0, "Start"), "01:00:00;00");
+        assert_eq!(at(0, "End"), "01:00:03;10");
+        assert_eq!(at(0, "Mark OUT"), "01:00:03;10");
+        // 107892 images en NDF : 59:56:12 + ... pas de point-virgule.
+        assert!(!at(1, "Start").contains(';') && !at(1, "End").contains(';'));
+        assert!(!at(1, "Duration").contains(';'));
+    }
+
+    #[test]
+    fn ale_sound_only_duration_from_samples_and_ltc_tracks() {
+        let rate = FrameRate::new(24000, 1001);
+        let mut w = ale_clip("W", FrameRate::new(25, 1), false);
+        w.log.has_video = false;
+        w.log.frame_count = 125; // 5 s sur la grille de 25 i/s
+        w.log.audio_rate = 48_000;
+        w.sample_count = Some(240_100);
+        let v = ale_clip("V", rate, false);
+        let mut s = ale_clip("S", rate, false);
+        let mut snd = crate::editorial::testutil::sound(0.0);
+        snd.file.channels = 3;
+        snd.file.ltc_channel = Some(2);
+        s.sound = Some(snd);
+        let f = ale_files(&[v, w, s], false);
+        let (cols, rows) = ale_rows(&f[0].1);
+        let at = |r: usize, n: &str| rows[r][cols.iter().position(|c| *c == n).unwrap()];
+        let exact: f64 = 240_100.0 / 48_000.0 * 24000.0 / 1001.0;
+        assert_eq!(
+            at(1, "Duration"),
+            Timecode::from_frames(exact.round() as i64, rate, false).to_string()
+        );
+        // Trois canaux dont un de LTC : deux pistes son.
+        assert_eq!(at(2, "Tracks"), "VA1A2");
     }
 }

@@ -253,7 +253,7 @@ pub fn to_fcpxml(clips: &[EditClip], opts: &EditOptions) -> String {
             (Some(s), true) if s.attachable(c) => {
                 let sr = s.file.sample_rate.max(1);
                 let k = match sounds.iter().position(|p| *p == s.file.path.as_path()) {
-                    Some(k) => k,
+                    Some(k) => k + 1,
                     None => {
                         sounds.push(&s.file.path);
                         let k = sounds.len();
@@ -571,5 +571,26 @@ mod tests {
             find(&els, "asset-clip")[0]["start"],
             find(&els, "asset")[0]["start"]
         );
+    }
+
+    #[test]
+    fn fcpxml_shared_sound_refs_resolved() {
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        a.sound = Some(wav(0.0));
+        let mut b = clip("B", FrameRate::new(25, 1), 0, false);
+        b.sound = Some(wav(0.5));
+        let els = parse(&to_fcpxml(&[a, b], &EditOptions::default()));
+        let ids: BTreeSet<&str> = find(&els, "asset")
+            .iter()
+            .map(|a| a["id"].as_str())
+            .collect();
+        // Deux clips vidéo + un seul asset de son partagé.
+        assert_eq!(ids.len(), 3);
+        let refs: Vec<&str> = find(&els, "asset-clip")
+            .iter()
+            .map(|a| a["ref"].as_str())
+            .collect();
+        assert_eq!(refs.iter().filter(|r| r.starts_with('s')).count(), 2);
+        assert!(refs.iter().all(|r| ids.contains(r)), "{refs:?}");
     }
 }

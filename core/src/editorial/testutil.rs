@@ -29,6 +29,7 @@ pub fn clip(name: &str, rate: FrameRate, start: i64, drop: bool) -> EditClip {
         meta: BTreeMap::new(),
         sound: None,
         time_reference: None,
+        sample_count: None,
     }
 }
 

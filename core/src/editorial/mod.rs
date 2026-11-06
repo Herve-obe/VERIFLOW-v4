@@ -91,7 +91,12 @@ fn write_new(out: &Path, stem: &str, ext: &str, text: &str) -> Result<PathBuf> {
             .open(&path)
         {
             Ok(mut f) => {
-                f.write_all(text.as_bytes())?;
+                // Écriture ratée : pas de fichier partiel laissé au montage.
+                if let Err(e) = f.write_all(text.as_bytes()) {
+                    drop(f);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(e.into());
+                }
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -100,6 +105,30 @@ fn write_new(out: &Path, stem: &str, ext: &str, text: &str) -> Result<PathBuf> {
     }
     unreachable!("boucle sans fin")
 }
+
+/// Ajoute à l'erreur la liste des fichiers déjà écrits, pour que le message
+/// dise ce qui existe sur le disque.
+fn with_written(e: crate::Error, written: &[PathBuf]) -> crate::Error {
+    if written.is_empty() {
+        return e;
+    }
+    let names: Vec<String> = written
+        .iter()
+        .map(|p| {
+            p.file_name().map_or_else(
+                || p.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    crate::Error::Io(std::io::Error::other(format!(
+        "{e} (déjà écrits : {})",
+        names.join(", ")
+    )))
+}
+
+/// Longueur maximale du nom de fichier tiré du titre, en octets.
+const STEM_MAX_BYTES: usize = 200;
 
 /// Résultat d'un export : fichiers écrits et avertissements à montrer.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -121,7 +150,12 @@ fn file_stem(title: &str) -> String {
             }
         })
         .collect();
-    let s = s.trim_matches(['.', ' ']).to_owned();
+    // Tronqué sans couper un caractère UTF-8.
+    let mut end = s.len().min(STEM_MAX_BYTES);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    let s = s[..end].trim_matches(['.', ' ']).to_owned();
     if s.is_empty() {
         "VERIFLOW".into()
     } else if is_reserved(&s) {
@@ -225,7 +259,10 @@ pub fn export(
         EditFormat::ResolveCsv => files.push((stem, resolve_csv::to_resolve_csv(&clips))),
     }
     for (name, text) in files {
-        res.written.push(write_new(out, &name, ext, &text)?);
+        match write_new(out, &name, ext, &text) {
+            Ok(path) => res.written.push(path),
+            Err(e) => return Err(with_written(e, &res.written)),
+        }
     }
     Ok(res)
 }
@@ -378,6 +415,40 @@ mod tests {
         ] {
             assert_eq!(file_stem(title), stem, "{title}");
         }
+    }
+
+    #[test]
+    fn file_stem_truncated_on_char_boundary() {
+        // « é » fait 2 octets : 150 caractères = 300 octets.
+        let long = "é".repeat(150);
+        let stem = file_stem(&long);
+        assert!(stem.len() <= STEM_MAX_BYTES && stem.len() >= STEM_MAX_BYTES - 1);
+        assert!(stem.chars().all(|c| c == 'é'));
+        assert_eq!(file_stem(&"a".repeat(500)).len(), STEM_MAX_BYTES);
+    }
+
+    #[test]
+    fn failed_format_lists_written_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Cadences mêlées : deux ALE ; le second nom est pris par un dossier.
+        let mixed = [
+            clip("A", FrameRate::new(25, 1), 0, false),
+            clip("B", FrameRate::new(24000, 1001), 0, false),
+        ];
+        std::fs::create_dir(dir.path().join("VERIFLOW_23.976.ale")).unwrap();
+        let err = export(EditFormat::Ale, &mixed, &EditOptions::default(), dir.path());
+        // Le dossier occupe le nom : le fichier suivant prend le suffixe _2, pas d'échec.
+        assert!(err.is_ok());
+        // Sortie qui n'est pas un dossier : échec sans fichier écrit, erreur brute.
+        let file = dir.path().join("plein");
+        std::fs::write(&file, "x").unwrap();
+        assert!(export(EditFormat::Edl, &mixed, &EditOptions::default(), &file).is_err());
+        // Message avec la liste des fichiers déjà écrits.
+        let e = with_written(
+            crate::Error::Io(std::io::Error::other("disque plein")),
+            &[dir.path().join("a.fcpxml"), dir.path().join("b.edl")],
+        );
+        assert!(e.to_string().ends_with("(déjà écrits : a.fcpxml, b.edl)"));
     }
 
     #[test]

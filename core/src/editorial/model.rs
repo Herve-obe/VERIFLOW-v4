@@ -74,6 +74,10 @@ pub struct EditClip {
     /// ALE et FCPXML convertissent depuis ce nombre, une seule fois.
     #[serde(default)]
     pub time_reference: Option<u64>,
+    /// Son seul : durée en échantillons (même cadence), pour une durée ALE à
+    /// un seul arrondi.
+    #[serde(default)]
+    pub sample_count: Option<u64>,
 }
 
 fn filled(s: Option<&String>) -> Option<String> {
@@ -121,6 +125,7 @@ impl EditClip {
             markers,
         };
         let mut time_reference = None;
+        let mut sample_count = None;
         if let Some(v) = probe.and_then(|p| p.video.as_ref()) {
             let p = probe.expect("vidéo sans analyse");
             log.rate = v.rate;
@@ -132,6 +137,7 @@ impl EditClip {
             log.start_frame = p.start_tc().map(|t| t.frames).unwrap_or(0);
         } else {
             time_reference = wav.and_then(|w| w.time_reference);
+            sample_count = wav.map(|w| w.frames);
             let secs = probe
                 .map(|p| p.duration)
                 .or_else(|| wav.map(|w| w.duration()))
@@ -149,6 +155,7 @@ impl EditClip {
             meta: r.values.clone(),
             sound: None,
             time_reference,
+            sample_count,
         }
     }
 }
