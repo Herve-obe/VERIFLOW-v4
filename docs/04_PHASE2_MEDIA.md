@@ -19,6 +19,7 @@ Objectif (charte §7.2) : parcourir les médias, les prévisualiser rapidement, 
 | Lecture des métadonnées intégrées | iXML (projet, scène, prise, bobine, note, prise cerclée, noms de pistes), étiquettes QuickTime / MXF, nom de bobine de la piste timecode |
 | Édition | Un média ou **par lot** (« plusieurs valeurs » si la sélection diffère), enregistrée dans le fichier projet |
 | Exports | **CSV** (Excel), **ALE** (Avid, DaVinci Resolve : Name, Tracks, Start, End, Source File, colonnes de métadonnées), **sidecars XMP** (Premiere, Resolve), **copies de travail** |
+| Exports vers le montage (05/11/2026) | Bouton **Montage…** (EXPERT) : FCPXML, XMEML, EDL, ALE, OTIO, CSV Resolve, clips de chutier sans séquence. Branche `claude/exports-montage`, non fusionnée, non testée sur poste réel. Détail ci-dessous |
 
 ### Règle d'or respectée (charte §5.4)
 Les originaux ne sont **jamais modifiés** :
@@ -56,6 +57,51 @@ Essai réel (Linux) : arbre des volumes, dossier créé pendant que l'applicatio
 ## Mode Débutant (ajout du 03/11/2026)
 
 En niveau DÉBUTANT, les métadonnées sont en lecture seule : les champs ne sont pas modifiables, leur texte reste sélectionnable et copiable, et le bouton Enregistrer est remplacé par une note. Les listes Oui/Non sont désactivées. Aucun enregistrement n'est fait. Les exports CSV, ALE, XMP, la copie de travail et « Ajouter au rapport » sont masqués. « Ouvrir dans le PLAYER » et « Envoyer vers TRANSCODE » restent disponibles. L'avertissement « pas de projet ouvert » n'apparaît qu'en EXPERT. Détail dans la charte, §3.2.
+
+## Exports vers le montage (05/11/2026)
+
+Le bouton **Montage…** de l'onglet MEDIA ouvre la boîte « Exporter vers le montage ». Il est visible en EXPERT seulement, dans le bloc des exports.
+
+**Logiciel de montage.** Le choix du logiciel coche les formats par défaut, modifiables ensuite :
+
+| Logiciel | Formats cochés par défaut |
+|---|---|
+| Final Cut Pro | FCPXML 1.11 |
+| Premiere Pro | XMEML |
+| DaVinci Resolve | FCPXML 1.10 + CSV Resolve |
+| Avid Media Composer | ALE + EDL |
+| Autre | OTIO + EDL |
+
+Formats cochables : FCPXML (version 1.9, 1.10 ou 1.11 au choix), XMEML (v5), EDL (CMX3600), ALE, OTIO, CSV Resolve. Plusieurs formats s'écrivent en un seul clic.
+
+**Portée.** Les clips sélectionnés, ou les clips affichés du dossier, filtres compris.
+
+**Pas d'écrasement.** Un fichier existant n'est jamais remplacé. Le nouveau fichier prend le suffixe `_2`, `_3`, etc. (un nouvel export dans le même dossier donne `..._2`).
+
+**Clips sans séquence.** Les clips sont exportés comme des clips de chutier, sans séquence à vider ni à construire. FCPXML écrit un événement sans projet, XMEML un bin, OTIO une collection. Seule l'EDL est une séquence.
+
+**Métadonnées et marqueurs.** Scène, plan, prise, caméra, bobine, notes, mots-clés et prise cerclée sont écrits dans chaque format qui les accepte. Les marqueurs du PLAYER (point ou plage, avec leur couleur) sont inclus si l'option est cochée.
+
+**FCPXML (1.9 à 1.11).** Le chemin des médias est dans `media-rep`. Correspondances : Scène = « scène/plan », Take = prise, Camera Name = caméra, Camera Angle = champ angle, à défaut la caméra si elle n'a qu'une lettre. Ces correspondances sont à confirmer sur un vrai Final Cut.
+
+**EDL.** Un événement par clip entier. Les marqueurs du PLAYER (points et plages) sont en commentaires `* LOC` à leur entrée.
+
+**Chemins.** Chemins absolus par défaut. Les chemins relatifs ne sont proposés que pour OTIO : ALE ne garde que le nom du fichier (colonne Source File), EDL, FCPXML et XMEML restent en absolu. Les lecteurs réseau (UNC) et les noms avec espaces, accents ou caractères Unicode sont encodés.
+
+**ALE.** Cadence écrite `23.976` (et non 23.98). Si les clips ont des cadences mêlées, un fichier ALE est écrit par cadence. Option « ALE en ASCII (sans accents) » pour les logiciels qui n'acceptent pas les accents.
+
+**CSV Resolve.** Séparateur virgule, UTF-8 sans BOM. Les intitulés des colonnes doivent être confirmés sur un vrai export de DaVinci Resolve (voir `docs/TESTS_EN_ATTENTE.md`).
+
+**Avertissements affichés après l'export.**
+- Cadences mêlées : un ALE par cadence ; l'EDL suit la cadence du premier clip, les durées sont à vérifier.
+- Son synchronisé en XMEML : le décalage est arrondi à l'image entière.
+
+**Son synchronisé (SYNC).** Le cœur sait l'écrire en FCPXML, XMEML, OTIO et ALE, mais la boîte Montage… ne l'envoie pas encore. Il viendra dans une PR suivante, avec l'accord d'Hervé. La piste LTC est retirée du son exporté, sauf en OTIO où elle n'est exclue qu'en métadonnées (pas de sélection de canaux standard).
+
+**Limites.**
+- AAF non pris en charge.
+
+**Contrôle externe.** `scripts/validate-exports.py` relit les fichiers avec OpenTimelineIO (adaptateurs cmx_3600, ale et otio_json). Le FCPXML est contrôlé par ElementTree, car l'adaptateur OTIO fcpx_xml ne lit pas les clips d'un événement. Le XMEML n'a pas d'adaptateur publié : il est seulement vérifié comme XML bien formé.
 
 ## Essais
 - Tests automatiques : catalogue et lecture iXML, champs, édition par lot dans le projet, forme d'onde WAV et FFmpeg (avec découpage de lecture), vignettes et bande d'images, CSV/ALE/XMP, copie de travail WAV (audio identique octet pour octet, original intact, aucun écrasement), copie de travail vidéo (timecode conservé).

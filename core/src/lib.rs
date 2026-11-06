@@ -4,6 +4,7 @@
 //! et réutilisé par une autre interface (charte §5.5).
 
 pub mod battery;
+pub mod editorial;
 pub mod error;
 pub mod explorer;
 pub mod media;

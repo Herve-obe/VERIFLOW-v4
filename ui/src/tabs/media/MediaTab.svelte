@@ -6,6 +6,7 @@
   import Wave from "./Wave.svelte";
   import Inspector from "./Inspector.svelte";
   import { openQuick, onToPlayer } from "../../lib/quick";
+  import EditExportDialog from "../../components/EditExportDialog.svelte";
   import Explorer from "../../components/explorer/Explorer.svelte";
   import { explorer } from "../../stores/explorer.svelte";
   import { watch, norm } from "../../lib/explorer";
@@ -35,6 +36,7 @@
   }
   // « Ouvrir dans le PLAYER » depuis la fenêtre du lecteur rapide.
   onToPlayer((m) => openInPlayer(m.path, m.kind));
+  let editExport = $state(false);
   let status = $state("");
 
   const modeKinds = $derived(app.mode === "audio" ? ["audio"] : ["video", "image"]);
@@ -141,7 +143,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (app.tab !== "media" || isTyping(e.target)) return;
+    if (app.tab !== "media" || editExport || isTyping(e.target)) return;
     if (e.key === " " && selection.length > 0) {
       e.preventDefault();
       quick(selection[0]);
@@ -278,6 +280,7 @@
         <button onclick={() => runExport("csv")}>CSV</button>
         <button onclick={() => runExport("ale")}>ALE</button>
         <button onclick={() => runExport("xmp")}>XMP</button>
+        <button onclick={() => (editExport = true)} disabled={visible.length === 0} title={t("edit.open.hint")}>{t("edit.open")}</button>
         <button onclick={() => runExport("working_copy")} title={t("media.export.working_copy.hint")}>{t("media.export.copy")}</button>
       </div>
     {/if}
@@ -338,6 +341,15 @@
 </div>
 </div>
 
+
+{#if editExport}
+  <EditExportDialog
+    selectionPaths={selection.map((m) => m.path)}
+    folderPaths={visible.map((m) => m.path)}
+    defaultTitle={dir.split(/[\\/]/).filter(Boolean).pop() ?? ""}
+    onClose={() => (editExport = false)}
+  />
+{/if}
 
 <style>
   .layout {
