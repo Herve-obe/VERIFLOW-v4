@@ -33,26 +33,34 @@ fn offset_frames(c: &LogClip, s: &SyncedSound) -> (i64, f64) {
     (exact.round() as i64, (exact - exact.round()).abs())
 }
 
-/// Avertissements d'arrondi : un par clip dont le son synchronisé n'est pas
-/// calé sur une image exacte.
+/// Avertissement d'arrondi, une seule fois : le nombre de clips dont le son
+/// synchronisé n'est pas calé sur une image exacte, leurs noms, et l'écart
+/// le plus grand. Les sons non écrits (sans recouvrement) ne comptent pas.
 pub fn rounding_warnings(clips: &[EditClip]) -> Vec<Warning> {
-    clips
-        .iter()
-        .filter_map(|c| {
-            let s = c.sound.as_ref()?;
-            let (_, gap) = offset_frames(&c.log, s);
-            (gap > ROUNDING_TOLERANCE).then(|| {
-                Warning::new(
-                    "xmeml_rounding",
-                    format!(
-                        "{} : le son synchronisé est arrondi à l'image (écart de {:.1} ms)",
-                        c.log.name,
-                        gap * 1000.0 / c.log.rate.as_f64()
-                    ),
-                )
-            })
-        })
-        .collect()
+    let mut names = Vec::new();
+    let mut worst = 0.0_f64;
+    for c in clips {
+        let Some(s) = c.sound.as_ref().filter(|s| s.attachable(&c.log)) else {
+            continue;
+        };
+        let (_, gap) = offset_frames(&c.log, s);
+        if gap > ROUNDING_TOLERANCE {
+            names.push(c.log.name.clone());
+            worst = worst.max(gap * 1000.0 / c.log.rate.as_f64());
+        }
+    }
+    if names.is_empty() {
+        return Vec::new();
+    }
+    vec![Warning::for_clips(
+        "xmeml_rounding",
+        format!(
+            "XMEML : {} clip(s) dont le son synchronisé est arrondi à l'image (écart maximal {worst:.1} ms) : {}",
+            names.len(),
+            names.join(", ")
+        ),
+        names,
+    )]
 }
 
 /// Écrivain XML indenté.
@@ -120,8 +128,10 @@ enum Kind {
 struct Item {
     id: String,
     kind: Kind,
-    /// Rang de la piste dans son type (1 pour la vidéo).
+    /// Rang de la piste dans son type (1 pour la vidéo, 1..n pour le son).
     track: u32,
+    /// Canal du fichier source (numéroté depuis 1), pour `sourcetrack`.
+    channel: u32,
     /// Fichier source : index dans la liste des fichiers du clip.
     file: usize,
     start: i64,
@@ -143,6 +153,8 @@ struct Source<'a> {
     video: Option<&'a LogClip>,
     channels: u32,
     sample_rate: u32,
+    /// Profondeur des échantillons (16 si inconnue).
+    depth: u32,
 }
 
 fn file(x: &mut Xml, s: &Source) {
@@ -176,7 +188,7 @@ fn file(x: &mut Xml, s: &Source) {
     if s.channels > 0 {
         x.open("audio");
         x.open("samplecharacteristics");
-        x.num("depth", 16);
+        x.num("depth", s.depth as i64);
         x.num("samplerate", s.sample_rate as i64);
         x.close("samplecharacteristics");
         x.num("channelcount", s.channels as i64);
@@ -201,6 +213,9 @@ fn circled(c: &EditClip) -> bool {
 fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
     let l = &c.log;
     let dur = l.frame_count.max(1);
+    // Un son qui ne recouvre pas l'image n'est pas écrit (avertissement
+    // `sound_no_overlap`) : le son de la caméra reste alors.
+    let sound = c.sound.as_ref().filter(|s| s.attachable(l));
     let reel = l.reel.clone().unwrap_or_else(|| l.name.clone());
     let mut sources: Vec<Source> = vec![Source {
         id: format!("file-{n}"),
@@ -209,15 +224,12 @@ fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
         drop: drop_frame(l),
         start: l.start_frame,
         duration: dur,
-        reel: reel.clone(),
+        reel,
         video: l.has_video.then_some(l),
         // Avec un son synchronisé, le son de la caméra n'est pas repris.
-        channels: if c.sound.is_some() {
-            0
-        } else {
-            l.audio_channels
-        },
+        channels: if sound.is_some() { 0 } else { l.audio_channels },
         sample_rate: l.audio_rate,
+        depth: 16,
     }];
     let mut items: Vec<Item> = Vec::new();
     let id = |k: usize| format!("clipitem-{}", *item_base + k);
@@ -226,6 +238,7 @@ fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
             id: id(items.len() + 1),
             kind: Kind::Video,
             track: 1,
+            channel: 1,
             file: 0,
             start: 0,
             end: dur,
@@ -233,13 +246,14 @@ fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
             tout: dur,
         });
     }
-    match &c.sound {
+    match sound {
         None => {
             for ch in 1..=l.audio_channels {
                 items.push(Item {
                     id: id(items.len() + 1),
                     kind: Kind::Audio,
                     track: ch,
+                    channel: ch,
                     file: 0,
                     start: 0,
                     end: dur,
@@ -257,21 +271,25 @@ fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
                 drop: drop_frame(l),
                 start: (f.start.unwrap_or(0.0) * l.rate.as_f64()).round() as i64,
                 duration: (f.duration * l.rate.as_f64()).round() as i64,
-                reel,
+                // Bobine du son : le sound roll, pas la bobine de la caméra.
+                reel: s.roll_name(),
                 video: None,
                 channels: f.channels,
                 sample_rate: f.sample_rate,
+                depth: s.bits.map_or(16, u32::from),
             });
             let (off, _) = offset_frames(l, s);
             let snd_len = (f.duration * l.rate.as_f64()).round() as i64;
             // Son en retard : il démarre dans le clip ; en avance : on entre dans le son.
             let (start, tin) = if off >= 0 { (off, 0) } else { (0, -off) };
             let len = (snd_len - tin).min(dur - start).max(1);
-            for ch in (1..=f.channels).filter(|ch| f.ltc_channel != Some(*ch as usize - 1)) {
+            // Rang de piste 1..n sans la piste de LTC ; le canal source reste celui du fichier.
+            for (rank, ch) in s.channels().into_iter().enumerate() {
                 items.push(Item {
                     id: id(items.len() + 1),
                     kind: Kind::Audio,
-                    track: ch,
+                    track: rank as u32 + 1,
+                    channel: ch,
                     file: 1,
                     start,
                     end: start + len,
@@ -365,7 +383,7 @@ fn master(x: &mut Xml, n: usize, c: &EditClip, item_base: &mut usize) {
             if kind == Kind::Audio {
                 x.open("sourcetrack");
                 x.text("mediatype", "audio");
-                x.num("trackindex", it.track as i64);
+                x.num("trackindex", it.channel as i64);
                 x.close("sourcetrack");
             }
             // Chaque clipitem est relié à tous ceux du clip, lui compris.
@@ -552,7 +570,8 @@ mod tests {
         let w = rounding_warnings(&[c.clone()]);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].code, "xmeml_rounding");
-        assert!(w[0].detail.starts_with("A "));
+        assert_eq!(w[0].clips, ["A"]);
+        assert!(w[0].detail.contains("1 clip(s)") && w[0].detail.ends_with(": A"));
         c.sound = Some(sound(0.48));
         assert!(rounding_warnings(&[c]).is_empty());
     }
@@ -587,5 +606,60 @@ mod tests {
         }
         // Son en avance : on entre dans le son de 5 images.
         assert!(xml.contains("<in>5</in>"));
+    }
+
+    #[test]
+    fn xmeml_link_trackindex_is_track_rank() {
+        let mut c = clip("A", FrameRate::new(25, 1), 0, false);
+        let mut snd = sound(0.0);
+        // Canaux 1, 2 (LTC) et 3 : pistes 1 et 2, canaux source 1 et 3.
+        snd.file.channels = 3;
+        snd.file.ltc_channel = Some(1);
+        snd.roll = Some("ROLL07".into());
+        snd.bits = Some(24);
+        c.sound = Some(snd);
+        let xml = to_xmeml(&[c], &EditOptions::default());
+        let els = parse(&xml);
+        let link_tracks: Vec<&str> = els
+            .iter()
+            .filter(|(n, _, p)| n == "trackindex" && p.last().is_some_and(|l| l == "link"))
+            .map(|(_, t, _)| t.as_str())
+            .collect();
+        // Trois clipitems (1 vidéo, 2 sons), chacun relié aux trois.
+        assert_eq!(link_tracks, ["1", "1", "2"].repeat(3));
+        let source: Vec<&str> = els
+            .iter()
+            .filter(|(n, _, p)| n == "trackindex" && p.last().is_some_and(|l| l == "sourcetrack"))
+            .map(|(_, t, _)| t.as_str())
+            .collect();
+        assert_eq!(source, ["1", "3"]);
+        // Bobine du son et profondeur réelle.
+        assert!(xml.contains("<name>ROLL07</name>"));
+        assert!(xml.contains("<depth>24</depth>"));
+        // Le son de la caméra n'est pas repris : une seule profondeur.
+        assert_eq!(xml.matches("<depth>").count(), 1);
+    }
+
+    #[test]
+    fn xmeml_sound_without_overlap_keeps_camera_audio() {
+        let mut c = clip("A", FrameRate::new(25, 1), 0, false);
+        c.sound = Some(sound(30.0));
+        let xml = to_xmeml(std::slice::from_ref(&c), &EditOptions::default());
+        assert!(!xml.contains("file-1-son"));
+        // 1 vidéo + 2 canaux de la caméra.
+        assert_eq!(xml.matches("<clipitem id=").count(), 3);
+        assert!(rounding_warnings(&[c]).is_empty());
+    }
+
+    #[test]
+    fn xmeml_rounding_single_warning_for_all_clips() {
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        a.sound = Some(sound(0.5));
+        let mut b = clip("B", FrameRate::new(25, 1), 0, false);
+        b.sound = Some(sound(0.5));
+        let w = rounding_warnings(&[a, b]);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].clips, ["A", "B"]);
+        assert!(w[0].detail.contains("2 clip(s)"));
     }
 }

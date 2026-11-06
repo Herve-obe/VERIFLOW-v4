@@ -6,7 +6,11 @@ Usage : VERIFLOW_EXPORTS_DUMP=<dossier> cargo test -p veriflow-core --lib dump_f
 
 Nécessite : pip install opentimelineio otio-cmx3600-adapter otio-fcpx-xml-adapter otio-ale-adapter
 (l'adaptateur fcp_xml, pour le XMEML, n'est pas publié sur PyPI : sans lui, le
-XMEML est seulement vérifié comme XML bien formé).
+XMEML est seulement vérifié comme XML bien formé, sans relecture de ses clips
+ni de ses liens : c'est la limite de ce contrôle.)
+L'adaptateur fcpx_xml ne lit que les projets (séquences) alors que nos FCPXML
+n'ont qu'un événement : leur structure est donc contrôlée ici avec ElementTree
+(bibliothèque, événement, asset-clip, références, au moins un clip).
 <dossier> contient VERIFLOW.{otio,edl,fcpxml,xml,ale,csv} écrits par le test
 `editorial::tests::dump_for_external_check`. Les logs du PLAYER (logs.*) sont
 contrôlés de la même façon si <dossier_logs> est donné
@@ -49,6 +53,27 @@ def show(path: Path, adapter: str, **kw) -> int:
     return n
 
 
+def check_fcpxml(path: Path) -> None:
+    root = ET.parse(path).getroot()
+    assert root.tag == "fcpxml", root.tag
+    event = root.find("library/event")
+    assert event is not None, "library/event absent"
+    resources = root.find("resources")
+    assert resources is not None, "resources absent"
+    ids = {e.get("id") for e in resources if e.get("id")}
+    for a in resources.findall("asset"):
+        assert a.get("src") is None, f"asset {a.get('id')} : src (1.9+ : media-rep)"
+        assert a.find("media-rep") is not None, f"asset {a.get('id')} sans media-rep"
+    clips = event.findall(".//asset-clip")
+    assert clips, "aucun asset-clip dans l'événement"
+    for el in root.iter():
+        for key in ("ref", "format"):
+            v = el.get(key)
+            if v is not None:
+                assert v in ids, f"{el.tag} {key}={v} sans ressource"
+    print(f"== {path.name} (structure FCPXML, {len(clips)} asset-clip, {len(ids)} ressources)")
+
+
 def check_xmeml(path: Path) -> None:
     if "fcp_xml" in otio.adapters.available_adapter_names():
         show(path, "fcp_xml")
@@ -64,14 +89,14 @@ def main() -> None:
     assert show(d / "VERIFLOW.otio", "otio_json") == 3  # 2 clips + le son synchronisé
     # Une EDL ne porte pas sa cadence : celle de l'exemple est 25 i/s.
     show(d / "VERIFLOW.edl", "cmx_3600", rate=25)
-    show(d / "VERIFLOW.fcpxml", "fcpx_xml")
+    check_fcpxml(d / "VERIFLOW.fcpxml")
     check_xmeml(d / "VERIFLOW.xml")
     show(d / "VERIFLOW.ale", "ale", fps=25)
     if len(sys.argv) > 2:
         d = Path(sys.argv[2])
         show(d / "logs.otio", "otio_json")
         show(d / "logs.edl", "cmx_3600", rate=25)
-        show(d / "logs.fcpxml", "fcpx_xml")
+        check_fcpxml(d / "logs.fcpxml")
         show(d / "logs.ale", "ale", fps=25)
     print("OK")
 

@@ -234,6 +234,21 @@ fn sequence_start(rate: FrameRate, drop: bool) -> i64 {
 
 /// Découpe les clips en événements, dans l'ordre des clips puis des plages.
 pub fn events(clips: &[LogClip]) -> Vec<Event<'_>> {
+    build_events(clips, false)
+}
+
+/// Un événement par clip entier, tous les marqueurs (points et plages) en
+/// `points`, dans l'ordre du clip. Sert l'EDL des exports vers le montage.
+pub fn whole_events(clips: &[LogClip]) -> Vec<Event<'_>> {
+    build_events(clips, true)
+}
+
+/// Début d'un marqueur : son entrée pour une plage, sa position pour un point.
+fn marker_start(m: &Marker) -> i64 {
+    m.range().map_or(m.frame, |r| r.0)
+}
+
+fn build_events(clips: &[LogClip], whole: bool) -> Vec<Event<'_>> {
     let (seq_rate, seq_drop) = sequence_rate(clips);
     let mut rec = sequence_start(seq_rate, seq_drop);
     let mut out = Vec::new();
@@ -244,7 +259,7 @@ pub fn events(clips: &[LogClip]) -> Vec<Event<'_>> {
             .filter(|m| m.range().is_some())
             .collect();
         ranges.sort_by_key(|m| m.range());
-        let spans: Vec<(i64, i64, Option<&Marker>)> = if ranges.is_empty() {
+        let spans: Vec<(i64, i64, Option<&Marker>)> = if whole || ranges.is_empty() {
             vec![(0, clip.frame_count.max(1), None)]
         } else {
             ranges
@@ -266,9 +281,11 @@ pub fn events(clips: &[LogClip]) -> Vec<Event<'_>> {
             let mut points: Vec<&Marker> = clip
                 .markers
                 .iter()
-                .filter(|m| m.range().is_none() && m.frame >= src_in && m.frame < src_out)
+                .filter(|m| {
+                    whole || (m.range().is_none() && m.frame >= src_in && m.frame < src_out)
+                })
                 .collect();
-            points.sort_by_key(|m| m.frame);
+            points.sort_by_key(|m| marker_start(m));
             let rec_dur = ((src_out - src_in) as f64 * seq_rate.as_f64() / clip.rate.as_f64())
                 .round()
                 .max(1.0) as i64;
@@ -352,6 +369,16 @@ pub(crate) fn ascii(s: &str) -> String {
 /// EDL CMX3600 : un événement par plage (ou par clip), marqueurs en `* LOC:`
 /// au timecode source (convention Avid, reprise par OpenTimelineIO).
 pub fn to_edl(title: &str, clips: &[LogClip]) -> String {
+    edl_text(title, clips, &events(clips))
+}
+
+/// EDL d'un clip entier par événement, tous les marqueurs (plages comprises,
+/// à leur entrée) en `* LOC:` : rien du clip ni des marqueurs n'est perdu.
+pub fn to_edl_whole(title: &str, clips: &[LogClip]) -> String {
+    edl_text(title, clips, &whole_events(clips))
+}
+
+fn edl_text(title: &str, clips: &[LogClip], evs: &[Event<'_>]) -> String {
     let (seq_rate, seq_drop) = sequence_rate(clips);
     let rec_tc = |f: i64| Timecode::from_frames(f, seq_rate, seq_drop);
     let mut out = format!(
@@ -363,7 +390,7 @@ pub fn to_edl(title: &str, clips: &[LogClip]) -> String {
             "NON-DROP FRAME"
         }
     );
-    for (n, e) in events(clips).iter().enumerate() {
+    for (n, e) in evs.iter().enumerate() {
         let c = e.clip;
         let channel = if c.has_video { "V" } else { "A" };
         out += &format!(
@@ -393,7 +420,7 @@ pub fn to_edl(title: &str, clips: &[LogClip]) -> String {
         for m in &e.points {
             out += &format!(
                 "* LOC: {} {:<7} {}\n",
-                c.tc(m.frame),
+                c.tc(marker_start(m)),
                 m.color.upper(),
                 ascii(&label(m))
             );

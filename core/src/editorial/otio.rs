@@ -126,7 +126,12 @@ fn sound_track(c: &EditClip, s: &SyncedSound, opts: &EditOptions) -> Value {
         range_json(origin + skip, len, srate),
         reference(&path, range_json(origin, total.max(1), srate), opts),
         vec![],
-        json!({ "veriflow": { "synced_with": c.log.name } }),
+        // Canaux exportés (numérotés depuis 1) et canal de LTC, exclu du son.
+        json!({ "veriflow": {
+            "synced_with": c.log.name,
+            "audio_channels": s.channels(),
+            "ltc_channel": f.ltc_channel.map(|ch| ch + 1),
+        } }),
     );
     let mut children = Vec::new();
     if gap > 0 {
@@ -157,7 +162,10 @@ fn one(c: &EditClip, opts: &EditOptions) -> Value {
         markers(l),
         veriflow_meta(c),
     );
-    let Some(s) = &c.sound else { return clip };
+    // Un son qui ne recouvre pas l'image n'est pas écrit (`sound_no_overlap`).
+    let Some(s) = c.sound.as_ref().filter(|s| s.attachable(l)) else {
+        return clip;
+    };
     json!({
         "OTIO_SCHEMA": "Stack.1",
         "name": l.name,
@@ -264,5 +272,22 @@ mod tests {
         assert_eq!(m[0]["marked_range"]["duration"]["value"], 0.0);
         assert_eq!(m[1]["color"], "CYAN");
         assert_eq!(m[1]["marked_range"]["duration"]["value"], 10.0);
+    }
+
+    #[test]
+    fn otio_sound_ltc_metadata_and_no_overlap() {
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        let mut s = sound(0.0);
+        s.file.channels = 3;
+        s.file.ltc_channel = Some(1);
+        a.sound = Some(s);
+        let mut b = clip("B", FrameRate::new(25, 1), 0, false);
+        b.sound = Some(sound(30.0));
+        let v = parse(&[a, b], &EditOptions::default());
+        let meta = &v["children"][0]["children"][1]["children"][0]["metadata"]["veriflow"];
+        assert_eq!(meta["ltc_channel"], 2);
+        assert_eq!(meta["audio_channels"], json!([1, 3]));
+        // Son hors image : le clip reste seul, sans pile.
+        assert_eq!(v["children"][1]["OTIO_SCHEMA"], "Clip.2");
     }
 }

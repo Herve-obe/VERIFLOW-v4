@@ -8,7 +8,7 @@
 
 use super::model::EditClip;
 
-const COLUMNS: [&str; 11] = [
+const COLUMNS: [&str; 10] = [
     "File Name",
     "Clip Directory",
     "Reel Name",
@@ -18,7 +18,6 @@ const COLUMNS: [&str; 11] = [
     "Camera #",
     "Good Take",
     "Comments",
-    "Description",
     "Keywords",
 ];
 
@@ -55,7 +54,6 @@ pub fn to_resolve_csv(clips: &[EditClip]) -> String {
             meta("camera"),
             if good { "true" } else { "false" },
             meta("comment"),
-            meta("description"),
             meta("keywords"),
         ];
         out += &row.iter().map(|s| cell(s)).collect::<Vec<_>>().join(",");
@@ -81,11 +79,11 @@ mod tests {
         let mut lines = csv.lines();
         assert_eq!(
             lines.next().unwrap(),
-            "File Name,Clip Directory,Reel Name,Scene,Shot,Take,Camera #,Good Take,Comments,Description,Keywords"
+            "File Name,Clip Directory,Reel Name,Scene,Shot,Take,Camera #,Good Take,Comments,Keywords"
         );
         assert_eq!(
             lines.next().unwrap(),
-            "A.mov,/m,A001,12,,,,true,\"bonne, \"\"nette\"\"\",,"
+            "A.mov,/m,A001,12,,,,true,\"bonne, \"\"nette\"\"\","
         );
     }
 }

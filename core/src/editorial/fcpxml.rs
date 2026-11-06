@@ -5,7 +5,7 @@
 use crate::player::logs::{fcp_time, label, LogClip, Marker};
 use crate::player::timecode::FrameRate;
 
-use super::model::{EditClip, EditOptions, FcpxmlVersion, SyncedSound};
+use super::model::{EditClip, EditOptions, SyncedSound};
 use super::paths::{url_file, xml_attr};
 
 /// Durée en échantillons : fraction exacte de seconde au pas de 1/`rate`.
@@ -30,15 +30,35 @@ fn tc_format(c: &LogClip) -> &'static str {
     }
 }
 
-/// Source du média : attribut `src` jusqu'à la 1.9, `media-rep` ensuite.
-fn asset(version: FcpxmlVersion, id: &str, attrs: &str, path: &str) -> String {
+/// Ressource média : la source passe par `media-rep` (FCPXML 1.9 et suivants,
+/// l'attribut `src` de l'asset n'existe plus).
+fn asset(id: &str, attrs: &str, path: &str) -> String {
     let url = xml_attr(&url_file(path));
-    if version == FcpxmlVersion::V1_9 {
-        format!("    <asset id=\"{id}\" {attrs} src=\"{url}\"/>\n")
+    format!(
+        "    <asset id=\"{id}\" {attrs}>\n      <media-rep kind=\"original-media\" src=\"{url}\"/>\n    </asset>\n"
+    )
+}
+
+/// Cadence d'échantillonnage d'un son seul (48 kHz à défaut).
+fn sound_rate(c: &LogClip) -> u32 {
+    if c.audio_rate > 0 {
+        c.audio_rate
     } else {
-        format!(
-            "    <asset id=\"{id}\" {attrs}>\n      <media-rep kind=\"original-media\" src=\"{url}\"/>\n    </asset>\n"
-        )
+        48_000
+    }
+}
+
+/// Heure située `frames` images après le début du clip. Un son seul qui a un
+/// time reference part de l'échantillon exact, converti une seule fois.
+fn at(c: &EditClip, frames: i64) -> String {
+    let l = &c.log;
+    match c.time_reference {
+        Some(tr) if !l.has_video => {
+            let sr = sound_rate(l);
+            let extra = (frames as f64 * sr as f64 / l.rate.as_f64()).round() as i64;
+            sample_time(tr as i64 + extra, sr)
+        }
+        _ => fcp_time(l.start_frame + frames, l.rate),
     }
 }
 
@@ -74,7 +94,7 @@ fn extras(c: &EditClip, opts: &EditOptions, ind: &str) -> String {
             };
             out += &format!(
                 "{ind}<marker start=\"{}\" duration=\"{}\" value=\"{}\" note=\"{}\"/>\n",
-                fcp_time(l.start_frame + from, l.rate),
+                at(c, from),
                 fcp_time(len, l.rate),
                 xml_attr(&value),
                 xml_attr(&format!("Couleur : {}", m.color.id())),
@@ -83,7 +103,7 @@ fn extras(c: &EditClip, opts: &EditOptions, ind: &str) -> String {
     }
     let span = format!(
         "start=\"{}\" duration=\"{}\"",
-        fcp_time(l.start_frame, l.rate),
+        at(c, 0),
         fcp_time(dur_frames(l), l.rate)
     );
     if let Some(k) = c.meta.get("keywords").filter(|k| !k.trim().is_empty()) {
@@ -92,20 +112,30 @@ fn extras(c: &EditClip, opts: &EditOptions, ind: &str) -> String {
     if truthy(c.meta.get("circled")) {
         out += &format!("{ind}<rating {span} value=\"favorite\"/>\n");
     }
+    // Clés de métadonnées de Final Cut Pro. Ces correspondances sont à
+    // confirmer sur un export FCP réel (voir docs/TESTS_EN_ATTENTE.md) :
+    // `studio.shot` s'affiche « Take » dans FCP (on y met la prise),
+    // `studio.angle` est le « Camera Angle ».
     let mut md = String::new();
     let mut put = |key: &str, value: Option<&str>| {
         if let Some(v) = value.map(str::trim).filter(|v| !v.is_empty()) {
-            md += &format!(
-                "{ind}  <md key=\"com.apple.proapps.studio.{key}\" value=\"{}\"/>\n",
-                xml_attr(v)
-            );
+            md += &format!("{ind}  <md key=\"{key}\" value=\"{}\"/>\n", xml_attr(v));
         }
     };
-    put("reel", l.reel.as_deref());
-    put("scene", c.meta.get("scene").map(String::as_str));
-    put("shot", c.meta.get("shot").map(String::as_str));
-    put("angle", c.meta.get("angle").map(String::as_str));
-    put("cameraName", c.meta.get("camera").map(String::as_str));
+    let meta = |k: &str| c.meta.get(k).map(|s| s.trim()).filter(|s| !s.is_empty());
+    // Scène, suivie du plan quand les deux existent : « scène/plan ».
+    let scene = match (meta("scene"), meta("shot")) {
+        (Some(sc), Some(sh)) => Some(format!("{sc}/{sh}")),
+        (Some(sc), None) => Some(sc.to_owned()),
+        _ => None,
+    };
+    // Angle : champ « angle », à défaut la lettre de la caméra (« A »).
+    let angle = meta("angle").or_else(|| meta("camera").filter(|c| c.chars().count() == 1));
+    put("com.apple.proapps.studio.reel", l.reel.as_deref());
+    put("com.apple.proapps.studio.scene", scene.as_deref());
+    put("com.apple.proapps.studio.shot", meta("take"));
+    put("com.apple.proapps.studio.angle", angle);
+    put("com.apple.proapps.mio.cameraName", meta("camera"));
     if !md.is_empty() {
         out += &format!("{ind}<metadata>\n{md}{ind}</metadata>\n");
     }
@@ -121,8 +151,12 @@ fn note(c: &EditClip, ind: &str) -> String {
 }
 
 /// Son attaché : décalage au pas de 1/`sample_rate` s, départ d'après l'heure
-/// du fichier (time reference BWF). Rien si le son ne recouvre pas l'image.
+/// du fichier (time reference BWF). Rien si le son ne recouvre pas l'image ou
+/// n'a que le canal de LTC. La piste de LTC est exclue par `audio-channel-source`.
 fn attached_sound(c: &LogClip, s: &SyncedSound, id: &str) -> Option<String> {
+    if !s.attachable(c) {
+        return None;
+    }
     let sr = s.file.sample_rate.max(1);
     let v_sec = c.start_frame as f64 / c.rate.as_f64();
     let v_dur = dur_frames(c) as f64 / c.rate.as_f64();
@@ -130,15 +164,21 @@ fn attached_sound(c: &LogClip, s: &SyncedSound, id: &str) -> Option<String> {
     let lead = s.offset.max(0.0);
     let skip = (-s.offset).max(0.0);
     let dur = (v_dur - lead).min(s.file.duration - skip);
-    if dur <= 0.0 {
-        return None;
-    }
-    Some(format!(
-        "        <asset-clip ref=\"{id}\" lane=\"-1\" offset=\"{}\" name=\"{}\" start=\"{}\" duration=\"{}\" audioRole=\"dialogue\"/>\n",
+    let head = format!(
+        "        <asset-clip ref=\"{id}\" lane=\"-1\" offset=\"{}\" name=\"{}\" start=\"{}\" duration=\"{}\" audioRole=\"dialogue\"",
         sample_time(samples(v_sec + lead, sr), sr),
         xml_attr(&s.file.name),
         sample_time(a_start + samples(skip, sr), sr),
         sample_time(samples(dur, sr).max(1), sr),
+    );
+    let chans = s.channels();
+    if chans.len() as u32 == s.file.channels.max(1) {
+        return Some(format!("{head}/>\n"));
+    }
+    let list: Vec<String> = chans.iter().map(u32::to_string).collect();
+    Some(format!(
+        "{head}>\n          <audio-channel-source srcCh=\"{}\" role=\"dialogue.dialogue-1\"/>\n        </asset-clip>\n",
+        list.join(", ")
     ))
 }
 
@@ -192,12 +232,11 @@ pub fn to_fcpxml(clips: &[EditClip], opts: &EditOptions) -> String {
             String::new()
         };
         res += &asset(
-            version,
             &id,
             &format!(
                 "name=\"{}\" start=\"{}\" duration=\"{}\" hasVideo=\"{}\"{fmt}{audio}",
                 xml_attr(&c.name),
-                fcp_time(c.start_frame, c.rate),
+                at(e, 0),
                 fcp_time(dur_frames(c), c.rate),
                 u8::from(c.has_video),
             ),
@@ -206,12 +245,12 @@ pub fn to_fcpxml(clips: &[EditClip], opts: &EditOptions) -> String {
         let head = format!(
             "name=\"{}\" start=\"{}\" duration=\"{}\" tcFormat=\"{}\"",
             xml_attr(&c.name),
-            fcp_time(c.start_frame, c.rate),
+            at(e, 0),
             fcp_time(dur_frames(c), c.rate),
             tc_format(c)
         );
         let attached = match (&e.sound, c.has_video) {
-            (Some(s), true) => {
+            (Some(s), true) if s.attachable(c) => {
                 let sr = s.file.sample_rate.max(1);
                 let k = match sounds.iter().position(|p| *p == s.file.path.as_path()) {
                     Some(k) => k,
@@ -219,7 +258,6 @@ pub fn to_fcpxml(clips: &[EditClip], opts: &EditOptions) -> String {
                         sounds.push(&s.file.path);
                         let k = sounds.len();
                         res += &asset(
-                            version,
                             &format!("s{k}"),
                             &format!(
                                 "name=\"{}\" start=\"{}\" duration=\"{}\" hasAudio=\"1\" audioSources=\"1\" audioChannels=\"{}\" audioRate=\"{sr}\"",
@@ -273,56 +311,12 @@ pub fn to_fcpxml(clips: &[EditClip], opts: &EditOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editorial::model::FcpxmlVersion;
+    use crate::editorial::testutil::{clip, sound as wav};
     use crate::player::logs::Color;
-    use crate::sync::{SyncFile, TimeSource};
     use quick_xml::events::Event;
     use quick_xml::Reader;
     use std::collections::{BTreeMap, BTreeSet};
-
-    fn clip(name: &str, rate: FrameRate, start: i64, drop: bool) -> EditClip {
-        EditClip {
-            log: LogClip {
-                path: format!("/m/{name}.mov"),
-                name: name.into(),
-                reel: Some("A001".into()),
-                start_frame: start,
-                frame_count: 100,
-                rate,
-                drop_frame: drop,
-                width: 1920,
-                height: 1080,
-                has_video: true,
-                audio_channels: 2,
-                audio_rate: 48000,
-                markers: vec![],
-            },
-            meta: BTreeMap::new(),
-            sound: None,
-        }
-    }
-
-    fn wav(offset: f64) -> SyncedSound {
-        SyncedSound {
-            file: SyncFile {
-                path: "/m/son.wav".into(),
-                name: "son".into(),
-                video: false,
-                start: Some(3600.0),
-                source: TimeSource::Metadata,
-                timecode: None,
-                duration: 60.0,
-                rate: None,
-                width: 0,
-                height: 0,
-                sample_rate: 48000,
-                channels: 2,
-                ltc_channel: None,
-                tracks: vec![],
-                error: None,
-            },
-            offset,
-        }
-    }
 
     /// Éléments avec leurs attributs, dans l'ordre du document.
     fn parse(xml: &str) -> Vec<(String, BTreeMap<String, String>)> {
@@ -387,15 +381,9 @@ mod tests {
             };
             let els = parse(&to_fcpxml(&c, &o));
             assert_eq!(find(&els, "fcpxml")[0]["version"], v.as_str());
-            // media-rep depuis la 1.10, attribut src avant.
-            assert_eq!(
-                find(&els, "media-rep").len(),
-                usize::from(v != FcpxmlVersion::V1_9)
-            );
-            assert_eq!(
-                find(&els, "asset")[0].contains_key("src"),
-                v == FcpxmlVersion::V1_9
-            );
+            // media-rep dès la 1.9, jamais d'attribut src sur l'asset.
+            assert_eq!(find(&els, "media-rep").len(), 1);
+            assert!(!find(&els, "asset")[0].contains_key("src"));
         }
     }
 
@@ -506,6 +494,82 @@ mod tests {
         assert!(md
             .iter()
             .any(|m| m["key"].ends_with(".scene") && m["value"] == "12 \"bis\""));
+        // Une seule lettre de caméra : elle sert aussi d'angle.
+        assert!(md
+            .iter()
+            .any(|m| m["key"] == "com.apple.proapps.studio.angle" && m["value"] == "A"));
         assert!(x.contains("<note>bon &lt;plan&gt;&#10;suite</note>"));
+    }
+
+    #[test]
+    fn fcpxml_final_cut_metadata_keys() {
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        a.meta.insert("scene".into(), "12".into());
+        a.meta.insert("shot".into(), "3".into());
+        a.meta.insert("take".into(), "5".into());
+        a.meta.insert("camera".into(), "Alexa Mini".into());
+        let els = parse(&to_fcpxml(&[a.clone()], &EditOptions::default()));
+        let md: BTreeMap<_, _> = find(&els, "md")
+            .into_iter()
+            .map(|m| (m["key"].as_str(), m["value"].as_str()))
+            .collect();
+        assert_eq!(md["com.apple.proapps.studio.scene"], "12/3");
+        assert_eq!(md["com.apple.proapps.studio.shot"], "5");
+        assert_eq!(md["com.apple.proapps.mio.cameraName"], "Alexa Mini");
+        assert_eq!(md["com.apple.proapps.studio.reel"], "A001");
+        // Pas de lettre de caméra ni d'angle : rien dans studio.angle.
+        assert!(!md.contains_key("com.apple.proapps.studio.angle"));
+        // Plan seul : pas de scène inventée.
+        a.meta.remove("scene");
+        let els = parse(&to_fcpxml(&[a], &EditOptions::default()));
+        assert!(find(&els, "md")
+            .iter()
+            .all(|m| m["key"] != "com.apple.proapps.studio.scene"));
+    }
+
+    #[test]
+    fn fcpxml_sound_ltc_channel_excluded() {
+        let mut e = clip("A", FrameRate::new(25, 1), 0, false);
+        let mut s = wav(0.0);
+        s.file.channels = 3;
+        s.file.ltc_channel = Some(1);
+        e.sound = Some(s);
+        let els = parse(&to_fcpxml(&[e.clone()], &EditOptions::default()));
+        let src = find(&els, "audio-channel-source");
+        assert_eq!(src.len(), 1);
+        assert_eq!(src[0]["srcCh"], "1, 3");
+        // Sans LTC : pas de sélection de canaux.
+        e.sound.as_mut().unwrap().file.ltc_channel = None;
+        let els = parse(&to_fcpxml(&[e], &EditOptions::default()));
+        assert!(find(&els, "audio-channel-source").is_empty());
+    }
+
+    #[test]
+    fn fcpxml_sound_without_overlap_not_written() {
+        let mut e = clip("A", FrameRate::new(25, 1), 0, false);
+        // Le son démarre 10 s après la fin de l'image (4 s).
+        e.sound = Some(wav(10.0));
+        let els = parse(&to_fcpxml(&[e], &EditOptions::default()));
+        assert!(find(&els, "sync-clip").is_empty());
+        assert_eq!(
+            find(&els, "asset").len(),
+            1,
+            "pas de ressource son orpheline"
+        );
+    }
+
+    #[test]
+    fn fcpxml_sound_only_start_from_samples() {
+        let mut w = clip("W", FrameRate::new(25, 1), 90_001, false);
+        w.log.has_video = false;
+        w.log.width = 0;
+        // 3600 s + 1000 échantillons à 48 kHz : pas de passage par 25 i/s.
+        w.time_reference = Some(172_800_000 + 1000);
+        let els = parse(&to_fcpxml(&[w], &EditOptions::default()));
+        assert_eq!(find(&els, "asset")[0]["start"], "172801/48s");
+        assert_eq!(
+            find(&els, "asset-clip")[0]["start"],
+            find(&els, "asset")[0]["start"]
+        );
     }
 }

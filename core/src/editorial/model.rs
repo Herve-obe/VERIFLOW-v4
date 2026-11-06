@@ -17,6 +17,47 @@ pub struct SyncedSound {
     /// Départ du son par rapport au début de la vidéo, en secondes (positif :
     /// le son commence après la première image).
     pub offset: f64,
+    /// Bobine du son : sound roll (iXML TAPE) du fichier de l'enregistreur, à
+    /// défaut le nom du fichier. Ce n'est jamais la bobine de la caméra.
+    #[serde(default)]
+    pub roll: Option<String>,
+    /// Profondeur des échantillons en bits, si connue (16 par défaut à l'export).
+    #[serde(default)]
+    pub bits: Option<u16>,
+}
+
+impl SyncedSound {
+    /// Le son recouvre-t-il l'image du clip ? Sinon aucun format ne l'écrit
+    /// (`sound_no_overlap`).
+    pub fn overlaps(&self, clip: &LogClip) -> bool {
+        let v_dur = clip.frame_count.max(1) as f64 / clip.rate.as_f64();
+        let lead = self.offset.max(0.0);
+        let skip = (-self.offset).max(0.0);
+        (v_dur - lead).min(self.file.duration - skip) > 0.0
+    }
+
+    /// Canaux du son à exporter (numérotés depuis 1), sans la piste de LTC.
+    pub fn channels(&self) -> Vec<u32> {
+        (1..=self.file.channels.max(1))
+            .filter(|ch| self.file.ltc_channel != Some(*ch as usize - 1))
+            .collect()
+    }
+
+    /// Nom de la bobine du son : sound roll, à défaut le nom du fichier.
+    pub fn roll_name(&self) -> String {
+        self.roll
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.file.name.clone())
+    }
+
+    /// Son à écrire dans les formats qui le rangent avec l'image : il
+    /// recouvre l'image et a au moins un canal hors LTC.
+    pub fn attachable(&self, clip: &LogClip) -> bool {
+        self.overlaps(clip) && !self.channels().is_empty()
+    }
 }
 
 /// Clip à exporter : sa description technique et ses marqueurs (`log`), les
@@ -28,6 +69,11 @@ pub struct EditClip {
     pub meta: BTreeMap<String, String>,
     #[serde(default)]
     pub sound: Option<SyncedSound>,
+    /// Son seul : time reference BWF en échantillons (à la cadence
+    /// `log.audio_rate`). `log.start_frame` n'en garde qu'un arrondi à 25 i/s ;
+    /// ALE et FCPXML convertissent depuis ce nombre, une seule fois.
+    #[serde(default)]
+    pub time_reference: Option<u64>,
 }
 
 fn filled(s: Option<&String>) -> Option<String> {
@@ -74,6 +120,7 @@ impl EditClip {
                 .unwrap_or(0),
             markers,
         };
+        let mut time_reference = None;
         if let Some(v) = probe.and_then(|p| p.video.as_ref()) {
             let p = probe.expect("vidéo sans analyse");
             log.rate = v.rate;
@@ -84,6 +131,7 @@ impl EditClip {
             log.drop_frame = p.start_timecode.as_deref().is_some_and(|t| t.contains(';'));
             log.start_frame = p.start_tc().map(|t| t.frames).unwrap_or(0);
         } else {
+            time_reference = wav.and_then(|w| w.time_reference);
             let secs = probe
                 .map(|p| p.duration)
                 .or_else(|| wav.map(|w| w.duration()))
@@ -100,6 +148,7 @@ impl EditClip {
             log,
             meta: r.values.clone(),
             sound: None,
+            time_reference,
         }
     }
 }

@@ -20,16 +20,19 @@ use serde::{Deserialize, Serialize};
 pub use model::{EditClip, EditFormat, EditOptions, FcpxmlVersion, PathMode, SyncedSound};
 
 use crate::media::export::ale_files;
-use crate::player::logs::{fps_text, to_edl, LogClip};
+use crate::player::logs::{fps_text, to_edl_whole, LogClip};
 use crate::Result;
 
 /// Avertissement structuré : `code` permet à l'interface de le traduire
-/// (`ale_mixed_rates`, `edl_mixed_rates`, `xmeml_rounding`), `detail` garde le
-/// texte français complet.
+/// (`ale_mixed_rates`, `edl_mixed_rates`, `xmeml_rounding`,
+/// `sound_no_overlap`), `detail` garde le texte français complet. Un code
+/// n'est émis qu'une fois par export ; `clips` liste les clips concernés.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Warning {
     pub code: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clips: Vec<String>,
 }
 
 impl Warning {
@@ -37,8 +40,65 @@ impl Warning {
         Self {
             code: code.to_owned(),
             detail: detail.into(),
+            clips: Vec::new(),
         }
     }
+
+    /// Avertissement qui porte sur ces clips.
+    pub fn for_clips(code: &str, detail: impl Into<String>, clips: Vec<String>) -> Self {
+        Self {
+            clips,
+            ..Self::new(code, detail)
+        }
+    }
+}
+
+/// Avertissement des sons synchronisés qui ne recouvrent pas l'image : ils ne
+/// sont pas écrits (FCPXML, XMEML, OTIO).
+fn no_overlap_warning(clips: &[EditClip]) -> Option<Warning> {
+    let names: Vec<String> = clips
+        .iter()
+        .filter(|c| c.sound.as_ref().is_some_and(|s| !s.overlaps(&c.log)))
+        .map(|c| c.log.name.clone())
+        .collect();
+    (!names.is_empty()).then(|| {
+        Warning::for_clips(
+            "sound_no_overlap",
+            format!(
+                "{} clip(s) : le son synchronisé ne recouvre pas l'image, il n'est pas écrit ({})",
+                names.len(),
+                names.join(", ")
+            ),
+            names,
+        )
+    })
+}
+
+/// Fichier créé sans jamais en écraser un : si `stem.ext` existe, essaie
+/// `stem_2.ext`, `stem_3.ext`... Rend le chemin réellement écrit.
+fn write_new(out: &Path, stem: &str, ext: &str, text: &str) -> Result<PathBuf> {
+    use std::io::Write;
+    for n in 1u32.. {
+        let name = if n == 1 {
+            format!("{stem}.{ext}")
+        } else {
+            format!("{stem}_{n}.{ext}")
+        };
+        let path = out.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                f.write_all(text.as_bytes())?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    unreachable!("boucle sans fin")
 }
 
 /// Résultat d'un export : fichiers écrits et avertissements à montrer.
@@ -64,9 +124,23 @@ fn file_stem(title: &str) -> String {
     let s = s.trim_matches(['.', ' ']).to_owned();
     if s.is_empty() {
         "VERIFLOW".into()
+    } else if is_reserved(&s) {
+        format!("_{s}")
     } else {
         s
     }
+}
+
+/// Nom réservé par Windows (CON, PRN, AUX, NUL, COM1-9, LPT1-9), avec ou sans
+/// extension (« CON.fcpxml » l'est aussi).
+fn is_reserved(name: &str) -> bool {
+    let base = name.split('.').next().unwrap_or("").trim_end();
+    let up = base.to_ascii_uppercase();
+    matches!(up.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|p| {
+            up.strip_prefix(p)
+                .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+        })
 }
 
 fn mixed_rates(clips: &[EditClip]) -> bool {
@@ -77,7 +151,9 @@ fn mixed_rates(clips: &[EditClip]) -> bool {
 /// Écrit `clips` au `format` voulu dans le dossier `out` (créé au besoin),
 /// sous le nom du titre. Les chemins relatifs le sont par rapport à
 /// `opts.base`, à défaut au dossier `out`. Un ALE n'ayant qu'une cadence, des
-/// cadences mêlées donnent un fichier par cadence.
+/// cadences mêlées donnent un fichier par cadence. Un fichier existant n'est
+/// jamais écrasé : le nom prend un suffixe `_2`, `_3`... (`written` rend le
+/// vrai chemin). L'EDL garde chaque clip entier, tous ses marqueurs en `* LOC`.
 pub fn export(
     format: EditFormat,
     clips: &[EditClip],
@@ -86,7 +162,9 @@ pub fn export(
 ) -> Result<EditResult> {
     std::fs::create_dir_all(out)?;
     let mut opts = opts.clone();
-    if opts.base.is_none() {
+    // Base absente ou vide : le dossier du fichier écrit, seul à donner des
+    // chemins relatifs justes.
+    if opts.base.as_ref().is_none_or(|b| b.as_os_str().is_empty()) {
         opts.base = Some(out.to_path_buf());
     }
     let mut clips = clips.to_vec();
@@ -100,8 +178,12 @@ pub fn export(
     let mut res = EditResult::default();
     let mut files: Vec<(String, String)> = Vec::new();
     match format {
-        EditFormat::Fcpxml => files.push((stem, fcpxml::to_fcpxml(&clips, &opts))),
+        EditFormat::Fcpxml => {
+            res.warnings.extend(no_overlap_warning(&clips));
+            files.push((stem, fcpxml::to_fcpxml(&clips, &opts)));
+        }
         EditFormat::Xmeml => {
+            res.warnings.extend(no_overlap_warning(&clips));
             res.warnings.extend(xmeml::rounding_warnings(&clips));
             files.push((stem, xmeml::to_xmeml(&clips, &opts)));
         }
@@ -113,7 +195,7 @@ pub fn export(
                 ));
             }
             let logs: Vec<LogClip> = clips.iter().map(|c| c.log.clone()).collect();
-            files.push((stem, to_edl(&opts.title, &logs)));
+            files.push((stem, to_edl_whole(&opts.title, &logs)));
         }
         EditFormat::Ale => {
             let ales = ale_files(&clips, opts.ale_ascii);
@@ -136,13 +218,14 @@ pub fn export(
                 files.push((name, text));
             }
         }
-        EditFormat::Otio => files.push((stem, otio::to_otio_bin(&clips, &opts))),
+        EditFormat::Otio => {
+            res.warnings.extend(no_overlap_warning(&clips));
+            files.push((stem, otio::to_otio_bin(&clips, &opts)));
+        }
         EditFormat::ResolveCsv => files.push((stem, resolve_csv::to_resolve_csv(&clips))),
     }
     for (name, text) in files {
-        let path = out.join(format!("{name}.{ext}"));
-        std::fs::write(&path, text)?;
-        res.written.push(path);
+        res.written.push(write_new(out, &name, ext, &text)?);
     }
     Ok(res)
 }
@@ -214,6 +297,108 @@ mod tests {
         // Clip entier (100 images) malgré la plage des marqueurs.
         assert_eq!(edl.matches("A001").count(), 1);
         assert!(edl.contains("01:00:00;00 01:00:03;10 01:00:00;00 01:00:03;10"));
+    }
+
+    #[test]
+    fn edl_markers_keep_whole_clip() {
+        let mut a = clip("A", FrameRate::new(25, 1), 90_000, false);
+        a.log.markers = vec![
+            testutil::marker(&a, 10, Some((10, 19)), crate::player::logs::Color::Red),
+            testutil::marker(&a, 50, None, crate::player::logs::Color::Green),
+            testutil::marker(&a, 80, Some((80, 89)), crate::player::logs::Color::Blue),
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        // markers = true par défaut.
+        export(EditFormat::Edl, &[a], &EditOptions::default(), dir.path()).unwrap();
+        let edl = std::fs::read_to_string(dir.path().join("VERIFLOW.edl")).unwrap();
+        // Un seul événement, clip entier (100 images), sans perte de marqueur.
+        assert_eq!(edl.matches("* FROM CLIP NAME").count(), 1);
+        assert!(edl.contains("01:00:00:00 01:00:04:00 01:00:00:00 01:00:04:00"));
+        assert_eq!(edl.matches("* LOC:").count(), 3);
+        assert!(edl.contains("* LOC: 01:00:00:10 RED"));
+        assert!(edl.contains("* LOC: 01:00:02:00 GREEN"));
+        assert!(edl.contains("* LOC: 01:00:03:05 BLUE"));
+    }
+
+    #[test]
+    fn otio_relative_url_uses_output_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        a.log.path = dir.path().join("rushes/J1/A.mov").display().to_string();
+        let out = dir.path().join("montage");
+        for base in [None, Some(PathBuf::new())] {
+            let opts = EditOptions {
+                paths: PathMode::Relative,
+                base,
+                ..Default::default()
+            };
+            let r = export(EditFormat::Otio, std::slice::from_ref(&a), &opts, &out).unwrap();
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&r.written[0]).unwrap()).unwrap();
+            assert_eq!(
+                v["children"][0]["media_references"]["DEFAULT_MEDIA"]["target_url"],
+                "../rushes/J1/A.mov"
+            );
+        }
+    }
+
+    #[test]
+    fn export_never_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = [clip("A", FrameRate::new(25, 1), 0, false)];
+        let opts = EditOptions::default();
+        let first = export(EditFormat::Edl, &a, &opts, dir.path()).unwrap();
+        let first_text = std::fs::read_to_string(&first.written[0]).unwrap();
+        std::fs::write(&first.written[0], "ORIGINAL").unwrap();
+        let second = export(EditFormat::Edl, &a, &opts, dir.path()).unwrap();
+        let third = export(EditFormat::Edl, &a, &opts, dir.path()).unwrap();
+        assert_eq!(second.written[0], dir.path().join("VERIFLOW_2.edl"));
+        assert_eq!(third.written[0], dir.path().join("VERIFLOW_3.edl"));
+        assert_eq!(
+            std::fs::read_to_string(&first.written[0]).unwrap(),
+            "ORIGINAL"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&second.written[0]).unwrap(),
+            first_text
+        );
+    }
+
+    #[test]
+    fn file_stem_reserved_windows_names() {
+        for (title, stem) in [
+            ("CON", "_CON"),
+            ("nul", "_nul"),
+            ("Lpt3.v2", "_Lpt3.v2"),
+            ("com1", "_com1"),
+            ("Console", "Console"),
+            ("COM10", "COM10"),
+            ("COM0", "COM0"),
+            ("", "VERIFLOW"),
+        ] {
+            assert_eq!(file_stem(title), stem, "{title}");
+        }
+    }
+
+    #[test]
+    fn no_overlap_warning_once_with_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = clip("A", FrameRate::new(25, 1), 0, false);
+        a.sound = Some(testutil::sound(30.0));
+        let mut b = clip("B", FrameRate::new(25, 1), 0, false);
+        b.sound = Some(testutil::sound(40.0));
+        let ok = clip("C", FrameRate::new(25, 1), 0, false);
+        let r = export(
+            EditFormat::Fcpxml,
+            &[a, b, ok],
+            &EditOptions::default(),
+            dir.path(),
+        )
+        .unwrap();
+        assert_eq!(r.warnings.len(), 1);
+        assert_eq!(r.warnings[0].code, "sound_no_overlap");
+        assert_eq!(r.warnings[0].clips, ["A", "B"]);
+        assert!(r.warnings[0].detail.contains("A, B"));
     }
 
     /// Écrit un exemple de chaque format dans `$VERIFLOW_EXPORTS_DUMP`

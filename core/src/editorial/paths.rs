@@ -15,8 +15,21 @@ enum Root {
     None,
 }
 
+/// Retire le préfixe de chemin étendu de Windows : `\\?\C:\x` devient
+/// `C:\x`, `\\?\UNC\srv\p` devient `\\srv\p`. Entrée avec « / ».
+fn strip_extended(p: String) -> String {
+    let head = |n: usize| p.get(..n).unwrap_or("");
+    if head(8).eq_ignore_ascii_case("//?/UNC/") {
+        format!("//{}", &p[8..])
+    } else if head(4) == "//?/" {
+        p[4..].to_owned()
+    } else {
+        p
+    }
+}
+
 fn split(path: &str) -> (Root, Vec<String>) {
-    let p = path.replace('\\', "/");
+    let p = strip_extended(path.replace('\\', "/"));
     let parts = |s: &str| -> Vec<String> {
         s.split('/')
             .filter(|x| !x.is_empty() && *x != ".")
@@ -167,6 +180,23 @@ mod tests {
         assert_eq!(
             url_xmeml("/Volumes/SSD/A.mov"),
             "file://localhost/Volumes/SSD/A.mov"
+        );
+    }
+
+    #[test]
+    fn extended_prefix_removed() {
+        assert_eq!(
+            url_file(r"\\?\C:\Rushes\A001.mov"),
+            "file:///C:/Rushes/A001.mov"
+        );
+        assert_eq!(
+            url_xmeml(r"\\?\UNC\serveur\partage\a.mov"),
+            "file://serveur/partage/a.mov"
+        );
+        assert_eq!(url_file(r"\\?\unc\srv\p\x y.mov"), "file://srv/p/x%20y.mov");
+        assert_eq!(
+            relative(r"\\?\C:\Prod\Rushes\x.mov", r"C:\Prod\Montage"),
+            "../Rushes/x.mov"
         );
     }
 

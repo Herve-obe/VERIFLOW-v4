@@ -170,17 +170,21 @@ const ALE_DEFAULT_RATE: FrameRate = FrameRate::new(25, 1);
 
 /// Début et durée d'un clip, en images à la cadence `rate` du fichier ALE. Un
 /// clip d'une autre cadence (ou un son, noté sur la grille de 25 i/s) est
-/// converti par les secondes.
+/// converti par les secondes. Le départ d'un son seul vient de son time
+/// reference en échantillons, converti une seule fois.
 fn ale_frames(c: &EditClip, rate: FrameRate) -> (i64, i64) {
     let l = &c.log;
     if l.has_video && l.rate == rate {
         return (l.start_frame, l.frame_count);
     }
     let k = rate.as_f64() / l.rate.as_f64();
-    (
-        (l.start_frame as f64 * k).round() as i64,
-        (l.frame_count as f64 * k).round() as i64,
-    )
+    let start = match c.time_reference {
+        Some(tr) if !l.has_video && l.audio_rate > 0 => {
+            (tr as f64 / l.audio_rate as f64 * rate.as_f64()).round() as i64
+        }
+        _ => (l.start_frame as f64 * k).round() as i64,
+    };
+    (start, (l.frame_count as f64 * k).round() as i64)
 }
 
 /// Texte d'un fichier ALE pour des clips ramenés à la cadence `rate`.
@@ -848,6 +852,27 @@ mod tests {
             d.probe.unwrap().start_timecode.as_deref(),
             Some("10:00:00:00"),
             "timecode conservé"
+        );
+    }
+
+    #[test]
+    fn ale_sound_only_start_from_samples_2398() {
+        let rate = FrameRate::new(24000, 1001);
+        let video = ale_clip("V", rate, false);
+        let mut w = ale_clip("W", FrameRate::new(25, 1), false);
+        w.log.has_video = false;
+        // 3600 s + 1000 échantillons : 25 i/s donnerait 90001 images puis 86315.
+        w.log.start_frame = 90_001;
+        w.log.audio_rate = 48_000;
+        w.time_reference = Some(172_800_000 + 1000);
+        let f = ale_files(&[video, w], false);
+        let (cols, rows) = ale_rows(&f[0].1);
+        let start = cols.iter().position(|c| *c == "Start").unwrap();
+        let exact: f64 = (3600.0 + 1000.0 / 48_000.0) * 24000.0 / 1001.0;
+        assert_eq!(exact.round() as i64, 86_314);
+        assert_eq!(
+            rows[1][start],
+            Timecode::from_frames(86_314, rate, false).to_string()
         );
     }
 }

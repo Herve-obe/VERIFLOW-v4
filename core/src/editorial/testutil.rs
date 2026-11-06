@@ -28,6 +28,7 @@ pub fn clip(name: &str, rate: FrameRate, start: i64, drop: bool) -> EditClip {
         },
         meta: BTreeMap::new(),
         sound: None,
+        time_reference: None,
     }
 }
 
@@ -52,6 +53,8 @@ pub fn sound(offset: f64) -> SyncedSound {
             error: None,
         },
         offset,
+        roll: None,
+        bits: None,
     }
 }
 
