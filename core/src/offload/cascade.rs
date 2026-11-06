@@ -16,11 +16,13 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::engine::{
-    check_space, run, DestStatus, Event, FileResult, Hashes, OffloadSpec, OffloadSummary,
+    check_space, run, temp_path, DestStatus, Event, FileResult, Hashes, OffloadSpec, OffloadSummary,
 };
 use super::hash::{hash_data, HashAlgo};
 use super::job::{overlap_allowed, JobResult, MhlFailure};
-use super::mhl::{write_cascade_generation, Action, GenEntry, MhlAuthor, REPORTS_DIR};
+use super::mhl::{
+    plain_file_name, write_cascade_generation, Action, GenEntry, MhlAuthor, REPORTS_DIR,
+};
 use super::mhl_read::{load_history, nfc, read_chain, to_path, History, MHL_DIR};
 use super::report::{write_reports, CascadeInfo, ReportData, ReportFiles, ReportInfo};
 use super::scan::{scan, SourceInventory};
@@ -158,6 +160,9 @@ pub fn error_code(e: &Error) -> Option<&'static str> {
     match e {
         Error::Report(m) if m.starts_with("cascade_no_source : ") => Some("cascade_no_source"),
         Error::Report(m) if m.starts_with("no_space : ") => Some("no_space"),
+        Error::Report(m) if m.starts_with("cascade_store_unreadable : ") => {
+            Some("cascade_store_unreadable")
+        }
         Error::Unsupported(m) if m.starts_with("cascade_no_immediate : ") => {
             Some("cascade_no_immediate")
         }
@@ -263,12 +268,38 @@ fn copy_identical(src: &Path, dst: &Path) -> bool {
         if dst.exists() {
             return Ok(fs::read(dst)? == bytes);
         }
-        let tmp = dst.with_extension("vfpart");
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(&bytes)?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, dst)?;
+        // Temporaire du moteur (`.nom.vfpart`), puis publication sans jamais
+        // remplacer un fichier apparu entre-temps : lien dur (atomique, refusé si
+        // la cible existe), ou à défaut création exclusive.
+        let tmp = temp_path(dst);
+        let published = (|| -> std::io::Result<bool> {
+            let mut f = fs::File::create(&tmp)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+            drop(f);
+            match fs::hard_link(&tmp, dst) {
+                Ok(()) => Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+                Err(_) => {
+                    let mut out = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(dst)?;
+                    let written = out.write_all(&bytes).and_then(|_| out.sync_all());
+                    if let Err(e) = written {
+                        drop(out);
+                        let _ = fs::remove_file(dst);
+                        return Err(e);
+                    }
+                    Ok(true)
+                }
+            }
+        })();
+        let _ = fs::remove_file(&tmp);
+        if !published? {
+            // Apparu entre-temps : conforme seulement s'il est identique.
+            return Ok(fs::read(dst)? == bytes);
+        }
         let same = fs::read(dst)? == bytes;
         if !same {
             let _ = fs::remove_file(dst);
@@ -284,7 +315,8 @@ fn copy_identical(src: &Path, dst: &Path) -> bool {
 fn copy_stage1_reports(source: &Path, dests: &[PathBuf], names: &[String]) -> Vec<(usize, usize)> {
     let names: Vec<&String> = names
         .iter()
-        .filter(|n| source.join(REPORTS_DIR).join(n).is_file())
+        // Noms venus du JSON : simples noms de fichier seulement.
+        .filter(|n| plain_file_name(n) && source.join(REPORTS_DIR).join(n).is_file())
         .collect();
     dests
         .iter()
@@ -440,10 +472,11 @@ static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 fn read_store(path: &Path) -> Result<Vec<PendingCascade>> {
     match fs::read(path) {
-        Ok(bytes) => serde_json::from_slice(&bytes)
-            .map_err(|e| Error::Report(format!("étapes 2 en attente illisibles : {e}"))),
+        Ok(bytes) => {
+            serde_json::from_slice(&bytes).map_err(|e| cascade_err("cascade_store_unreadable", e))
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(e) => Err(e.into()),
+        Err(e) => Err(cascade_err("cascade_store_unreadable", e)),
     }
 }
 
@@ -914,6 +947,9 @@ mod tests {
         let pending = res.cascade.unwrap();
         let store = dir.path().join("data/offload_cascades.json");
         assert!(load(&store).unwrap().is_empty());
+        // Chemin illisible (un dossier) : erreur à code stable.
+        let unreadable = load(dir.path()).unwrap_err();
+        assert_eq!(error_code(&unreadable), Some("cascade_store_unreadable"));
         save(&store, &pending).unwrap();
         save(&store, &pending).unwrap(); // même clé : remplacée
         let mut other = pending.clone();
@@ -1070,5 +1106,75 @@ mod tests {
         assert_eq!(message(&e), "cascade_no_source : y");
         let e = Error::Report("autre chose".into());
         assert_eq!(message(&e), "rapport : autre chose");
+    }
+
+    #[test]
+    fn sha256_only_with_cascade_adds_xxh128_and_stage2_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let mut req = request(&src, &[dir.path().join("SSD")], &[dir.path().join("HDD")]);
+        req.algorithms = vec![HashAlgo::Sha256];
+        let pre = preflight(&req).unwrap();
+        assert_eq!(pre.added_algorithms, vec!["xxh128".to_string()]);
+        let res = execute_stage1(&req, pre, &no_cancel(), |_| {}, None, None).unwrap();
+        assert!(res.card_free);
+        let pending = res.cascade.expect("étape 2");
+        assert!(pending.algorithms.contains(&HashAlgo::Xxh128));
+        assert!(pending.algorithms.contains(&HashAlgo::Sha256));
+        let out = execute(&pending, &no_cancel(), |_| {}).unwrap();
+        assert_eq!(out.summary.failed_files, 0);
+        assert!(out.mhl[0].is_some());
+        // Sans étape 2, la demande n'est pas modifiée.
+        let mut plain = req.clone();
+        plain.cascade.clear();
+        assert!(preflight(&plain).unwrap().added_algorithms.is_empty());
+    }
+
+    #[test]
+    fn resolve_stages_fixes_the_split_once() {
+        use crate::offload::job::{planned_roots, resolve_stages};
+        let dirs: Vec<PathBuf> = ["/a", "/b", "/c"].map(PathBuf::from).to_vec();
+        let mut req = request(Path::new("/carte"), &dirs, &[PathBuf::from("/d")]);
+        req.cascade_auto = true;
+        req.roots = Some(vec!["/x/1".into(), "/x/2".into(), "/x/3".into()]);
+        let stages = vec![1, 2, 1, 2];
+        let fixed = resolve_stages(&req, &stages);
+        assert_eq!(fixed.destinations, vec![PathBuf::from("/a"), "/c".into()]);
+        assert_eq!(fixed.cascade, vec![PathBuf::from("/b"), "/d".into()]);
+        assert!(!fixed.cascade_auto);
+        assert_eq!(fixed.roots.as_ref().unwrap().len(), 2);
+        assert_eq!(fixed.roots.as_ref().unwrap()[1], PathBuf::from("/x/3"));
+        // Même découpage quel que soit le matériel : plus de choix automatique.
+        let again = crate::offload::job::split_cascade(&fixed, |_| true).unwrap();
+        assert_eq!(again, vec![1, 1, 2, 2]);
+        assert_eq!(planned_roots(&fixed).len(), 4);
+    }
+
+    #[test]
+    fn copy_identical_never_replaces_and_leaves_no_temporary() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("a.csv");
+        fs::write(&src, b"contenu").unwrap();
+        let dst = dir.path().join("b.csv");
+        assert!(copy_identical(&src, &dst));
+        assert_eq!(fs::read(&dst).unwrap(), b"contenu");
+        assert!(!temp_path(&dst).exists());
+        fs::write(&dst, b"autre").unwrap();
+        assert!(!copy_identical(&src, &dst));
+        assert_eq!(fs::read(&dst).unwrap(), b"autre");
+        // Noms de rapports venant du JSON : ceux qui sortent du dossier sont ignorés.
+        let report_dir = dir.path().join("etape1/_VERIFLOW");
+        fs::create_dir_all(&report_dir).unwrap();
+        fs::write(report_dir.join("ok.csv"), b"x").unwrap();
+        fs::write(dir.path().join("etape1/hors.csv"), b"x").unwrap();
+        let dest = dir.path().join("dest");
+        let names = vec!["ok.csv".to_string(), "../hors.csv".to_string()];
+        let copied = copy_stage1_reports(
+            &dir.path().join("etape1"),
+            std::slice::from_ref(&dest),
+            &names,
+        );
+        assert_eq!(copied, vec![(1, 1)]);
+        assert!(!dest.join("hors.csv").exists());
     }
 }

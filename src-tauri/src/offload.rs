@@ -14,8 +14,8 @@ use veriflow_core::offload::cascade::{self, PendingCascade};
 use veriflow_core::offload::engine::Event;
 use veriflow_core::offload::existing::{self, CheckProgress, DestCheck, Known};
 use veriflow_core::offload::job::{
-    execute, local_date, planned_roots, preflight, render_template, split_cascade, JobResult,
-    OffloadRequest, Preflight, TemplateVars,
+    execute, local_date, planned_roots, preflight, render_template, resolve_stages, split_cascade,
+    JobResult, OffloadRequest, Preflight, TemplateVars,
 };
 use veriflow_core::offload::mhl_read::{self, MhlInfo};
 use veriflow_core::offload::mhl_verify::{verify_root, VerifySummary};
@@ -479,8 +479,16 @@ fn run_cascade(app: &AppHandle, id: u64, pending: &PendingCascade, cancel: &Atom
                 }
             }
             if stage2_conform(&result) {
-                if let Ok(path) = cascade_store(app) {
-                    let _ = cascade::remove(&path, &pending.key);
+                let removed = cascade_store(app)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| {
+                        cascade::remove(&path, &pending.key).map_err(|e| cascade::message(&e))
+                    });
+                if let Err(detail) = removed {
+                    eprintln!(
+                        "étape 2 de {} conforme mais non retirée de la liste à reprendre : {detail}",
+                        pending.card
+                    );
                 }
             }
             send(Notice::Done {
@@ -823,12 +831,34 @@ pub async fn offload_start(
     let abs_source = veriflow_core::absolute_path(&request.source);
     // Étape de chaque destination (lecture des volumes) ; refus sans
     // destination immédiate (`cascade_no_immediate`).
-    let (request, stages) = tauri::async_runtime::spawn_blocking(move || {
-        split_cascade(&request, storage::is_slow).map(|s| (request, s))
+    // Les étapes ne sont calculées qu'ici : la demande est ensuite résolue
+    // (listes explicites, sans choix automatique) pour que l'exécution copie
+    // exactement les destinations réservées par l'ordonnancement.
+    let (request, stages, order) = tauri::async_runtime::spawn_blocking(move || {
+        split_cascade(&request, storage::is_slow).map(|stages| {
+            let order: Vec<usize> = (0..stages.len())
+                .filter(|&i| stages[i] == 1)
+                .chain((0..stages.len()).filter(|&i| stages[i] != 1))
+                .collect();
+            let resolved = resolve_stages(&request, &stages);
+            let n1 = resolved.destinations.len();
+            let stages: Vec<u8> = (0..stages.len())
+                .map(|i| if i < n1 { 1 } else { 2 })
+                .collect();
+            (resolved, stages, order)
+        })
     })
     .await
     .map_err(text)?
     .map_err(|e| cascade::message(&e))?;
+    // Vérification préalable faite dans l'ordre d'origine : même ordre que la
+    // demande résolue (étape 1 puis étape 2).
+    let known = known.map(|mut k| {
+        if k.identical.len() == order.len() {
+            k.identical = order.iter().map(|&i| k.identical[i].clone()).collect();
+        }
+        k
+    });
     enqueue(
         &app,
         &state.shared,
@@ -1128,7 +1158,7 @@ pub async fn offload_cascade_pending(
     let list = tauri::async_runtime::spawn_blocking(move || cascade::load(&path))
         .await
         .map_err(text)?
-        .map_err(text)?;
+        .map_err(|e| cascade::message(&e))?;
     let active: HashMap<String, u64> = lock(&state.shared.cascades)
         .iter()
         .map(|(id, key)| (key.clone(), *id))
@@ -1166,7 +1196,7 @@ pub async fn offload_cascade_resume(
     let list = tauri::async_runtime::spawn_blocking(move || cascade::load(&path))
         .await
         .map_err(text)?
-        .map_err(text)?;
+        .map_err(|e| cascade::message(&e))?;
     let pending = list
         .into_iter()
         .find(|p| p.key == key)
@@ -1211,7 +1241,7 @@ pub async fn offload_cascade_discard(
         .await
         .map_err(text)?
         .map(|_| ())
-        .map_err(text)
+        .map_err(|e| cascade::message(&e))
 }
 
 #[cfg(test)]

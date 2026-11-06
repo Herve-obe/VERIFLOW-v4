@@ -414,7 +414,7 @@ pub fn cascade_error_code(e: &Error) -> Option<&'static str> {
 }
 
 /// Simple nom de fichier : ni séparateur, ni `..`, ni lecteur.
-fn plain_file_name(name: &str) -> bool {
+pub(super) fn plain_file_name(name: &str) -> bool {
     !name.is_empty() && !name.contains("..") && !name.contains(['/', '\\', ':'])
 }
 

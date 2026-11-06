@@ -812,16 +812,21 @@ fn copy_stage(
         match exp.get(&super::mhl_read::nfc(&file.rel)) {
             None => Some("absent de l'historique de l'étape 1"),
             Some(want) => {
+                let common = source_hashes
+                    .iter()
+                    .any(|(algo, _)| want.iter().any(|(a, _)| a == algo));
                 let differs = source_hashes.iter().any(|(algo, hex)| {
                     want.iter()
                         .any(|(a, w)| a == algo && !same_digest(*algo, w, hex))
                 });
                 // Aucun algorithme commun : rien ne prouve l'identité.
-                let common = source_hashes
-                    .iter()
-                    .any(|(algo, _)| want.iter().any(|(a, _)| a == algo));
-                (differs || !common)
-                    .then_some("source de l'étape 2 différente de la copie vérifiée de l'étape 1")
+                if !common {
+                    Some("aucune empreinte commune avec l'historique de l'étape 1")
+                } else {
+                    differs.then_some(
+                        "source de l'étape 2 différente de la copie vérifiée de l'étape 1",
+                    )
+                }
             }
         }
     });
@@ -1876,6 +1881,28 @@ mod tests {
         assert_eq!(partials(&d2[0]), 0);
         // Les autres fichiers sont copiés normalement.
         assert!(d2[0].join("CLIP/C0001.MP4").exists());
+    }
+
+    #[test]
+    fn expected_hashes_without_common_algorithm_fails_with_clear_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = card(dir.path());
+        let d1 = [dir.path().join("D1/A001")];
+        let d2 = [dir.path().join("D2/A001")];
+        let inv = scan(&src).unwrap();
+        let first = run(&inv, &spec(&d1), &AtomicBool::new(false), |_| {}).unwrap();
+        // L'historique n'a plus que du MD5 alors que la copie calcule XXH128 seul.
+        let mut exp = expected_of(&first);
+        for h in exp.values_mut() {
+            h.retain(|(a, _)| *a == HashAlgo::Md5);
+        }
+        let mut sp = spec(&d2);
+        sp.algorithms = vec![HashAlgo::Xxh128];
+        sp.expected = Some(exp);
+        let s = run(&inv, &sp, &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(s.failed_files, s.files.len());
+        assert!(s.files.iter().all(|f| matches!(&f.destinations[0],
+            DestStatus::Failed(m) if m == "aucune empreinte commune avec l'historique de l'étape 1")));
     }
 
     #[test]

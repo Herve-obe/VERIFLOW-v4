@@ -138,6 +138,10 @@ pub struct Preflight {
     /// elle ne bloque pas la copie de la carte (l'étape 2 recontrôle l'espace
     /// à son démarrage). Toujours null pour une destination de l'étape 1.
     pub cascade_space_warning: Vec<Option<u64>>,
+    /// Algorithmes ajoutés d'office (identifiants, ex. `xxh128`) : avec une
+    /// étape 2, l'historique MHL de l'étape 1 doit contenir au moins une
+    /// empreinte (SHA-256 seul n'y figure pas). Vide sinon.
+    pub added_algorithms: Vec<String>,
     /// Destinations contenant déjà une copie vérifiée (historique ascmhl).
     pub already_in_destination: Vec<bool>,
     /// Rushes de la source déjà présents dans chaque destination.
@@ -192,6 +196,51 @@ pub fn split_cascade(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> R
         ));
     }
     Ok(stages)
+}
+
+/// Demande équivalente avec les étapes résolues : `destinations` ne garde que
+/// l'étape 1, `cascade` toute l'étape 2, sans choix automatique. Les étapes
+/// sont ainsi calculées une fois (lecture des volumes) puis transmises à
+/// l'exécution, qui ne les recalcule pas.
+pub fn resolve_stages(req: &OffloadRequest, stages: &[u8]) -> OffloadRequest {
+    let n = req.destinations.len();
+    let stage_of = |i: usize| stages.get(i).copied().unwrap_or(1);
+    let all = all_destinations(req);
+    let mut out = req.clone();
+    out.destinations = (0..all.len())
+        .filter(|&i| stage_of(i) == 1)
+        .map(|i| all[i].clone())
+        .collect();
+    out.cascade = (0..all.len())
+        .filter(|&i| stage_of(i) != 1)
+        .map(|i| all[i].clone())
+        .collect();
+    out.cascade_auto = false;
+    // Dossiers imposés (reprise) : ceux des destinations restées immédiates.
+    out.roots = req.roots.as_ref().filter(|r| r.len() == n).map(|r| {
+        (0..n)
+            .filter(|&i| stage_of(i) == 1)
+            .map(|i| r[i].clone())
+            .collect()
+    });
+    out
+}
+
+/// Algorithmes de la copie. Avec une étape 2, XXH128 est ajouté d'office si
+/// aucun algorithme n'entre dans le MHL : sans empreinte dans l'historique de
+/// l'étape 1, l'étape 2 n'aurait rien à comparer. Renvoie aussi les ajouts.
+fn stage_algorithms(requested: &[HashAlgo], has_cascade: bool) -> (Vec<HashAlgo>, Vec<HashAlgo>) {
+    let mut algos = if requested.is_empty() {
+        vec![HashAlgo::Xxh128]
+    } else {
+        requested.to_vec()
+    };
+    let mut added = Vec::new();
+    if has_cascade && !algos.iter().any(|a| a.in_mhl()) {
+        algos.push(HashAlgo::Xxh128);
+        added.push(HashAlgo::Xxh128);
+    }
+    (algos, added)
 }
 
 /// Dossiers finals d'après le nom de source et la date (source de vérité
@@ -277,6 +326,11 @@ fn preflight_with(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> Resu
             }
         })
         .collect();
+    let added_algorithms = stage_algorithms(&req.algorithms, stages.contains(&2))
+        .1
+        .iter()
+        .map(|a| a.id().to_owned())
+        .collect();
     let space = check_space(&inv, &roots);
     let stage_space = |wanted: u8| -> Vec<Option<u64>> {
         space
@@ -292,6 +346,7 @@ fn preflight_with(req: &OffloadRequest, is_slow: impl Fn(&Path) -> bool) -> Resu
         fingerprint: inv.fingerprint.clone(),
         missing_space: stage_space(1),
         cascade_space_warning: stage_space(2),
+        added_algorithms,
         already_in_destination: roots
             .iter()
             .map(|r| r.join("ascmhl/ascmhl_chain.xml").exists())
@@ -317,7 +372,7 @@ impl MhlFailure {
     pub(super) fn of(e: &Error) -> MhlFailure {
         MhlFailure {
             code: cascade::error_code(e).map(str::to_owned),
-            message: e.to_string(),
+            message: cascade::message(e),
         }
     }
 }
@@ -385,11 +440,7 @@ pub fn execute(
     let overlap = overlap_allowed(&roots1, super::storage::is_hdd);
     let spec = OffloadSpec {
         destinations: roots1,
-        algorithms: if req.algorithms.is_empty() {
-            vec![HashAlgo::Xxh128]
-        } else {
-            req.algorithms.clone()
-        },
+        algorithms: stage_algorithms(&req.algorithms, !roots2.is_empty()).0,
         known: match req.existing {
             ExistingMode::Complete => known,
             _ => None,
