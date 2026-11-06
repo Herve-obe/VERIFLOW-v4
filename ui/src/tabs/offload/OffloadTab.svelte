@@ -12,10 +12,10 @@
   import { drag, dropZone, startNativeDrop } from "../../stores/drag.svelte";
   import { app } from "../../stores/app.svelte";
   import { isBeginner } from "../../stores/level.svelte";
-  import { offload, listenOffload, dismissBatteryAlert } from "../../stores/offload.svelte";
+  import { offload, listenOffload, dismissBatteryAlert, refreshPending } from "../../stores/offload.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary } from "../../lib/format";
-  import { ALGORITHMS, DEFAULT_TSA, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, cardInfo, type CardInfo, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
+  import { ALGORITHMS, DEFAULT_TSA, MAX_PARALLEL_JOBS, volumes, preflight, start, batteryWarning, reveal, templatePreview, cardInfo, cascadeResume, cascadeDiscard, errorMessage, type CardInfo, type StageChoice, type ExistingMode, type HashAlgo, type PreflightView, type BatteryWarning, type Volume, type OffloadRequest } from "../../lib/offload";
 
   const SETTINGS_KEY = "veriflow.offload.settings";
 
@@ -31,6 +31,7 @@
     /** Horodatage RFC 3161 du PDF et adresse de l'autorité. */
     tsa: boolean;
     tsaUrl: string;
+    stages: Record<string, StageChoice>;
   }
 
   function loadSettings(): Settings {
@@ -41,6 +42,7 @@
       thumbnails: true,
       tsa: false,
       tsaUrl: DEFAULT_TSA,
+      stages: {},
       ...structuredClone($state.snapshot(prefs.offload)),
     };
     try {
@@ -61,6 +63,10 @@
   let thumbnails = $state(saved.thumbnails);
   let tsa = $state(saved.tsa);
   let tsaUrl = $state(saved.tsaUrl);
+  // Étape voulue par destination ; absent = Auto.
+  let stageChoice = $state<Record<string, StageChoice>>(saved.stages ?? {});
+  // Étape que le cœur choisit pour les destinations en Auto, quand d'autres sont forcées.
+  let autoRes = $state<{ key: string; stages: Record<string, number> } | null>(null);
   let jour = $state("");
   let camera = $state("");
   let notes = $state("");
@@ -102,7 +108,7 @@
   );
 
   $effect(() => {
-    const s: Settings = { destinations, template, algorithms, operator, eject, logo, thumbnails, tsa, tsaUrl };
+    const s: Settings = { destinations, template, algorithms, operator, eject, logo, thumbnails, tsa, tsaUrl, stages: stageChoice };
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
     } catch {
@@ -114,9 +120,56 @@
   // valeurs EXPERT enregistrées (SETTINGS_KEY) ne sont jamais écrasées.
   const BEGINNER: Partial<OffloadRequest> = { template: "{date}/{carte}", algorithms: ["xxh128"], notes: null, logo: null, thumbnails: true, timestamp: null };
 
+  const choiceOf = (d: string): StageChoice => stageChoice[d] ?? "auto";
+  // En DÉBUTANT, pas de sélecteur : toutes les destinations restent en Auto.
+  const allAuto = $derived(isBeginner() || destinations.every((d) => choiceOf(d) === "auto"));
+  const destKey = $derived(JSON.stringify(destinations));
+
+  /** Étape de chaque destination quand une au moins est forcée (Auto : choix du cœur, 1 par défaut). */
+  function resolved(d: string): 1 | 2 {
+    const c = choiceOf(d);
+    if (c === "immediate") return 1;
+    if (c === "cascade") return 2;
+    return autoRes && autoRes.key === destKey && autoRes.stages[d] === 2 ? 2 : 1;
+  }
+
+  /** Listes envoyées au cœur et ordre des dossiers du préflight (destinations puis cascade). */
+  const plan = $derived.by(() => {
+    if (allAuto) return { auto: true, dests: destinations, cascade: [] as string[] };
+    return {
+      auto: false,
+      dests: destinations.filter((d) => resolved(d) === 1),
+      cascade: destinations.filter((d) => resolved(d) === 2),
+    };
+  });
+  const planOrder = $derived([...plan.dests, ...plan.cascade]);
+  /** Rang de la destination dans les résultats du préflight. */
+  const preIndex = (d: string) => planOrder.indexOf(d);
+  const stageOf = (d: string): number | null => pre?.stages[preIndex(d)] ?? null;
+
+  // Destinations en Auto alors que d'autres sont forcées : on demande au cœur
+  // comment il répartirait toutes les destinations.
+  $effect(() => {
+    const key = destKey;
+    if (allAuto || !source || destinations.length === 0 || algorithms.length === 0) return;
+    if (autoRes && autoRes.key === key) return;
+    const dests = [...destinations];
+    const r: OffloadRequest = { source, destinations: dests, template, vars: { projet: null, jour: null, camera: null }, algorithms: ["xxh128"], operator: null, notes: null, cascade: [], cascade_auto: true };
+    preflight(r)
+      .then((p) => {
+        if (key !== JSON.stringify(destinations)) return;
+        autoRes = { key, stages: Object.fromEntries(dests.map((d, i) => [d, p.stages[i] ?? 1])) };
+      })
+      .catch((e) => {
+        if (key === JSON.stringify(destinations)) error = cascadeText(e);
+      });
+  });
+
   const request = (): OffloadRequest => ({
     source,
-    destinations,
+    destinations: plan.dests,
+    cascade: plan.cascade,
+    cascade_auto: plan.auto,
     template: effTemplate,
     vars: resuming && resumeReq ? resumeReq.vars : { projet: app.project?.name ?? null, jour: jour || null, camera: camera || null },
     algorithms: effAlgorithms,
@@ -199,7 +252,11 @@
     source = r.source;
     resumeSource = r.source;
     resumeDate = r.date ?? null;
-    destinations = [...r.destinations];
+    destinations = [...r.destinations, ...(r.cascade ?? [])];
+    stageChoice = Object.fromEntries([
+      ...(r.cascade_auto ? [] : r.destinations.map((d) => [d, "immediate"])),
+      ...(r.cascade ?? []).map((d) => [d, "cascade"]),
+    ]);
     resumeReq = { ...r, algorithms: [...r.algorithms] };
     notes = r.notes ?? "";
     jour = r.vars.jour ?? "";
@@ -237,7 +294,7 @@
       try {
         pre = await preflight(r);
       } catch (e) {
-        error = String(e);
+        error = cascadeText(e);
       } finally {
         checking = false;
       }
@@ -276,7 +333,44 @@
   }
 
   const noSpace = $derived(pre?.missing_space.some((m) => m !== null) ?? false);
-  const canStart = $derived(!!pre && !noSpace && !checking);
+  // Toutes les destinations sont en cascade : aucune copie immédiate possible.
+  const allCascade = $derived(destinations.length > 0 && destinations.every((d) => choiceOf(d) === "cascade"));
+  const noImmediate = $derived(allCascade || (!!pre && pre.stages.length > 0 && !pre.stages.includes(1)));
+  const singleCopy = $derived(!!pre && pre.stages.includes(2) && pre.stages.filter((s) => s === 1).length === 1);
+  const canStart = $derived(!!pre && !noSpace && !checking && !noImmediate);
+
+  function setChoice(d: string, c: StageChoice) {
+    stageChoice = { ...stageChoice, [d]: c };
+  }
+
+  /** Erreurs du pont sous la forme « code : détail » : texte traduit si le code est connu. */
+  function cascadeText(e: unknown): string {
+    return errorMessage(String(e));
+  }
+
+  async function resumeCascade(key: string) {
+    try {
+      await cascadeResume(key);
+    } catch (e) {
+      error = cascadeText(e);
+    }
+    await refreshPending();
+  }
+
+  async function discardCascade(key: string, card: string) {
+    const yes = await ask(t("offload.cascade.discard_confirm").replace("{card}", card), {
+      title: t("offload.cascade.discard"),
+      ok: t("offload.cascade.discard"),
+      kind: "danger",
+    });
+    if (!yes) return;
+    try {
+      await cascadeDiscard(key);
+    } catch (e) {
+      error = cascadeText(e);
+    }
+    await refreshPending();
+  }
 
   function batteryText(w: BatteryWarning): string {
     const key = w.reason === "short" ? "offload.battery.short" : w.reason === "low" ? "offload.battery.low" : w.percent === null ? "offload.battery.long_nopercent" : "offload.battery.long";
@@ -362,7 +456,7 @@
       resumeSource = "";
       resumeReq = null;
     } catch (e) {
-      error = String(e);
+      error = cascadeText(e);
     }
   }
 
@@ -376,6 +470,7 @@
   onMount(() => {
     listenOffload();
     refreshVolumes();
+    void refreshPending();
   });
 </script>
 
@@ -452,9 +547,28 @@
         <div class="row dest">
           <span class="num">{i + 1}</span>
           <span class="path mono" title={d}>{d}</span>
-          {#if pre?.hdd[i]}<span class="warn" title={t("offload.hdd")}>HDD</span>{/if}
+          {#if pre?.hdd[preIndex(d)]}<span class="warn" title={t("offload.hdd")}>HDD</span>{/if}
+          {#if stageOf(d)}<span class="stage" class:s2={stageOf(d) === 2}>{t(stageOf(d) === 2 ? "offload.cascade.stage2" : "offload.cascade.stage1")}</span>{/if}
+          {#if !isBeginner()}
+          <select
+            class="stage-pick"
+            aria-label={t("offload.dest.stage")}
+            value={choiceOf(d)}
+            onchange={(e) => {
+              setChoice(d, e.currentTarget.value as StageChoice);
+              e.currentTarget.blur();
+            }}
+          >
+            <option value="auto">{t("offload.dest.auto")}</option>
+            <option value="immediate">{t("offload.dest.immediate")}</option>
+            <option value="cascade">{t("offload.dest.cascade")}</option>
+          </select>
+          {/if}
           <button class="ghost small" onclick={() => (destinations = destinations.filter((x) => x !== d))} aria-label={t("offload.remove")}>✕</button>
         </div>
+        {#if pre?.cascade_space_warning?.[preIndex(d)]}
+          <p class="warn">{t("offload.cascade.space_warning").replace("{size}", bytes(pre.cascade_space_warning[preIndex(d)] ?? 0))}</p>
+        {/if}
       {/each}
       <button class="add" onclick={addDestination}>+ {t("offload.dest.add")}</button>
       <p class="muted small">{t("offload.drop.dest")}</p>
@@ -514,6 +628,7 @@
     {/if}
 
     <div class="block summary" bind:this={summaryEl}>
+      {#if noImmediate}<p class="error">{t("offload.cascade.need_immediate")}</p>{/if}
       {#if checking}
         <p class="muted">{t("offload.checking")}</p>
       {:else if error}
@@ -523,6 +638,7 @@
         {#each pre.roots as r, i (r)}
           <p class="mono small">
             {i + 1}. {r}
+            {#if pre.stages[i] === 2}<span class="stage s2">{t("offload.cascade.stage2")}</span>{/if}
             {#if pre.missing_space[i] !== null}<span class="error"> {t("offload.space.missing")} {bytes(pre.missing_space[i] ?? 0)}</span>{/if}
             {#if pre.present[i].files > 0 || pre.present[i].partial > 0}
               <span class="warn"> {t("offload.present.short")} {pre.present[i].files} ({bytes(pre.present[i].bytes)})</span>
@@ -546,6 +662,10 @@
             <p class="note small">{t("offload.elsewhere.hint")}</p>
           </div>
         {/if}
+        {#if pre.added_algorithms?.length}
+          <p class="note small">{t("offload.cascade.added_algo").replace("{algos}", pre.added_algorithms.map((a) => ALGORITHMS.find((x) => x.id === a)?.label ?? a.toUpperCase()).join(", "))}</p>
+        {/if}
+        {#if singleCopy}<p class="warn">{t("offload.cascade.single_copy_warning")}</p>{/if}
         {#if pre.previous.length > 0}<p class="warn">{t("offload.warn.previous")}</p>{/if}
         {#if pre.source_hdd || pre.hdd.some((h) => h)}<p class="warn">{t("offload.hdd")}</p>{/if}
         {#if pre.battery}<p class="warn">{batteryText(pre.battery)}</p>{/if}
@@ -566,6 +686,24 @@
         <span>{alertText(offload.batteryAlert)}</span>
         <button onclick={dismissBatteryAlert}>{t("offload.battery.dismiss")}</button>
       </p>
+    {/if}
+    {#if offload.pendingError}
+      <p class="error pending-error">{t("offload.cascade.pending_error").replace("{detail}", offload.pendingError)}</p>
+    {/if}
+    {#if offload.pending.length > 0}
+      <div class="pending">
+        <h3>{t("offload.cascade.pending_title")}</h3>
+        {#each offload.pending as p (p.key)}
+          <div class="row">
+            <span class="path mono" title={p.stage2_roots.join("\n")}>{p.card} : {p.stage2_roots.join(", ")}</span>
+            <span class="small muted">{p.files} {t("offload.files")}, {bytes(p.total_bytes)}, {p.finished_at}</span>
+            {#if !p.stage1_available}<span class="small error">{t("offload.cascade.stage1_missing")}</span>{/if}
+            {#if p.job !== null}<span class="small muted">{t("offload.cascade.active")}</span>{/if}
+            <button disabled={!p.stage1_available || p.job !== null} onclick={() => resumeCascade(p.key)}>{t("offload.cascade.resume")}</button>
+            <button class="ghost" onclick={() => discardCascade(p.key, p.card)}>{t("offload.cascade.discard")}</button>
+          </div>
+        {/each}
+      </div>
     {/if}
     {#each offload.jobs as job (job.id)}
       <JobCard {job} />
@@ -803,5 +941,45 @@
   }
   .error {
     color: var(--vf-error);
+  }
+  .stage {
+    flex: none;
+    font-size: var(--vf-text-xs);
+    font-weight: 600;
+    padding: 1px var(--vf-space-2);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    color: var(--vf-text-muted);
+  }
+  /* L'étape 2 se distingue de l'étape 1 par la couleur d'accent, pas seulement par le texte. */
+  .stage.s2 {
+    color: var(--vf-accent);
+    border-color: var(--vf-accent);
+  }
+  .stage-pick {
+    flex: none;
+    background: var(--vf-bg);
+    color: var(--vf-text);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+    padding: var(--vf-space-1) var(--vf-space-2);
+    font-size: var(--vf-text-xs);
+  }
+  .pending {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vf-space-2);
+    padding: var(--vf-space-3);
+    background: var(--vf-surface);
+    border: 1px solid var(--vf-warning);
+    border-radius: var(--vf-radius-md);
+  }
+  .pending .row {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .pending button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 </style>

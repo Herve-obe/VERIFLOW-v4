@@ -10,11 +10,12 @@ use std::thread;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+use veriflow_core::offload::cascade::{self, PendingCascade};
 use veriflow_core::offload::engine::Event;
 use veriflow_core::offload::existing::{self, CheckProgress, DestCheck, Known};
 use veriflow_core::offload::job::{
-    execute, local_date, planned_roots, preflight, render_template, JobResult, OffloadRequest,
-    Preflight, TemplateVars,
+    execute, local_date, planned_roots, preflight, render_template, resolve_stages, split_cascade,
+    JobResult, OffloadRequest, Preflight, TemplateVars,
 };
 use veriflow_core::offload::mhl_read::{self, MhlInfo};
 use veriflow_core::offload::mhl_verify::{verify_root, VerifySummary};
@@ -32,14 +33,17 @@ fn text<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-/// Genre de travail : copie, ou revérification d'un disque par son historique
-/// ASC MHL.
+/// Genre de travail : copie (étape 1), étape 2 d'une copie en cascade, ou
+/// revérification d'un disque par son historique ASC MHL.
 enum JobKind {
     Offload {
         request: Box<OffloadRequest>,
         eject: bool,
         /// Empreintes établies par la vérification des rushes présents.
         known: Option<Known>,
+    },
+    Cascade {
+        pending: Box<PendingCascade>,
     },
     Verify {
         root: PathBuf,
@@ -79,6 +83,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Shared {
     sched: Arc<Mutex<Sched>>,
     cancels: Cancels,
+    /// Étapes 2 en file ou en cours : numéro du travail et clé de l'étape 2
+    /// (une même étape 2 n'est jamais en double).
+    cascades: Arc<Mutex<HashMap<u64, String>>>,
 }
 
 pub struct OffloadState {
@@ -97,6 +104,11 @@ enum Notice {
     Queued {
         job: u64,
         source: String,
+        /// 1 (copie de la carte) ou 2 (étape 2 en cascade).
+        stage: u8,
+        /// Étape 2 : numéro du travail de l'étape 1 qui l'a mise en file
+        /// (absent après un redémarrage, quand elle est reprise à la main).
+        cascade_of: Option<u64>,
     },
     /// Le travail attend (raison : limit, source_busy, root_busy, hdd_busy,
     /// space) ; renvoyé seulement quand la raison change.
@@ -144,6 +156,17 @@ enum Notice {
         #[serde(skip_serializing_if = "Option::is_none")]
         report_error: Option<String>,
         ejected: Option<Result<(), String>>,
+        /// Étape 1 : la carte peut être éjectée (toutes les destinations de
+        /// l'étape 1 vérifiées). Toujours faux pour une étape 2 ou une vérification.
+        card_free: bool,
+        /// Étape 1 : numéro du travail de l'étape 2 mis en file.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cascade_job: Option<u64>,
+        /// Étape 1 : l'étape 2 n'a pas pu être inscrite sur disque (elle est
+        /// quand même en file, mais ne survivrait pas à un redémarrage). Texte
+        /// « cascade_store : détail ».
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cascade_error: Option<String>,
         /// Code stable de l'échec d'éjection (traduction côté interface) :
         /// `source_in_use_eject` ou `eject_not_removable`. Absent si l'échec
         /// vient du système (texte de `ejected`).
@@ -153,7 +176,9 @@ enum Notice {
         job: u64,
         error: String,
         /// Code stable pour la traduction : `no_space`, `job_panic`,
-        /// `job_spawn`, `no_history`, `mhl_v1`, `nested_history`. Absent : seul le texte `error` est affichable.
+        /// `job_spawn`, `no_history`, `mhl_v1`, `nested_history`,
+        /// `cascade_history`, `cascade_diverged`, `cascade_no_source`,
+        /// `cascade_no_immediate`. Absent : seul le texte `error` est affichable.
         error_code: Option<&'static str>,
     },
 }
@@ -246,39 +271,87 @@ fn dispatch(app: &AppHandle, shared: &Shared) {
     }
 }
 
+/// Oublie l'annulation et l'étape 2 réservée d'un travail (ordre des verrous :
+/// file, annulations, étapes 2).
+fn release(shared: &Shared, id: u64) {
+    lock(&shared.cancels).remove(&id);
+    lock(&shared.cascades).remove(&id);
+}
+
 /// Libère les ressources d'un travail terminé (même en erreur) et relance
 /// l'ordonnancement.
 fn finish(app: &AppHandle, shared: &Shared, id: u64) {
-    lock(&shared.cancels).remove(&id);
+    release(shared, id);
     lock(&shared.sched).running.remove(&id);
     dispatch(app, shared);
 }
 
+/// Volume d'un dossier (le dossier lui-même si le volume est introuvable).
+fn volume_or(p: &Path) -> PathBuf {
+    storage::volume_of(p)
+        .map(|v| v.mount_point)
+        .unwrap_or_else(|| p.to_path_buf())
+}
+
 /// Ressources d'une demande : volumes, disques durs, octets à écrire. Lent
 /// (lecture des volumes) : hors du fil de l'interface. `total_bytes` vient du
-/// préflight de l'interface ; absent, la source est inventoriée.
-fn claim_for(request: &OffloadRequest, total_bytes: Option<u64>) -> Claim {
+/// préflight de l'interface ; absent, la source est inventoriée. `stages` :
+/// étape de chaque destination (`destinations` puis `cascade`) ; seules celles
+/// de l'étape 1 sont copiées par ce travail.
+fn claim_for(request: &OffloadRequest, total_bytes: Option<u64>, stages: &[u8]) -> Claim {
     let source = veriflow_core::absolute_path(&request.source);
-    let volume_or = |p: &Path| {
-        storage::volume_of(p)
-            .map(|v| v.mount_point)
-            .unwrap_or_else(|| p.to_path_buf())
-    };
     // Inventaire en échec : le travail échouera de lui-même au lancement.
     let bytes = total_bytes.unwrap_or_else(|| scan(&source).map(|i| i.total_bytes).unwrap_or(0));
+    let immediate = |i: &usize| stages.get(*i).copied().unwrap_or(1) == 1;
+    let roots: Vec<PathBuf> = planned_roots(request)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| immediate(i))
+        .map(|(_, r)| r)
+        .collect();
+    let dest_volumes = request
+        .destinations
+        .iter()
+        .chain(&request.cascade)
+        .enumerate()
+        .filter(|(i, _)| immediate(i))
+        .map(|(_, d)| {
+            let d = veriflow_core::absolute_path(d);
+            (volume_or(&d), storage::is_hdd(&d), bytes)
+        })
+        .collect();
     Claim {
         source_volume: volume_or(&source),
         source_hdd: storage::is_hdd(&source),
-        roots: planned_roots(request),
-        dest_volumes: request
-            .destinations
+        roots,
+        dest_volumes,
+        source,
+        deferred: false,
+    }
+}
+
+/// Ressources de l'étape 2 : lecture de la copie de l'étape 1 (dossier SSD),
+/// écriture des destinations lentes. Différée : passe après les copies de cartes.
+fn claim_for_cascade(pending: &PendingCascade) -> Claim {
+    let source = cascade::pick_source(&pending.stage1_roots)
+        .or_else(|| pending.stage1_roots.first().map(PathBuf::as_path))
+        .map(veriflow_core::absolute_path)
+        .unwrap_or_else(|| pending.source.clone());
+    let bytes = pending.stage1.total_bytes;
+    Claim {
+        source_volume: volume_or(&source),
+        source_hdd: storage::is_hdd(&source),
+        roots: pending.stage2_roots.clone(),
+        dest_volumes: pending
+            .stage2_roots
             .iter()
-            .map(|d| {
-                let d = veriflow_core::absolute_path(d);
-                (volume_or(&d), storage::is_hdd(&d), bytes)
+            .map(|r| {
+                let r = veriflow_core::absolute_path(r);
+                (volume_or(&r), storage::is_hdd(&r), bytes)
             })
             .collect(),
         source,
+        deferred: true,
     }
 }
 
@@ -302,6 +375,7 @@ fn run_job(app: &AppHandle, shared: &Shared, job: Job) {
             eject,
             known,
         } => run_offload(app, shared, id, *request, eject, known, &cancel, &claim),
+        JobKind::Cascade { pending } => run_cascade(app, id, &pending, &cancel),
         JobKind::Verify { root, operator } => run_verify(app, id, &root, operator, &cancel),
     }
 }
@@ -358,8 +432,82 @@ fn run_verify(
         reports,
         report_error,
         ejected: None,
+        card_free: false,
+        cascade_job: None,
+        cascade_error: None,
         eject_code: None,
     });
+}
+
+/// Fichier des étapes 2 en attente, dans le dossier de données de l'application.
+fn cascade_store(app: &AppHandle) -> CmdResult<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("offload_cascades.json"))
+        .map_err(text)
+}
+
+/// Étape 2 conforme : rien d'annulé, aucun fichier en échec, historique
+/// prolongé sur chaque destination. Seule une étape 2 conforme est retirée de
+/// la liste des copies à reprendre.
+fn stage2_conform(result: &JobResult) -> bool {
+    !result.summary.cancelled
+        && result.summary.failed_files == 0
+        && result.mhl.iter().all(Option::is_some)
+        && result.mhl_errors.iter().all(Option::is_none)
+}
+
+/// Étape 2 d'une copie en cascade : recopie de la copie vérifiée de l'étape 1,
+/// sans relire la carte.
+fn run_cascade(app: &AppHandle, id: u64, pending: &PendingCascade, cancel: &AtomicBool) {
+    let send = |n: Notice| {
+        let _ = app.emit("offload", n);
+    };
+    send(Notice::Running {
+        job: id,
+        job_kind: JobType::Offload,
+        files: pending.stage1.files,
+        total_bytes: pending.stage1.total_bytes,
+        roots: pending.stage2_roots.clone(),
+    });
+    match cascade::execute(pending, cancel, |event| {
+        send(Notice::Engine { job: id, event })
+    }) {
+        Ok(result) => {
+            if let Ok(guard) = app.state::<AppState>().project.lock() {
+                if let Some(p) = guard.as_ref() {
+                    let _ = p.record_offload(&result, &pending.source);
+                }
+            }
+            if stage2_conform(&result) {
+                let removed = cascade_store(app)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| {
+                        cascade::remove(&path, &pending.key).map_err(|e| cascade::message(&e))
+                    });
+                if let Err(detail) = removed {
+                    eprintln!(
+                        "étape 2 de {} conforme mais non retirée de la liste à reprendre : {detail}",
+                        pending.card
+                    );
+                }
+            }
+            send(Notice::Done {
+                job: id,
+                job_kind: JobType::Offload,
+                result: Some(Box::new(result)),
+                verify: None,
+                reports: None,
+                report_error: None,
+                ejected: None,
+                card_free: false,
+                cascade_job: None,
+                cascade_error: None,
+                eject_code: None,
+            });
+        }
+        Err(e) => send(failed(id, cascade::message(&e), cascade::error_code(&e))),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -379,7 +527,7 @@ fn run_offload(
     let pre = match preflight(&request) {
         Ok(p) => p,
         Err(e) => {
-            return send(failed(id, e.to_string(), None));
+            return send(failed(id, cascade::message(&e), cascade::error_code(&e)));
         }
     };
     // L'espace a pu manquer entre le préflight de l'interface et le lancement
@@ -415,11 +563,25 @@ fn run_offload(
                     let _ = p.record_offload(&result, &request.source);
                 }
             }
-            let success = !result.summary.cancelled && result.summary.failed_files == 0;
-            // Éjection seulement quand plus aucun autre travail (en cours ou en
+            // Étape 2 : inscrite sur disque (reprise possible après un
+            // redémarrage), puis mise en file depuis ce fil, sans attendre.
+            let mut cascade_job = None;
+            let mut cascade_error = None;
+            if let Some(pending) = result.cascade.clone() {
+                let saved = cascade_store(app)
+                    .map_err(|e| e.to_string())
+                    .and_then(|path| cascade::save(&path, &pending).map_err(|e| e.to_string()));
+                if let Err(detail) = saved {
+                    cascade_error = Some(format!("cascade_store : {detail}"));
+                }
+                cascade_job = queue_cascade(app, shared, pending, Some(id));
+            }
+            let card_free = result.card_free;
+            // Éjection seulement si la carte est libérable (étape 1 entièrement
+            // vérifiée), que l'étape 2 existe ou non, et quand plus aucun autre travail (en cours ou en
             // attente) n'utilise ce volume (source, destination ou dossier final).
             let mut eject_code = None;
-            let ejected = (eject && success).then(|| {
+            let ejected = (eject && result.card_free).then(|| {
                 let volume = claim.source_volume.clone();
                 let in_use = {
                     let sched = lock(&shared.sched);
@@ -456,10 +618,13 @@ fn run_offload(
                 reports: None,
                 report_error: None,
                 ejected,
+                card_free,
+                cascade_job,
+                cascade_error,
                 eject_code,
             });
         }
-        Err(e) => send(failed(id, e.to_string(), None)),
+        Err(e) => send(failed(id, cascade::message(&e), cascade::error_code(&e))),
     }
 }
 
@@ -554,7 +719,7 @@ pub async fn offload_preflight(
         tauri::async_runtime::spawn_blocking(move || preflight(&request).map(|p| (p, request)))
             .await
             .map_err(text)?
-            .map_err(text)?;
+            .map_err(|e| cascade::message(&e))?;
     let (pre, request) = pre;
     let previous = {
         let state = app.state::<AppState>();
@@ -564,16 +729,25 @@ pub async fn offload_preflight(
             .and_then(|p| p.previous_offloads(&pre.fingerprint).ok())
             .unwrap_or_default()
     };
+    // Dans l'ordre de `roots` : destinations puis cascade.
     let hdd: Vec<bool> = request
         .destinations
         .iter()
+        .chain(&request.cascade)
         .map(|d| storage::is_hdd(d))
         .collect();
     let source_hdd = storage::is_hdd(&request.source);
+    // Durée et batterie ne portent que sur l'étape 1 : l'étape 2 se fait plus
+    // tard, sans la carte.
+    let immediate: Vec<bool> = pre.stages.iter().map(|s| *s == 1).collect();
     let estimated_secs = veriflow_core::battery::estimate_secs(
         pre.total_bytes,
-        request.destinations.len(),
-        source_hdd || hdd.iter().any(|h| *h),
+        immediate.iter().filter(|i| **i).count(),
+        source_hdd
+            || hdd
+                .iter()
+                .zip(&immediate)
+                .any(|(h, immediate)| *h && *immediate),
     );
     // Une lecture de batterie en échec ne fait jamais échouer le préflight.
     let status = tauri::async_runtime::spawn_blocking(veriflow_core::battery::power_status)
@@ -611,7 +785,7 @@ pub async fn offload_check_existing(
     *state.check_cancel.lock().map_err(text)? = Some(cancel.clone());
     let emitter = app.clone();
     let (view, known) = tauri::async_runtime::spawn_blocking(move || {
-        let pre = preflight(&request).map_err(text)?;
+        let pre = preflight(&request).map_err(|e| cascade::message(&e))?;
         let inv = pre.inventory.as_ref().ok_or("inventaire absent")?;
         let (destinations, known) = existing::verify(
             inv,
@@ -671,16 +845,158 @@ pub async fn offload_start(
     request.date.get_or_insert_with(local_date);
     let source = request.source.display().to_string();
     let abs_source = veriflow_core::absolute_path(&request.source);
-    enqueue(&app, &state.shared, id, source, abs_source, move || {
-        let claim = claim_for(&request, total_bytes);
-        let kind = JobKind::Offload {
-            request: Box::new(request),
-            eject,
-            known,
-        };
-        (kind, claim)
+    // Étape de chaque destination (lecture des volumes) ; refus sans
+    // destination immédiate (`cascade_no_immediate`).
+    // Les étapes ne sont calculées qu'ici : la demande est ensuite résolue
+    // (listes explicites, sans choix automatique) pour que l'exécution copie
+    // exactement les destinations réservées par l'ordonnancement.
+    let (request, stages, order) = tauri::async_runtime::spawn_blocking(move || {
+        split_cascade(&request, storage::is_slow).map(|stages| {
+            let order: Vec<usize> = (0..stages.len())
+                .filter(|&i| stages[i] == 1)
+                .chain((0..stages.len()).filter(|&i| stages[i] != 1))
+                .collect();
+            let resolved = resolve_stages(&request, &stages);
+            let n1 = resolved.destinations.len();
+            let stages: Vec<u8> = (0..stages.len())
+                .map(|i| if i < n1 { 1 } else { 2 })
+                .collect();
+            (resolved, stages, order)
+        })
     })
     .await
+    .map_err(text)?
+    .map_err(|e| cascade::message(&e))?;
+    // Vérification préalable faite dans l'ordre d'origine : même ordre que la
+    // demande résolue (étape 1 puis étape 2).
+    let known = known.map(|mut k| {
+        if k.identical.len() == order.len() {
+            k.identical = order.iter().map(|&i| k.identical[i].clone()).collect();
+        }
+        k
+    });
+    enqueue(
+        &app,
+        &state.shared,
+        id,
+        source,
+        abs_source,
+        None,
+        move || {
+            let claim = claim_for(&request, total_bytes, &stages);
+            let kind = JobKind::Offload {
+                request: Box::new(request),
+                eject,
+                known,
+            };
+            (kind, claim)
+        },
+    )
+    .await
+}
+
+/// Étape 2 d'une copie en cascade, pour le suivi des doublons.
+struct CascadeRef {
+    key: String,
+    /// Travail de l'étape 1 à l'origine de la mise en file.
+    of: Option<u64>,
+}
+
+/// Annonce un travail : annulation enregistrée, étape 2 réservée, notification
+/// Queued. Renvoie le drapeau d'annulation, ou rien si l'étape 2 est déjà en
+/// file ou en cours.
+fn announce(
+    app: &AppHandle,
+    shared: &Shared,
+    id: u64,
+    source: String,
+    cascade: Option<&CascadeRef>,
+) -> Option<Arc<AtomicBool>> {
+    if let Some(c) = cascade {
+        let mut active = lock(&shared.cascades);
+        if active.values().any(|k| *k == c.key) {
+            return None;
+        }
+        active.insert(id, c.key.clone());
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    lock(&shared.cancels).insert(id, cancel.clone());
+    let _ = app.emit(
+        "offload",
+        Notice::Queued {
+            job: id,
+            source,
+            stage: if cascade.is_some() { 2 } else { 1 },
+            cascade_of: cascade.and_then(|c| c.of),
+        },
+    );
+    Some(cancel)
+}
+
+/// Calcule le claim puis met le travail en file et relance l'ordonnanceur.
+/// Synchrone (lecture des volumes) : jamais depuis le fil de l'interface.
+fn queue_job(
+    app: &AppHandle,
+    shared: &Shared,
+    id: u64,
+    cancel: Arc<AtomicBool>,
+    build: impl FnOnce() -> (JobKind, Claim),
+) {
+    let (kind, claim) = build();
+    // Drapeau lu sous le verrou, comme `offload_cancel` : une annulation
+    // ne peut pas passer entre la lecture et la mise en file.
+    let mut sched = lock(&shared.sched);
+    sched.preparing.remove(&id);
+    if cancel.load(Ordering::Relaxed) {
+        drop(sched);
+        release(shared, id);
+        let _ = app.emit("offload", Notice::Dropped { job: id });
+        return;
+    }
+    sched.pending.push_back(Job {
+        id,
+        kind,
+        cancel,
+        claim,
+        last_wait: None,
+    });
+    drop(sched);
+    dispatch(app, shared);
+}
+
+/// Met l'étape 2 en file depuis le fil d'un travail (sans `block_on`).
+/// Renvoie son numéro, ou rien si cette étape 2 est déjà en file.
+fn queue_cascade(
+    app: &AppHandle,
+    shared: &Shared,
+    pending: PendingCascade,
+    of: Option<u64>,
+) -> Option<u64> {
+    let id = app
+        .state::<OffloadState>()
+        .next_id
+        .fetch_add(1, Ordering::Relaxed);
+    let reference = CascadeRef {
+        key: pending.key.clone(),
+        of,
+    };
+    let cancel = announce(
+        app,
+        shared,
+        id,
+        pending.source.display().to_string(),
+        Some(&reference),
+    )?;
+    queue_job(app, shared, id, cancel, move || {
+        let claim = claim_for_cascade(&pending);
+        (
+            JobKind::Cascade {
+                pending: Box::new(pending),
+            },
+            claim,
+        )
+    });
+    Some(id)
 }
 
 /// Met un travail en file : le claim se calcule hors du fil de l'interface
@@ -693,42 +1009,23 @@ async fn enqueue(
     id: u64,
     source: String,
     busy: PathBuf,
+    cascade: Option<CascadeRef>,
     build: impl FnOnce() -> (JobKind, Claim) + Send + 'static,
 ) -> CmdResult<u64> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    lock(&shared.cancels).insert(id, cancel.clone());
-    let _ = app.emit("offload", Notice::Queued { job: id, source });
+    let Some(cancel) = announce(app, shared, id, source, cascade.as_ref()) else {
+        return Err("cascade_active : cette étape 2 est déjà en file ou en cours".to_owned());
+    };
     let shared = shared.clone();
     lock(&shared.sched).preparing.insert(id, busy);
     let (worker, worker_app) = (shared.clone(), app.clone());
     let prepared = tauri::async_runtime::spawn_blocking(move || {
-        let (shared, app) = (worker, worker_app);
-        let (kind, claim) = build();
-        // Drapeau lu sous le verrou, comme `offload_cancel` : une annulation
-        // ne peut pas passer entre la lecture et la mise en file.
-        let mut sched = lock(&shared.sched);
-        sched.preparing.remove(&id);
-        if cancel.load(Ordering::Relaxed) {
-            drop(sched);
-            lock(&shared.cancels).remove(&id);
-            let _ = app.emit("offload", Notice::Dropped { job: id });
-            return;
-        }
-        sched.pending.push_back(Job {
-            id,
-            kind,
-            cancel,
-            claim,
-            last_wait: None,
-        });
-        drop(sched);
-        dispatch(&app, &shared);
+        queue_job(&worker_app, &worker, id, cancel, build);
     })
     .await;
     if let Err(e) = prepared {
         // Panique du calcul : le travail n'existe pas, rien ne doit rester.
         lock(&shared.sched).preparing.remove(&id);
-        lock(&shared.cancels).remove(&id);
+        release(&shared, id);
         let _ = app.emit("offload", failed(id, text(&e), Some("job_spawn")));
         return Err(text(e));
     }
@@ -775,13 +1072,21 @@ pub async fn offload_mhl_verify(
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let root = veriflow_core::absolute_path(&root);
     let source = root.display().to_string();
-    enqueue(&app, &state.shared, id, source, root.clone(), move || {
-        let volume = storage::volume_of(&root)
-            .map(|v| v.mount_point)
-            .unwrap_or_else(|| root.clone());
-        let claim = Claim::verify(root.clone(), volume, storage::is_hdd(&root));
-        (JobKind::Verify { root, operator }, claim)
-    })
+    enqueue(
+        &app,
+        &state.shared,
+        id,
+        source,
+        root.clone(),
+        None,
+        move || {
+            let volume = storage::volume_of(&root)
+                .map(|v| v.mount_point)
+                .unwrap_or_else(|| root.clone());
+            let claim = Claim::verify(root.clone(), volume, storage::is_hdd(&root));
+            (JobKind::Verify { root, operator }, claim)
+        },
+    )
     .await
 }
 
@@ -797,7 +1102,7 @@ pub fn offload_cancel(job: u64, app: AppHandle, state: State<'_, OffloadState>) 
         .position(|j| j.id == job)
         .and_then(|i| sched.pending.remove(i));
     if dropped.is_some() {
-        lock(&state.shared.cancels).remove(&job);
+        release(&state.shared, job);
         drop(sched);
         let _ = app.emit("offload", Notice::Dropped { job });
     } else if let Some(c) = lock(&state.shared.cancels).get(&job) {
@@ -839,4 +1144,198 @@ fn open_with_system(path: &Path) -> std::io::Result<()> {
         std::process::Command::new("xdg-open")
     };
     cmd.arg(path).spawn().map(|_| ())
+}
+
+/// Étape 2 en attente, telle que la voit l'interface.
+#[derive(Serialize)]
+pub struct PendingView {
+    key: String,
+    /// Nom et chemin de la carte d'origine.
+    card: String,
+    source: PathBuf,
+    date: String,
+    stage1_roots: Vec<PathBuf>,
+    stage2_roots: Vec<PathBuf>,
+    files: usize,
+    total_bytes: u64,
+    /// Fin de l'étape 1.
+    finished_at: String,
+    /// Une copie de l'étape 1 a encore un historique intact (sinon la reprise
+    /// échouera avec `cascade_no_source`).
+    stage1_available: bool,
+    /// Numéro du travail si cette étape 2 est déjà en file ou en cours.
+    job: Option<u64>,
+}
+
+/// Étapes 2 enregistrées et non terminées (reprise après un arrêt, une
+/// annulation ou un échec).
+#[tauri::command]
+pub async fn offload_cascade_pending(
+    app: AppHandle,
+    state: State<'_, OffloadState>,
+) -> CmdResult<Vec<PendingView>> {
+    let path = cascade_store(&app)?;
+    let list = tauri::async_runtime::spawn_blocking(move || cascade::load(&path))
+        .await
+        .map_err(text)?
+        .map_err(|e| cascade::message(&e))?;
+    let active: HashMap<String, u64> = lock(&state.shared.cascades)
+        .iter()
+        .map(|(id, key)| (key.clone(), *id))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        list.into_iter()
+            .map(|p| PendingView {
+                stage1_available: cascade::pick_source(&p.stage1_roots).is_some(),
+                job: active.get(&p.key).copied(),
+                key: p.key,
+                card: p.card,
+                source: p.source,
+                date: p.date,
+                stage1_roots: p.stage1_roots,
+                stage2_roots: p.stage2_roots,
+                files: p.stage1.files,
+                total_bytes: p.stage1.total_bytes,
+                finished_at: p.stage1.finished_at,
+            })
+            .collect()
+    })
+    .await
+    .map_err(text)
+}
+
+/// Remet une étape 2 enregistrée en file ; renvoie son numéro. Les fichiers
+/// déjà copiés sont revérifiés sans être recopiés.
+#[tauri::command]
+pub async fn offload_cascade_resume(
+    key: String,
+    app: AppHandle,
+    state: State<'_, OffloadState>,
+) -> CmdResult<u64> {
+    let path = cascade_store(&app)?;
+    let list = tauri::async_runtime::spawn_blocking(move || cascade::load(&path))
+        .await
+        .map_err(text)?
+        .map_err(|e| cascade::message(&e))?;
+    let pending = list
+        .into_iter()
+        .find(|p| p.key == key)
+        .ok_or("étape 2 introuvable : déjà terminée ou abandonnée")?;
+    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    let source = pending.source.display().to_string();
+    let busy = pending.stage1_roots.first().cloned().unwrap_or_default();
+    let reference = CascadeRef { key, of: None };
+    enqueue(
+        &app,
+        &state.shared,
+        id,
+        source,
+        busy,
+        Some(reference),
+        move || {
+            let claim = claim_for_cascade(&pending);
+            (
+                JobKind::Cascade {
+                    pending: Box::new(pending),
+                },
+                claim,
+            )
+        },
+    )
+    .await
+}
+
+/// Abandonne une étape 2 enregistrée (les copies déjà faites restent en
+/// place). Refusée tant qu'elle est en file ou en cours.
+#[tauri::command]
+pub async fn offload_cascade_discard(
+    key: String,
+    app: AppHandle,
+    state: State<'_, OffloadState>,
+) -> CmdResult<()> {
+    if lock(&state.shared.cascades).values().any(|k| *k == key) {
+        return Err("cascade_active : étape 2 en file ou en cours, annule-la d'abord".to_owned());
+    }
+    let path = cascade_store(&app)?;
+    tauri::async_runtime::spawn_blocking(move || cascade::remove(&path, &key))
+        .await
+        .map_err(text)?
+        .map(|_| ())
+        .map_err(|e| cascade::message(&e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use veriflow_core::offload::cascade::Stage1Summary;
+
+    fn pending() -> PendingCascade {
+        PendingCascade {
+            key: "k".into(),
+            card: "A001".into(),
+            source: PathBuf::from("/nonexistent/card"),
+            fingerprint: "f".into(),
+            stage1_roots: vec![PathBuf::from("/nonexistent/ssd/A001")],
+            stage2_roots: vec![PathBuf::from("/nonexistent/hdd/A001")],
+            algorithms: Vec::new(),
+            operator: None,
+            notes: None,
+            project: None,
+            logo: None,
+            thumbnails: false,
+            timestamp: None,
+            date: "2026-01-01".into(),
+            stage1: Stage1Summary {
+                started_at: String::new(),
+                finished_at: String::new(),
+                duration_s: 1.0,
+                total_bytes: 42,
+                files: 3,
+                effective_rate: None,
+                bottleneck: String::new(),
+                destinations: Vec::new(),
+                reports: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn cascade_claim_is_deferred_and_reads_stage1_copy() {
+        let claim = claim_for_cascade(&pending());
+        assert!(claim.deferred);
+        assert_eq!(claim.source, PathBuf::from("/nonexistent/ssd/A001"));
+        assert_eq!(claim.roots, vec![PathBuf::from("/nonexistent/hdd/A001")]);
+        assert_eq!(claim.dest_volumes.len(), 1);
+        assert_eq!(claim.dest_volumes[0].2, 42);
+    }
+
+    #[test]
+    fn offload_claim_covers_only_stage1_destinations() {
+        let request = OffloadRequest {
+            source: PathBuf::from("/nonexistent/card"),
+            destinations: vec![
+                PathBuf::from("/nonexistent/ssd"),
+                PathBuf::from("/nonexistent/hdd"),
+            ],
+            template: "{card}".into(),
+            vars: TemplateVars::default(),
+            algorithms: Vec::new(),
+            operator: None,
+            notes: None,
+            existing: Default::default(),
+            date: Some("2026-01-01".into()),
+            roots: None,
+            history: Vec::new(),
+            cascade: Vec::new(),
+            cascade_auto: false,
+            logo: None,
+            thumbnails: false,
+            timestamp: None,
+        };
+        let claim = claim_for(&request, Some(10), &[1, 2]);
+        assert!(!claim.deferred);
+        assert_eq!(claim.roots.len(), 1);
+        assert_eq!(claim.dest_volumes.len(), 1);
+        assert_eq!(claim_for(&request, Some(10), &[1, 1]).roots.len(), 2);
+    }
 }

@@ -3,7 +3,7 @@
   import ProgressBar from "../../components/ProgressBar.svelte";
   import { t } from "../../i18n/index.svelte";
   import { bytes, bytesBinary, rate, duration } from "../../lib/format";
-  import { MAX_PARALLEL_JOBS, cancel, remainingSecs, reveal, type DestStatus } from "../../lib/offload";
+  import { MAX_PARALLEL_JOBS, cancel, errorMessage, parseError, remainingSecs, reveal, type DestStatus } from "../../lib/offload";
   import { ask } from "../../stores/confirm.svelte";
   import { offload, interrupted, removeJob, type Job } from "../../stores/offload.svelte";
 
@@ -86,17 +86,26 @@
       if (c === "job_panic") return t("offload.verify.panic");
       if (c === "job_spawn") return t("offload.verify.spawn");
     }
+    // Texte « code : détail » ou code de cascade : message traduit avec détail ; sinon le message du code seul.
+    if (c.startsWith("cascade_") || /^(cascade_[a-z_]+|no_space) : /.test(job.error ?? "")) return errorMessage(job.error ?? "", c);
     return t(`offload.error.${c}`);
   }
+
+  // Cascade : fiche d'origine (étape 2) et fiche d'étape 2 (étape 1).
+  const origin = $derived(job.cascadeOf !== null ? offload.jobs.find((o) => o.id === job.cascadeOf) : undefined);
+  const stage2 = $derived(job.cascadeJob !== null ? offload.jobs.find((o) => o.id === job.cascadeJob) : undefined);
+  const stage2NotStarted = $derived(!!stage2 && (stage2.state === "queued" || stage2.state === "waiting"));
+  const goTo = (id: number) => document.getElementById(`job-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 
   const label = (d: DestStatus) =>
     d.state === "verified" ? t("offload.status.verified") : d.state === "resumed_verified" ? t("offload.status.resumed") : t("offload.status.failed");
 </script>
 
-<article class="job" class:ok={job.state === "done" && (isVerify ? vOk : ok)} class:ko={(job.state === "failed" && !job.dropped) || (job.state === "done" && !(isVerify ? vOk : ok))}>
+<article id={`job-${job.id}`} class="job" class:ok={job.state === "done" && (isVerify ? vOk : ok)} class:ko={(job.state === "failed" && !job.dropped) || (job.state === "done" && !(isVerify ? vOk : ok))}>
   <header>
     <div>
       <h3>{isVerify ? (vs?.root ?? job.roots[0] ?? job.source) : (job.result?.source_name ?? job.source)}</h3>
+      {#if !isVerify}<span class="badge" class:s2={job.stage === 2}>{t(job.stage === 2 ? "offload.cascade.stage2" : "offload.cascade.stage1")}</span>{/if}
       <span class="state">{t(job.dropped ? "offload.job.dropped" : `offload.job.${job.result?.summary.cancelled || vs?.cancelled ? "cancelled" : job.state}`)}</span>
       {#if job.state === "waiting" && job.waitReason}
         <span class="wait">{t(`offload.wait.${job.waitReason}`).replace("{max}", String(MAX_PARALLEL_JOBS))}</span>
@@ -113,6 +122,17 @@
       </button>
     </div>
   </header>
+
+  {#if job.stage === 2}
+    <div class="small">
+      {t("offload.cascade.from")}
+      {#if origin}
+        <button class="link" onclick={() => goTo(origin.id)}>{origin.result?.source_name ?? origin.source}</button>
+      {:else}
+        <span class="mono">{job.source}</span>
+      {/if}
+    </div>
+  {/if}
 
   <ProgressBar value={job.state === "done" ? 1 : progress} state={barState} />
 
@@ -239,6 +259,23 @@
         </table>
       </details>
     {/if}
+    {#if job.stage === 1 && job.cardFree !== null}
+      <div class="free" class:yes={job.cardFree}>{t(job.cardFree ? "offload.cascade.card_free" : "offload.cascade.card_not_free")}</div>
+    {/if}
+    {#if stage2}
+      <div class="small">
+        {#if stage2NotStarted}{t("offload.cascade.not_started")}{:else}{t("offload.cascade.stage2")}{/if} :
+        <button class="link" onclick={() => goTo(stage2.id)}>{stage2.source}</button>
+      </div>
+    {/if}
+    {#each job.result.mhl_errors ?? [] as m, i (i)}
+      {#if m}
+        <div class="small err">{t("offload.destination")} {i + 1} : {m.code?.startsWith("cascade_") ? `${t(`offload.error.code.${m.code}`)} ` : ""}({m.message})</div>
+      {/if}
+    {/each}
+    {#if job.cascadeError}
+      <div class="small err">{t("offload.cascade.store_error").replace("{detail}", parseError(job.cascadeError).detail || job.cascadeError)}</div>
+    {/if}
     {#if job.ejected}
       <div class="small">{job.ejected === "ok" ? t("offload.ejected") : `${t("offload.eject.error")} : ${job.ejectCode ? t(`offload.eject.code.${job.ejectCode}`) : job.ejected}`}</div>
     {/if}
@@ -360,6 +397,27 @@
     display: block;
     font-size: var(--vf-text-sm);
     color: var(--vf-warning);
+  }
+  .badge {
+    display: inline-block;
+    margin-right: var(--vf-space-2);
+    padding: 1px var(--vf-space-2);
+    font-size: var(--vf-text-xs);
+    font-weight: 600;
+    color: var(--vf-text-muted);
+    border: 1px solid var(--vf-border);
+    border-radius: var(--vf-radius-sm);
+  }
+  .badge.s2 {
+    color: var(--vf-accent);
+    border-color: var(--vf-accent);
+  }
+  .free {
+    font-weight: 700;
+    color: var(--vf-warning);
+  }
+  .free.yes {
+    color: var(--vf-success);
   }
   .state,
   .small {

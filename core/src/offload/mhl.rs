@@ -14,9 +14,9 @@ use std::sync::Mutex;
 
 use super::engine::{DestStatus, Hashes, OffloadSummary};
 use super::hash::{digest_bytes, hash_data, hash_of_hash_list, HashAlgo};
-use super::mhl_read::{parse_chain_file, ChainEntry};
+use super::mhl_read::{parse_chain_file, read_chain, to_path, Chain, ChainEntry, CHAIN_FILE};
 use super::scan::{SourceInventory, IGNORED};
-use crate::{Result, VERSION};
+use crate::{Error, Result, VERSION};
 
 /// Dossier des rapports VERIFLOW dans chaque destination (exclu du MHL).
 pub const REPORTS_DIR: &str = "_VERIFLOW";
@@ -213,6 +213,22 @@ fn write_core(
     comment: &str,
     author: &MhlAuthor,
 ) -> Result<PathBuf> {
+    // Numéro de génération suivant et chaîne (atomiques entre fils ; un verrou
+    // empoisonné ne dit rien sur les fichiers, on le reprend).
+    let _chain_guard = MHL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    write_core_locked(dest_root, entries, dirs, algos, process, comment, author)
+}
+
+/// Corps de `write_core`, à appeler avec `MHL_LOCK` déjà pris.
+fn write_core_locked(
+    dest_root: &Path,
+    entries: &[GenEntry],
+    dirs: &[&str],
+    algos: &[HashAlgo],
+    process: &str,
+    comment: &str,
+    author: &MhlAuthor,
+) -> Result<PathBuf> {
     let now = chrono::Utc::now();
     let date = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
     let hashdate = esc(&date);
@@ -335,9 +351,6 @@ fn write_core(
     }
     xml += "  </hashes>\n</hashlist>\n";
 
-    // Numéro de génération suivant et chaîne (atomiques entre fils ; un verrou
-    // empoisonné ne dit rien sur les fichiers, on le reprend).
-    let _chain_guard = MHL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mhl_dir = dest_root.join("ascmhl");
     fs::create_dir_all(&mhl_dir)?;
     let chain_path = mhl_dir.join("ascmhl_chain.xml");
@@ -383,6 +396,136 @@ fn write_core(
     cx += "</ascmhldirectory>\n";
     write_atomic(&chain_path, cx.as_bytes())?;
     Ok(mhl_path)
+}
+
+/// Erreur de cascade : le code stable (`cascade_history`, `cascade_diverged`)
+/// ouvre le message, le pont s'en sert pour la traduction.
+fn cascade_err(code: &str, detail: impl std::fmt::Display) -> Error {
+    Error::Report(format!("{code} : {detail}"))
+}
+
+/// Code stable d'une erreur de `write_cascade_generation`.
+pub fn cascade_error_code(e: &Error) -> Option<&'static str> {
+    match e {
+        Error::Report(m) if m.starts_with("cascade_history : ") => Some("cascade_history"),
+        Error::Report(m) if m.starts_with("cascade_diverged : ") => Some("cascade_diverged"),
+        _ => None,
+    }
+}
+
+/// Simple nom de fichier : ni séparateur, ni `..`, ni lecteur.
+pub(super) fn plain_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains("..") && !name.contains(['/', '\\', ':'])
+}
+
+/// Mêmes générations (numéro, fichier, C4) dans le même ordre.
+fn same_entries(a: &[ChainEntry], b: &[ChainEntry]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.seq == y.seq && x.file == y.file && x.c4 == y.c4)
+}
+
+/// Prolonge l'historique ASC MHL de l'étape 1 dans la destination de l'étape 2.
+///
+/// L'historique de `stage1_root` est copié tel quel (octet par octet, chaîne
+/// comprise) dans `dest_root`, puis une génération `transfer` dont toutes les
+/// empreintes sont `verified` est ajoutée (les entrées en échec sont exclues).
+/// Une destination qui a déjà une partie de l'historique est complétée ; une
+/// cascade déjà faite ne recopie rien ; un historique qui ne prolonge pas
+/// celui de l'étape 1 n'est jamais modifié (`cascade_diverged`). Un historique
+/// d'étape 1 altéré ou absent est refusé (`cascade_history`).
+pub fn write_cascade_generation(
+    stage1_root: &Path,
+    dest_root: &Path,
+    entries: &[GenEntry],
+    dirs: &[&str],
+    author: &MhlAuthor,
+) -> Result<PathBuf> {
+    let _chain_guard = MHL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let s1 = read_chain(stage1_root).map_err(|e| cascade_err("cascade_history", e))?;
+    if s1.entries.is_empty() {
+        return Err(cascade_err(
+            "cascade_history",
+            "historique de l'étape 1 vide",
+        ));
+    }
+    if let Some(issue) = s1.issues.first() {
+        return Err(cascade_err(
+            "cascade_history",
+            format!("historique de l'étape 1 altéré ({issue:?})"),
+        ));
+    }
+    // Un nom de génération vient d'un fichier : jamais de chemin (lecture ou
+    // écriture hors du dossier ascmhl).
+    if let Some(e) = s1.entries.iter().find(|e| !plain_file_name(&e.file)) {
+        return Err(cascade_err(
+            "cascade_history",
+            format!("nom de génération refusé dans la chaîne ({:?})", e.file),
+        ));
+    }
+    let src_dir = stage1_root.join("ascmhl");
+    let dst_dir = dest_root.join("ascmhl");
+    let dst_chain = dst_dir.join(CHAIN_FILE);
+    let dst_has_chain = dst_chain.exists();
+    if !dst_has_chain && dst_dir.is_dir() && fs::read_dir(&dst_dir)?.next().is_some() {
+        return Err(cascade_err(
+            "cascade_diverged",
+            "historique de la destination sans chaîne",
+        ));
+    }
+    let dst: Chain = if dst_has_chain {
+        read_chain(dest_root).map_err(|e| cascade_err("cascade_diverged", e))?
+    } else {
+        Chain::default()
+    };
+    let n = dst.entries.len();
+    let common = n.min(s1.entries.len());
+    if !dst.issues.is_empty() || !same_entries(&dst.entries[..common], &s1.entries[..common]) {
+        return Err(cascade_err(
+            "cascade_diverged",
+            "l'historique de la destination ne prolonge pas celui de l'étape 1",
+        ));
+    }
+    // Cascade déjà faite (destination plus longue) : rien à recopier.
+    if n < s1.entries.len() {
+        fs::create_dir_all(&dst_dir)?;
+        for e in &s1.entries[n..] {
+            let bytes = fs::read(to_path(&src_dir, &e.file))?;
+            write_atomic(&to_path(&dst_dir, &e.file), &bytes)?;
+        }
+        write_atomic(&dst_chain, &fs::read(src_dir.join(CHAIN_FILE))?)?;
+        // Relecture : la copie de l'historique doit être intacte (C4).
+        let check = read_chain(dest_root).map_err(|e| cascade_err("cascade_history", e))?;
+        if !check.issues.is_empty() || !same_entries(&check.entries, &s1.entries) {
+            return Err(cascade_err(
+                "cascade_history",
+                "copie de l'historique de l'étape 1 non conforme à la relecture",
+            ));
+        }
+    }
+    let gen: Vec<GenEntry> = entries
+        .iter()
+        .filter(|e| e.action != Action::Failed)
+        .map(|e| GenEntry {
+            action: Action::Verified,
+            ..e.clone()
+        })
+        .collect();
+    let mut algos: Vec<HashAlgo> = gen
+        .iter()
+        .flat_map(|e| e.hashes.iter().map(|(a, _)| *a))
+        .filter(|a| a.in_mhl())
+        .collect();
+    algos.sort_by_key(|a| a.mhl_order());
+    algos.dedup();
+    let comment = author.comment.clone().unwrap_or_else(|| {
+        format!(
+            "Copie en cascade (étape 2) de « {} » vérifiée par VERIFLOW",
+            stage1_root.display()
+        )
+    });
+    write_core_locked(dest_root, &gen, dirs, &algos, "transfer", &comment, author)
 }
 
 /// Écriture atomique : fichier temporaire du même dossier, fsync, renommage,
@@ -443,6 +586,7 @@ mod tests {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128, HashAlgo::Sha256, HashAlgo::Md5],
             known: None,
+            expected: None,
             overlap: false,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
@@ -540,6 +684,7 @@ mod tests {
             destinations: vec![dest.clone()],
             algorithms: vec![HashAlgo::Xxh128],
             known: None,
+            expected: None,
             overlap: true,
         };
         let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
@@ -573,5 +718,216 @@ mod tests {
         }
         assert_eq!(paths.len(), 2);
         assert_ne!(paths[0], paths[1]);
+    }
+
+    /// Étape 1 : copie la carte de test vers `<dir>/SSD/A001` (génération 1) et
+    /// renvoie la racine, les entrées de génération et les dossiers.
+    fn stage1(dir: &Path) -> (PathBuf, Vec<GenEntry>, Vec<String>) {
+        let src = dir.join("A001");
+        fs::create_dir_all(src.join("Clips")).unwrap();
+        fs::write(src.join("Clips/a.mov"), b"abcde").unwrap();
+        fs::write(src.join("b.txt"), b"texte").unwrap();
+        let ssd = dir.join("SSD/A001");
+        let inv = scan(&src).unwrap();
+        let spec = OffloadSpec {
+            destinations: vec![ssd.clone()],
+            algorithms: vec![HashAlgo::Xxh128, HashAlgo::Md5],
+            known: None,
+            expected: None,
+            overlap: false,
+        };
+        let s = run(&inv, &spec, &AtomicBool::new(false), |_| {}).unwrap();
+        write_generation(&inv, &s, 0, &ssd, &spec.algorithms, &MhlAuthor::default()).unwrap();
+        let entries = s
+            .files
+            .iter()
+            .map(|f| GenEntry {
+                rel: f.rel.clone(),
+                size: f.size,
+                hashes: f.hashes.clone(),
+                action: Action::Original,
+            })
+            .collect();
+        let dirs = inv.dirs.iter().map(|d| d.rel.clone()).collect();
+        (ssd, entries, dirs)
+    }
+
+    fn cascade(
+        ssd: &Path,
+        hdd: &Path,
+        entries: &[GenEntry],
+        dirs: &[String],
+    ) -> crate::Result<PathBuf> {
+        let dirs: Vec<&str> = dirs.iter().map(String::as_str).collect();
+        write_cascade_generation(ssd, hdd, entries, &dirs, &MhlAuthor::default())
+    }
+
+    /// Racine, empreinte de contenu du dossier racine (première balise du roothash).
+    fn root_content(path: &Path) -> String {
+        let xml = fs::read_to_string(path).unwrap();
+        let from = xml.find("<roothash>").unwrap();
+        let end = xml[from..].find("</content>").unwrap();
+        xml[from..from + end].to_string()
+    }
+
+    #[test]
+    fn cascade_generation_extends_copied_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        let p2 = cascade(&ssd, &hdd, &entries, &dirs).unwrap();
+        let g1 = fs::read_dir(ssd.join("ascmhl"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .find(|n| n.starts_with("0001_"))
+            .unwrap();
+        assert_eq!(
+            fs::read(ssd.join("ascmhl").join(&g1)).unwrap(),
+            fs::read(hdd.join("ascmhl").join(&g1)).unwrap(),
+            "génération 1 identique octet par octet"
+        );
+        let chain = read_chain(&hdd).unwrap();
+        assert!(chain.issues.is_empty());
+        assert_eq!(chain.entries.len(), 2);
+        assert_eq!(chain.entries[0].file, g1);
+        assert!(p2
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("0002_"));
+        let xml = fs::read_to_string(&p2).unwrap();
+        assert!(xml.contains("<process>transfer</process>"));
+        assert!(xml.contains("<md5 action=\"verified\""));
+        assert!(!xml.contains("action=\"original\""));
+        assert_eq!(
+            root_content(&p2).split_once("<content>").unwrap().1,
+            root_content(&ssd.join("ascmhl").join(&g1))
+                .split_once("<content>")
+                .unwrap()
+                .1,
+            "même empreinte racine que l'étape 1"
+        );
+    }
+
+    #[test]
+    fn cascade_appends_after_previous_cascade() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        cascade(&ssd, &hdd, &entries, &dirs).unwrap();
+        let first = read_chain(&hdd).unwrap().entries;
+        let p3 = cascade(&ssd, &hdd, &entries, &dirs).unwrap();
+        let chain = read_chain(&hdd).unwrap();
+        assert!(chain.issues.is_empty());
+        assert_eq!(chain.entries.len(), 3);
+        assert!(same_entries(&chain.entries[..2], &first));
+        assert!(p3
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("0003_"));
+        // L'étape 1 n'a pas bougé.
+        assert_eq!(read_chain(&ssd).unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn cascade_completes_partial_destination_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        // Destination ayant déjà la génération 1 de l'étape 1.
+        fs::create_dir_all(hdd.join("ascmhl")).unwrap();
+        for e in fs::read_dir(ssd.join("ascmhl")).unwrap() {
+            let e = e.unwrap();
+            fs::copy(e.path(), hdd.join("ascmhl").join(e.file_name())).unwrap();
+        }
+        // L'étape 1 reçoit ensuite une génération de plus (vérification).
+        write_entries(&ssd, &[], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        cascade(&ssd, &hdd, &entries, &dirs).unwrap();
+        let chain = read_chain(&hdd).unwrap();
+        assert!(chain.issues.is_empty());
+        assert_eq!(chain.entries.len(), 3);
+        assert!(same_entries(
+            &chain.entries[..2],
+            &read_chain(&ssd).unwrap().entries
+        ));
+    }
+
+    #[test]
+    fn cascade_refuses_when_stage1_grew_after_cascade() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        cascade(&ssd, &hdd, &entries, &dirs).unwrap();
+        // La génération 2 de l'étape 1 n'est pas celle de la cascade.
+        write_entries(&ssd, &[], &[], "in-place", "t", &MhlAuthor::default()).unwrap();
+        let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
+        assert_eq!(cascade_error_code(&err), Some("cascade_diverged"));
+        assert_eq!(read_chain(&hdd).unwrap().entries.len(), 2);
+    }
+
+    #[test]
+    fn cascade_refuses_diverged_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        // La destination a sa propre génération 1 (autre contenu).
+        fs::create_dir_all(&hdd).unwrap();
+        write_entries(&hdd, &[], &[], "in-place", "autre", &MhlAuthor::default()).unwrap();
+        let snapshot = |root: &Path| -> Vec<(String, Vec<u8>)> {
+            let mut v: Vec<_> = fs::read_dir(root.join("ascmhl"))
+                .unwrap()
+                .map(|e| {
+                    let e = e.unwrap();
+                    (
+                        e.file_name().to_string_lossy().into_owned(),
+                        fs::read(e.path()).unwrap(),
+                    )
+                })
+                .collect();
+            v.sort();
+            v
+        };
+        let before = snapshot(&hdd);
+        let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
+        assert_eq!(cascade_error_code(&err), Some("cascade_diverged"));
+        assert_eq!(snapshot(&hdd), before, "destination intacte");
+    }
+
+    #[test]
+    fn cascade_refuses_generation_names_that_are_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        let g1 = read_chain(&ssd).unwrap().entries[0].file.clone();
+        // La génération est aussi présente hors de ascmhl : la chaîne reste
+        // intacte (C4 identique), seul le nom la rend inacceptable.
+        fs::copy(ssd.join("ascmhl").join(&g1), ssd.join("dehors.mhl")).unwrap();
+        let chain = ssd.join("ascmhl").join(CHAIN_FILE);
+        let xml = fs::read_to_string(&chain).unwrap();
+        fs::write(&chain, xml.replace(&g1, "../dehors.mhl")).unwrap();
+        assert!(read_chain(&ssd).unwrap().issues.is_empty());
+        let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
+        assert_eq!(cascade_error_code(&err), Some("cascade_history"));
+        assert!(!hdd.exists(), "rien écrit");
+        assert!(plain_file_name("0001_A001_2026-11-05.mhl"));
+        for bad in ["", "..", "a/b.mhl", "a\\b.mhl", "C:x.mhl", "a..b"] {
+            assert!(!plain_file_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn cascade_refuses_altered_stage1_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ssd, entries, dirs) = stage1(dir.path());
+        let hdd = dir.path().join("HDD/A001");
+        let g1 = read_chain(&ssd).unwrap().entries[0].file.clone();
+        let path = ssd.join("ascmhl").join(g1);
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.extend_from_slice(b"<!-- modifie -->\n");
+        fs::write(&path, bytes).unwrap();
+        let err = cascade(&ssd, &hdd, &entries, &dirs).unwrap_err();
+        assert_eq!(cascade_error_code(&err), Some("cascade_history"));
+        assert!(!hdd.join("ascmhl").exists(), "rien écrit");
     }
 }

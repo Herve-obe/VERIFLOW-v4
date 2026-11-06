@@ -248,6 +248,7 @@ Uniquement des licences compatibles GPLv3 (MIT, BSD, Apache 2.0, SIL OFL, domain
 | Reprise | Reprise après coupure (secteur, câble débranché, plantage) sans recopier les fichiers déjà vérifiés |
 | File d'attente | Jusqu'à 3 copies simultanées quand les sources sont sur des lecteurs différents. Une copie attend si sa source est sur un lecteur déjà en cours, si elle écrirait dans le même dossier (ou un dossier inclus) qu'une copie en cours, si un disque dur de destination est déjà utilisé, ou si l'espace manque ; sinon traitement automatique dans l'ordre d'arrivée (modifié le 03/11/2026 à la demande d'Hervé : parité OffShoot) |
 | Éjection | Éjection sécurisée de la source à la fin, en option |
+| Cascade (05/11/2026) | Par destination : Auto (par défaut, les destinations lentes passent en étape 2), Immédiate ou En cascade. Étape 1 : copie vérifiée vers les destinations immédiates ; carte libérable (et éjectée) seulement quand toutes sont vérifiées. Étape 2, en différé : recopie d'une copie vérifiée de l'étape 1 (jamais de la carte) vers les destinations en cascade, vérifiée contre les empreintes de l'étape 1, historique ASC MHL prolongé |
 | Disque lent | Détection d'un HDD et avertissement sur la durée estimée |
 | Espace | Vérification de l'espace libre sur toutes les destinations **avant** de démarrer |
 
