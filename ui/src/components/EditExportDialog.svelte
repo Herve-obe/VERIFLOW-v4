@@ -63,20 +63,17 @@
     formats = on ? [...formats, f] : formats.filter((x) => x !== f);
   }
 
-  /** Une ligne par code d'avertissement, avec le nombre d'occurrences. */
+  /** Une ligne par code d'avertissement ; les clips concernés sont réunis. */
   const warnings = $derived.by(() => {
-    const map = new Map<string, { code: string; detail: string; count: number }>();
+    const map = new Map<string, { code: string; detail: string; clips: string[] }>();
     for (const w of result?.warnings ?? []) {
-      const g = map.get(w.code);
-      if (g) g.count++;
-      else map.set(w.code, { ...w, count: 1 });
+      const g = map.get(w.code) ?? { code: w.code, detail: w.detail, clips: [] };
+      for (const c of w.clips ?? []) if (!g.clips.includes(c)) g.clips.push(c);
+      map.set(w.code, g);
     }
     return [...map.values()];
   });
-  const warnText = (code: string, detail: string) => {
-    const k = `edit.warn.${code}`;
-    return t(k) === k ? detail : t(k);
-  };
+  const known = (code: string) => t(`edit.warn.${code}`) !== `edit.warn.${code}`;
 
   async function run() {
     if (formats.length === 0 || paths.length === 0) return;
@@ -111,8 +108,8 @@
       </ul>
       {#each warnings as w (w.code)}
         <p class="warn">
-          {warnText(w.code, w.detail)}{w.count > 1 ? ` (×${w.count})` : ""}
-          {#if warnText(w.code, w.detail) !== w.detail}<span class="detail">{w.detail}</span>{/if}
+          {known(w.code) ? t(`edit.warn.${w.code}`) : w.detail}
+          {#if w.clips.length > 0}<span class="detail">{w.clips.join(", ")}</span>{/if}
         </p>
       {/each}
       <div class="buttons">

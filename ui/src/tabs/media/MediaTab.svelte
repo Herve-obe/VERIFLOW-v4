@@ -137,7 +137,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (app.tab !== "media" || quick || isTyping(e.target)) return;
+    if (app.tab !== "media" || quick || editExport || isTyping(e.target)) return;
     if (e.key === " " && selection.length > 0) {
       e.preventDefault();
       quick = selection[0];

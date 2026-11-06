@@ -47,6 +47,7 @@ export interface EditOptions {
 export interface EditWarning {
   code: string;
   detail: string;
+  clips?: string[];
 }
 
 export interface EditResult {
@@ -54,9 +55,9 @@ export interface EditResult {
   warnings: EditWarning[];
 }
 
-/** Les chemins relatifs n'existent pas pour FCPXML et XMEML. */
+/** Les chemins relatifs n'existent que pour OTIO (et pas avec FCPXML ou XMEML). */
 export const relativeAllowed = (formats: EditFormat[]) =>
-  !formats.some((f) => f === "fcpxml" || f === "xmeml");
+  formats.includes("otio") && !formats.some((f) => f === "fcpxml" || f === "xmeml");
 
 export const editorialExport = (formats: EditFormat[], paths: string[], options: EditOptions, out: string) =>
   invoke<EditResult>("editorial_export", { formats, paths, options, out });
